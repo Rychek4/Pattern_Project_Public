@@ -18,25 +18,30 @@ from concurrency.locks import get_lock_manager
 
 
 # Prompt for memory extraction
-EXTRACTION_PROMPT = """You are a memory extraction system. Analyze the following conversation and extract important memories.
+EXTRACTION_PROMPT = """You are a memory extraction system. Analyze the conversation to extract information specifically about the 'Human' user.
+
+STRICT RULES:
+1. TARGET SUBJECT: Extract facts, preferences, and events related ONLY to the Human. Do NOT extract the AI's own personality, backstory, opinions, or training data references (e.g., do not record that the AI "reminds itself of coding").
+2. CONFIRMATION REQUIRED: Do not infer facts from the AI's questions. If the AI asks "Do you like X?", do not record that the user likes X unless the User explicitly confirms it in their reply.
+3. CONTEXT: Ignore polite filler (greetings, small talk) unless it reveals a specific user mood or trait.
 
 For each memory, provide:
 1. A concise statement of the memory (1-2 sentences)
-2. The type: 'fact' (objective information), 'preference' (likes/dislikes), 'event' (something that happened), 'observation' (noticed pattern), or 'reflection' (insight/thought)
-3. Importance: 0.0-1.0 (how important is this to remember?)
-4. Temporal relevance: 'permanent' (always relevant), 'recent' (relevant now), or 'dated' (time-specific)
+2. The type: 'fact', 'preference', 'event', 'observation', or 'reflection'
+3. Importance: 0.0-1.0 (1.0 is critical info like name/job, 0.1 is trivial)
+4. Temporal relevance: 'permanent' (facts), 'recent' (current status), or 'dated' (specific time)
 
 Output as JSON array:
 [
   {
     "content": "The memory statement",
-    "type": "fact|preference|event|observation|reflection",
-    "importance": 0.0-1.0,
-    "temporal_relevance": "permanent|recent|dated"
+    "type": "type_category",
+    "importance": 0.5,
+    "temporal_relevance": "temporal_category"
   }
 ]
 
-If no significant memories are found, return an empty array: []
+If no significant User memories are found, return an empty array: []
 
 Conversation to analyze:
 """
