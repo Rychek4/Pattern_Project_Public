@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from core.logger import log_info, log_success, log_error, log_config, log_section
 
 # Schema version for migrations
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # SQL schema definition
 SCHEMA_SQL = """
@@ -73,6 +73,26 @@ CREATE TABLE IF NOT EXISTS memories (
     memory_type TEXT CHECK (memory_type IN ('fact', 'preference', 'event', 'reflection', 'observation'))
 );
 
+-- Core memories: permanent, foundational knowledge always included
+CREATE TABLE IF NOT EXISTS core_memories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content TEXT NOT NULL,
+    category TEXT NOT NULL CHECK (category IN ('identity', 'relationship', 'preference', 'fact')),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    promoted_from_memory_id INTEGER REFERENCES memories(id)
+);
+
+-- Relationship tracking: emergent affinity and trust
+CREATE TABLE IF NOT EXISTS relationships (
+    id INTEGER PRIMARY KEY DEFAULT 1,
+    affinity REAL DEFAULT 0.0 CHECK (affinity >= -1.0 AND affinity <= 1.0),
+    trust REAL DEFAULT 0.5 CHECK (trust >= 0.0 AND trust <= 1.0),
+    interaction_count INTEGER DEFAULT 0,
+    first_interaction TIMESTAMP,
+    last_interaction TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Runtime state persistence
 CREATE TABLE IF NOT EXISTS state (
     key TEXT PRIMARY KEY,
@@ -89,6 +109,33 @@ CREATE INDEX IF NOT EXISTS idx_memories_source_time ON memories(source_timestamp
 CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type);
 CREATE INDEX IF NOT EXISTS idx_memories_importance ON memories(importance DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(ended_at) WHERE ended_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_core_memories_category ON core_memories(category);
+"""
+
+# Migration SQL for v1 -> v2
+MIGRATION_V2_SQL = """
+-- Core memories: permanent, foundational knowledge always included
+CREATE TABLE IF NOT EXISTS core_memories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content TEXT NOT NULL,
+    category TEXT NOT NULL CHECK (category IN ('identity', 'relationship', 'preference', 'fact')),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    promoted_from_memory_id INTEGER REFERENCES memories(id)
+);
+
+-- Relationship tracking: emergent affinity and trust
+CREATE TABLE IF NOT EXISTS relationships (
+    id INTEGER PRIMARY KEY DEFAULT 1,
+    affinity REAL DEFAULT 0.0 CHECK (affinity >= -1.0 AND affinity <= 1.0),
+    trust REAL DEFAULT 0.5 CHECK (trust >= 0.0 AND trust <= 1.0),
+    interaction_count INTEGER DEFAULT 0,
+    first_interaction TIMESTAMP,
+    last_interaction TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Index for core memories
+CREATE INDEX IF NOT EXISTS idx_core_memories_category ON core_memories(category);
 """
 
 
@@ -169,8 +216,12 @@ class Database:
 
     def _apply_migrations(self, conn: sqlite3.Connection, from_version: int) -> None:
         """Apply schema migrations from from_version to SCHEMA_VERSION."""
-        # Add migration logic here as schema evolves
-        # For now, just update version
+        # Apply migrations incrementally
+        if from_version < 2:
+            log_config("Applying migration", "v1 → v2 (core_memories, relationships)", indent=1)
+            conn.executescript(MIGRATION_V2_SQL)
+
+        # Record new version
         conn.execute(
             "INSERT INTO schema_version (version) VALUES (?)",
             (SCHEMA_VERSION,)
@@ -273,11 +324,27 @@ class Database:
             cursor = conn.execute("SELECT COUNT(*) FROM memories")
             stats["total_memories"] = cursor.fetchone()[0]
 
+            # Core memory count
+            cursor = conn.execute("SELECT COUNT(*) FROM core_memories")
+            stats["core_memories"] = cursor.fetchone()[0]
+
             # Unprocessed conversations
             cursor = conn.execute(
                 "SELECT COUNT(*) FROM conversations WHERE processed_for_memory = FALSE"
             )
             stats["unprocessed_conversations"] = cursor.fetchone()[0]
+
+            # Relationship state
+            cursor = conn.execute(
+                "SELECT affinity, trust, interaction_count FROM relationships WHERE id = 1"
+            )
+            row = cursor.fetchone()
+            if row:
+                stats["relationship"] = {
+                    "affinity": row[0],
+                    "trust": row[1],
+                    "interactions": row[2]
+                }
 
         return stats
 
