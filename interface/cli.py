@@ -22,6 +22,9 @@ from memory.vector_store import get_vector_store
 from memory.extractor import get_memory_extractor
 from llm.router import get_llm_router, TaskType
 from concurrency.locks import get_lock_manager
+from prompt_builder import get_prompt_builder
+from prompt_builder.sources.core_memory import get_core_memory_source
+from prompt_builder.sources.relationship import get_relationship_source
 
 
 class ChatCLI:
@@ -55,6 +58,9 @@ class ChatCLI:
             "/extract": self._cmd_extract,
             "/pause": self._cmd_pause,
             "/resume": self._cmd_resume,
+            "/core": self._cmd_core_memories,
+            "/addcore": self._cmd_add_core,
+            "/relationship": self._cmd_relationship,
         }
 
     def start(self) -> None:
@@ -63,6 +69,12 @@ class ChatCLI:
         tracker = get_temporal_tracker()
         conversation_mgr = get_conversation_manager()
         router = get_llm_router()
+        prompt_builder = get_prompt_builder()
+
+        # Default system prompt - emergent persona
+        system_prompt = """You are a thoughtful AI companion engaged in natural conversation.
+Your personality emerges from the context provided - memories, relationship history, and ongoing dialogue.
+Be genuine, curious, and responsive to the emotional tone of the conversation."""
 
         # Start a session if not already active
         if not tracker.is_session_active:
@@ -94,14 +106,21 @@ class ChatCLI:
                     input_type="text"
                 )
 
-                # Get conversation history
-                history = conversation_mgr.get_recent_history(limit=20)
+                # Build rich prompt with all context sources
+                assembled = prompt_builder.build(
+                    user_input=user_input,
+                    system_prompt=system_prompt
+                )
+
+                # Get conversation history for LLM
+                history = conversation_mgr.get_recent_history(limit=30)
 
                 # Show thinking indicator
                 with self.console.status("[bold blue]Thinking...[/bold blue]", spinner="dots"):
-                    # Get response from LLM
+                    # Get response from LLM with full context
                     response = router.chat(
                         messages=history,
+                        system_prompt=assembled.full_system_prompt,
                         task_type=TaskType.CONVERSATION,
                         temperature=0.7
                     )
@@ -174,6 +193,9 @@ class ChatCLI:
         table.add_row("/memories", "Show recent memories")
         table.add_row("/search <query>", "Search memories")
         table.add_row("/extract", "Force memory extraction")
+        table.add_row("/core", "Show core memories")
+        table.add_row("/addcore <category> <content>", "Add core memory (identity/relationship/preference/fact)")
+        table.add_row("/relationship", "Show relationship status")
         table.add_row("/pause", "Pause background processes")
         table.add_row("/resume", "Resume background processes")
 
@@ -347,6 +369,118 @@ class ChatCLI:
         extractor = get_memory_extractor()
         extractor.start()
         self.console.print("[green]Background processes resumed[/green]")
+
+    def _cmd_core_memories(self, args: str) -> None:
+        """Show core memories."""
+        core_source = get_core_memory_source()
+        memories = core_source.get_all()
+
+        if not memories:
+            self.console.print("[dim]No core memories set[/dim]")
+            self.console.print("[dim]Use /addcore <category> <content> to add one[/dim]")
+            return
+
+        table = Table(title="Core Memories", show_header=True)
+        table.add_column("ID", style="dim")
+        table.add_column("Category", style="cyan")
+        table.add_column("Content")
+
+        for mem in memories:
+            table.add_row(
+                str(mem.id),
+                mem.category,
+                mem.content[:60] + "..." if len(mem.content) > 60 else mem.content
+            )
+
+        self.console.print(table)
+
+    def _cmd_add_core(self, args: str) -> None:
+        """Add a core memory."""
+        if not args:
+            self.console.print("[yellow]Usage: /addcore <category> <content>[/yellow]")
+            self.console.print("[dim]Categories: identity, relationship, preference, fact[/dim]")
+            return
+
+        parts = args.split(maxsplit=1)
+        if len(parts) < 2:
+            self.console.print("[yellow]Usage: /addcore <category> <content>[/yellow]")
+            return
+
+        category = parts[0].lower()
+        content = parts[1]
+
+        valid_categories = ["identity", "relationship", "preference", "fact"]
+        if category not in valid_categories:
+            self.console.print(f"[yellow]Invalid category. Use: {', '.join(valid_categories)}[/yellow]")
+            return
+
+        core_source = get_core_memory_source()
+        memory_id = core_source.add(content=content, category=category)
+
+        if memory_id:
+            self.console.print(f"[green]Added core memory [{category}]: {content}[/green]")
+        else:
+            self.console.print("[red]Failed to add core memory[/red]")
+
+    def _cmd_relationship(self, args: str) -> None:
+        """Show relationship status."""
+        relationship_source = get_relationship_source()
+        state = relationship_source.get_state()
+
+        if state is None:
+            self.console.print("[dim]No relationship data yet[/dim]")
+            return
+
+        # Create visual representation
+        affinity_bar = self._create_bar(state.affinity, -1, 1, 20)
+        trust_bar = self._create_bar(state.trust, 0, 1, 20)
+
+        table = Table(title="Relationship Status", show_header=False)
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value")
+        table.add_column("Visual")
+
+        table.add_row(
+            "Affinity",
+            f"{state.affinity:+.2f}",
+            affinity_bar
+        )
+        table.add_row(
+            "Trust",
+            f"{state.trust:.2f}",
+            trust_bar
+        )
+        table.add_row(
+            "Interactions",
+            str(state.interaction_count),
+            ""
+        )
+
+        if state.first_interaction:
+            days = (state.updated_at - state.first_interaction).days
+            table.add_row("Known for", f"{days} days", "")
+
+        self.console.print(table)
+
+    def _create_bar(self, value: float, min_val: float, max_val: float, width: int) -> str:
+        """Create a visual bar representation."""
+        normalized = (value - min_val) / (max_val - min_val)
+        filled = int(normalized * width)
+        empty = width - filled
+
+        if min_val < 0:  # Affinity-style bar (negative to positive)
+            mid = width // 2
+            if value >= 0:
+                left = "─" * mid
+                right_filled = int((value / max_val) * mid)
+                right = "█" * right_filled + "─" * (mid - right_filled)
+            else:
+                left_empty = int((abs(value) / abs(min_val)) * mid)
+                left = "─" * (mid - left_empty) + "▓" * left_empty
+                right = "─" * mid
+            return f"[dim]{left}[/dim]│[green]{right}[/green]"
+        else:  # Trust-style bar (0 to 1)
+            return f"[green]{'█' * filled}[/green][dim]{'─' * empty}[/dim]"
 
 
 # Global CLI instance

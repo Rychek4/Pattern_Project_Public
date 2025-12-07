@@ -35,9 +35,12 @@ from memory.extractor import init_memory_extractor, get_memory_extractor
 from interface.cli import init_cli, get_cli
 from interface.http_api import init_http_server, get_http_server
 from agency.proactive import init_proactive_agent, get_proactive_agent
+from agency.relationship_analyzer import init_relationship_analyzer, get_relationship_analyzer
+from agency.visual_capture import init_visual_capture, get_visual_capture
 from subprocess_mgmt.manager import init_subprocess_manager, get_subprocess_manager
 from subprocess_mgmt.audio_player import register_audio_player
 from subprocess_mgmt.chat_overlay import register_chat_overlay
+from prompt_builder import init_prompt_builder
 
 
 # Global shutdown event
@@ -103,8 +106,23 @@ def initialize_system() -> bool:
     # Initialize memory extractor
     init_memory_extractor()
 
+    # Initialize prompt builder (must come after memory/vector store)
+    init_prompt_builder()
+
     # Initialize agency
     init_proactive_agent()
+
+    # Initialize relationship analyzer
+    init_relationship_analyzer()
+
+    # Initialize visual capture if enabled
+    if config.VISUAL_ENABLED:
+        init_visual_capture(
+            gemini_api_key=config.GOOGLE_API_KEY,
+            capture_interval=config.VISUAL_CAPTURE_INTERVAL,
+            enable_screenshot=config.VISUAL_SCREENSHOT_ENABLED,
+            enable_webcam=config.VISUAL_WEBCAM_ENABLED
+        )
 
     # Initialize subprocess manager and register subprocesses
     init_subprocess_manager()
@@ -153,6 +171,18 @@ def print_configuration() -> None:
     log_subsection(f"Scoring Weights: semantic={config.MEMORY_SEMANTIC_WEIGHT}, "
                    f"freshness={config.MEMORY_FRESHNESS_WEIGHT}, access={config.MEMORY_ACCESS_WEIGHT}")
 
+    # Prompt Builder settings
+    log_section("Prompt Builder", "📝")
+    log_subsection(f"Conversation History: {config.CONVERSATION_EXCHANGE_LIMIT} exchanges")
+    log_subsection(f"Memory Promotion Threshold: {config.MEMORY_PROMOTION_THRESHOLD}")
+
+    # Visual settings
+    if config.VISUAL_ENABLED:
+        log_section("Visual Capture", "📷")
+        log_subsection(f"Capture Interval: {config.VISUAL_CAPTURE_INTERVAL}s")
+        log_subsection(f"Screenshot: {'ENABLED' if config.VISUAL_SCREENSHOT_ENABLED else 'DISABLED'}")
+        log_subsection(f"Webcam: {'ENABLED' if config.VISUAL_WEBCAM_ENABLED else 'DISABLED'}")
+
 
 def check_llm_providers() -> None:
     """Check and display LLM provider status."""
@@ -198,6 +228,17 @@ def start_background_services() -> None:
     proactive.start()
     log_subsection("Proactive agent started")
 
+    # Start relationship analyzer
+    relationship_analyzer = get_relationship_analyzer()
+    relationship_analyzer.start()
+    log_subsection("Relationship analyzer started")
+
+    # Start visual capture if enabled
+    if config.VISUAL_ENABLED:
+        visual_capture = get_visual_capture()
+        visual_capture.start()
+        log_subsection("Visual capture started")
+
     # Start subprocess manager monitoring
     subprocess_mgr = get_subprocess_manager()
     subprocess_mgr.start_monitor()
@@ -235,6 +276,23 @@ def stop_background_services() -> None:
         log_subsection("Proactive agent stopped")
     except Exception as e:
         log_error(f"Error stopping proactive agent: {e}")
+
+    # Stop relationship analyzer
+    try:
+        relationship_analyzer = get_relationship_analyzer()
+        relationship_analyzer.stop()
+        log_subsection("Relationship analyzer stopped")
+    except Exception as e:
+        log_error(f"Error stopping relationship analyzer: {e}")
+
+    # Stop visual capture if enabled
+    if config.VISUAL_ENABLED:
+        try:
+            visual_capture = get_visual_capture()
+            visual_capture.stop()
+            log_subsection("Visual capture stopped")
+        except Exception as e:
+            log_error(f"Error stopping visual capture: {e}")
 
     # Stop subprocesses
     try:

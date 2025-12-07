@@ -171,36 +171,40 @@ Defaults:
 
 ---
 
-## Prompt Builder (Planned)
+## Prompt Builder
 
 ### Context Sources
 
 | Source | Status | Description |
 |--------|--------|-------------|
-| Conversation History | ✅ Built | Recent turns from current session |
-| Semantic Memories | ✅ Built | Relevant memories via vector search |
+| Core Memories | ✅ Built | Permanent, foundational knowledge (always included) |
+| Relationship Data | ✅ Built | Emergent affinity/trust tracking |
 | Temporal Context | ✅ Built | Time awareness, session duration |
-| Core Memories | 🔜 Planned | Permanent, foundational knowledge |
-| Relationship Data | 🔜 Planned | Affinity, history, dynamics |
-| Web Sources | 🔜 Planned | External data injection |
-| Visual Input | 🔜 Planned | Screenshots, images |
+| Visual Input | ✅ Built | Screenshots/webcam via Gemini 2.5 Flash |
+| Semantic Memories | ✅ Built | Relevant memories via vector search |
+| Conversation History | ✅ Built | Last 15 exchanges |
+| Web Sources | 🔜 Future | External data injection |
 
-### Assembly Process
-1. **Persona/System Prompt** - Character, tone, guidelines
-2. **Core Memories** - Immutable foundational context
-3. **Relationship Context** - Who is the user, history
-4. **Temporal Context** - Time of day, session duration
-5. **Relevant Memories** - Semantically retrieved
-6. **Visual Context** - Any images being referenced
-7. **Web Context** - External data if applicable
-8. **Conversation History** - Recent turns
-9. **User Input** - Current message
+### Assembly Process (Priority Order)
+1. **Core Memories** (priority 10) - Always included, foundational facts
+2. **Relationship Context** (priority 20) - Affinity, trust, history
+3. **Temporal Context** (priority 30) - Time of day, session duration
+4. **Visual Context** (priority 40) - Screenshot/webcam descriptions
+5. **Semantic Memories** (priority 50) - Relevance-scored memories
+6. **Conversation History** (priority 60) - Last 15 exchanges
+7. **User Input** - Current message
 
-### Token Budget Management
-- Total budget based on model context window
-- Each source has priority and max allocation
-- Lower priority sources trimmed first
-- Always preserve: user input, system prompt
+### Pluggable Source Architecture
+```python
+class ContextSource(ABC):
+    @property
+    def source_name(self) -> str: ...
+    @property
+    def priority(self) -> int: ...
+    def get_context(self, user_input, session_context) -> ContextBlock: ...
+```
+
+New sources can be added without modifying PromptBuilder.
 
 ---
 
@@ -233,6 +237,8 @@ Main Process
 ├── [Main Thread] CLI input loop
 ├── [Daemon] MemoryExtractor - every 60s
 ├── [Daemon] ProactiveAgent - every 300s
+├── [Daemon] RelationshipAnalyzer - every 120s
+├── [Daemon] VisualCapture - every 30s (if enabled)
 ├── [Daemon] HTTPServer - Flask
 └── [Daemon] SubprocessManager - health checks
 ```
@@ -241,23 +247,83 @@ All daemon threads stop automatically when main exits.
 
 ---
 
-## Database Schema
+## Database Schema (v2)
 
 ```sql
 sessions        -- Session metadata
 conversations   -- All turns with temporal data
 memories        -- Extracted memories with embeddings
+core_memories   -- Permanent foundational knowledge
+relationships   -- Affinity and trust tracking
 state           -- Key-value runtime state
 schema_version  -- Migration tracking
 ```
 
 ---
 
+## Relationship System
+
+### Affinity & Trust
+- **Affinity** (-1.0 to 1.0): Emotional closeness
+- **Trust** (0.0 to 1.0): Mutual reliability
+
+### Emergent Updates
+The RelationshipAnalyzer uses local LLM to interpret conversations:
+1. Analyzes recent conversation history
+2. Identifies positive/negative signals
+3. Outputs affinity_delta and trust_delta
+4. Values are clamped (max ±0.1 per analysis)
+
+### Signals
+| Positive | Negative |
+|----------|----------|
+| Sharing personal info | Curt responses |
+| Humor, warmth | Frustration |
+| Returning to chat | Long absences |
+| Vulnerability | Evasion |
+
+---
+
+## Visual System
+
+### Pipeline
+1. Timer triggers capture (screenshot/webcam)
+2. Image sent to Gemini 2.5 Flash
+3. Text description cached
+4. Description injected into prompts
+
+### Configuration
+```bash
+VISUAL_ENABLED=true
+VISUAL_CAPTURE_INTERVAL=30
+GOOGLE_API_KEY=your_key
+```
+
+---
+
+## CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `/help` | Show all commands |
+| `/quit` | Exit program |
+| `/new` | Start new session |
+| `/end` | End session (triggers extraction) |
+| `/stats` | System statistics |
+| `/memories` | Show recent memories |
+| `/search <query>` | Semantic memory search |
+| `/extract` | Force memory extraction |
+| `/core` | Show core memories |
+| `/addcore <cat> <content>` | Add core memory |
+| `/relationship` | Show affinity/trust status |
+| `/pause` | Pause background processes |
+| `/resume` | Resume background processes |
+
+---
+
 ## Next Steps
 
-1. **Prompt Builder** - Modular context assembly
-2. **Core Memories** - Distinguished from regular memories
-3. **Relationship Data** - User affinity and dynamics
-4. **Web Sources** - External data integration
-5. **Visual Input** - Image processing pipeline
-6. **Richer Triggers** - Beyond idle detection
+1. **Web Sources** - External data integration (search, APIs)
+2. **Richer Triggers** - Curiosity, time-of-day, events
+3. **Memory Promotion** - Auto-promote high-scoring memories to core
+4. **Multi-User Support** - Separate relationship tracking per user

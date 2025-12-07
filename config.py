@@ -117,3 +117,25 @@ HEALTH_CHECK_INTERVAL = 30
 # =============================================================================
 CLI_PROMPT_STYLE = "You: "
 CLI_ASSISTANT_STYLE = "AI: "
+
+# =============================================================================
+# PROMPT BUILDER CONFIGURATION
+# =============================================================================
+CONVERSATION_EXCHANGE_LIMIT = 15  # Last N exchanges (user + reply pairs)
+MEMORY_PROMOTION_THRESHOLD = 0.85  # Score threshold for core memory promotion
+
+# =============================================================================
+# RELATIONSHIP CONFIGURATION
+# =============================================================================
+RELATIONSHIP_ANALYSIS_INTERVAL = 120  # Seconds between relationship analysis
+RELATIONSHIP_MIN_TURNS = 4  # Minimum turns before analysis
+RELATIONSHIP_MAX_DELTA = 0.1  # Maximum change per analysis
+
+# =============================================================================
+# VISUAL CAPTURE CONFIGURATION
+# =============================================================================
+VISUAL_ENABLED = os.getenv("VISUAL_ENABLED", "false").lower() == "true"
+VISUAL_CAPTURE_INTERVAL = int(os.getenv("VISUAL_CAPTURE_INTERVAL", "30"))
+VISUAL_SCREENSHOT_ENABLED = True
+VISUAL_WEBCAM_ENABLED = True
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
