@@ -550,13 +550,42 @@ def init_gui() -> ChatWindow:
 
 def run_gui():
     """Run the GUI application (blocking)."""
-    app = QApplication(sys.argv)
-    app.setStyle("Fusion")
+    # =========================================================
+    # CRITICAL: Load PyTorch/native libraries BEFORE Qt5
+    # MS Store Python has DLL loading issues if Qt5 initializes first.
+    # PyTorch's c10.dll fails to load in the sandbox environment
+    # when Qt5 DLLs are already loaded.
+    # =========================================================
 
-    # Import and initialize backend
+    # Import backend modules needed for pre-Qt initialization
     import config
     from core.database import init_database
     from core.embeddings import load_embedding_model
+
+    # Setup directories
+    config.LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    config.DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Initialize database
+    print("Initializing database...")
+    init_database(db_path=config.DATABASE_PATH, busy_timeout_ms=config.DB_BUSY_TIMEOUT_MS)
+
+    # Load embedding model BEFORE Qt - this loads PyTorch DLLs
+    print("Loading embedding model...")
+    embedding_loaded = load_embedding_model(config.EMBEDDING_MODEL)
+    if not embedding_loaded:
+        print("=" * 60)
+        print("WARNING: Running in degraded mode - semantic memory disabled")
+        print("Conversations will be stored, but memory recall won't work.")
+        print("=" * 60)
+
+    # =========================================================
+    # NOW safe to create Qt application (PyTorch DLLs are loaded)
+    # =========================================================
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+
+    # Import remaining backend modules
     from core.temporal import init_temporal_tracker, get_temporal_tracker
     from concurrency.locks import init_lock_manager
     from memory.conversation import init_conversation_manager, get_conversation_manager
@@ -567,22 +596,7 @@ def run_gui():
     from prompt_builder.sources.relationship import get_relationship_source
     from agency.relationship_analyzer import init_relationship_analyzer, get_relationship_analyzer
 
-    # Setup directories
-    config.LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    config.DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Initialize components
-    print("Initializing database...")
-    init_database(db_path=config.DATABASE_PATH, busy_timeout_ms=config.DB_BUSY_TIMEOUT_MS)
-
-    print("Loading embedding model...")
-    embedding_loaded = load_embedding_model(config.EMBEDDING_MODEL)
-    if not embedding_loaded:
-        print("=" * 60)
-        print("WARNING: Running in degraded mode - semantic memory disabled")
-        print("Conversations will be stored, but memory recall won't work.")
-        print("=" * 60)
-
+    # Initialize remaining components
     print("Initializing components...")
     init_lock_manager()
     init_temporal_tracker()
