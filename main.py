@@ -347,6 +347,25 @@ def main() -> int:
 
     # GUI mode - default
     try:
+        # =============================================================
+        # CRITICAL: Load PyTorch BEFORE importing PyQt5
+        # MS Store Python has DLL loading conflicts - if Qt5 DLLs load
+        # first, PyTorch's c10.dll fails to initialize in the sandbox.
+        # The gui.py module has PyQt5 imports at module level, so we
+        # must load PyTorch HERE, before the import statement executes.
+        # =============================================================
+        config.LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        config.DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+        print("Loading embedding model...")
+        embedding_loaded = load_embedding_model(config.EMBEDDING_MODEL)
+        if not embedding_loaded:
+            print("=" * 60)
+            print("WARNING: Embedding model failed to load")
+            print("Continuing in degraded mode (no semantic memory)")
+            print("=" * 60)
+
+        # NOW safe to import GUI module (triggers PyQt5 module-level imports)
         from interface.gui import run_gui
         return run_gui()
     except ImportError as e:
