@@ -20,21 +20,24 @@ try:
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
-    log_warning("PIL not available - screenshot capture disabled")
+    # Optional - only needed for screenshot capture
+    log_warning("PIL not available - screenshot capture disabled (optional)")
 
 try:
     import cv2
     CV2_AVAILABLE = True
 except ImportError:
     CV2_AVAILABLE = False
-    log_warning("OpenCV not available - webcam capture disabled")
+    # Optional - only needed for webcam capture
+    log_warning("OpenCV not available - webcam capture disabled (optional)")
 
 try:
     import google.generativeai as genai
     GEMINI_AVAILABLE = True
 except ImportError:
     GEMINI_AVAILABLE = False
-    log_warning("Google Generative AI not available - image interpretation disabled")
+    # This is an optional feature - not a problem if missing
+    log_warning("Google Generative AI not available - visual features disabled (optional)")
 
 
 # Interpretation prompts

@@ -89,9 +89,14 @@ def initialize_system() -> bool:
         return False
 
     # Load embedding model (this can take a while)
-    if not load_embedding_model(config.EMBEDDING_MODEL):
-        log_error("Failed to load embedding model")
-        return False
+    # System can run in degraded mode without embeddings (no semantic search)
+    embedding_loaded = load_embedding_model(config.EMBEDDING_MODEL)
+    if not embedding_loaded:
+        log_warning("=" * 60)
+        log_warning("RUNNING IN DEGRADED MODE - Semantic memory disabled")
+        log_warning("Conversations will still be stored and you can chat normally,")
+        log_warning("but memory recall and extraction won't work.")
+        log_warning("=" * 60)
 
     # Print configuration summary
     print_configuration()
