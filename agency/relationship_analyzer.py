@@ -227,23 +227,46 @@ class RelationshipAnalyzer:
             if json_match:
                 text = json_match.group(0)
 
+            # Fix common LLM escaping errors where keys have embedded quotes
+            # e.g., {"\"affinity_delta\"": 1} or {"'affinity_delta'": 1}
+            text = re.sub(r'"\\"([^"]+)\\""\s*:', r'"\1":', text)  # Fix \"key\" -> key
+            text = re.sub(r"\"'([^']+)'\"\s*:", r'"\1":', text)    # Fix "'key'" -> key
+
             # Normalize whitespace within JSON (fixes malformed responses with newlines)
             text = re.sub(r'\s+', ' ', text).strip()
 
             data = json.loads(text)
 
+            # Normalize dictionary keys by stripping any embedded quotes
+            normalized_data = {k.strip('"\'').strip(): v for k, v in data.items()}
+
+            # Validate required keys exist
+            if "affinity_delta" not in normalized_data:
+                log_warning(
+                    f"Missing 'affinity_delta' in response. "
+                    f"Found keys: {list(data.keys())}. Raw text: {text[:200]}"
+                )
+                return None
+
+            if "trust_delta" not in normalized_data:
+                log_warning(
+                    f"Missing 'trust_delta' in response. "
+                    f"Found keys: {list(data.keys())}. Raw text: {text[:200]}"
+                )
+                return None
+
             # Clamp deltas to ±max_delta (default ±2)
             affinity_delta = max(-self.max_delta, min(self.max_delta,
-                int(data.get("affinity_delta", 0))
+                int(normalized_data.get("affinity_delta", 0))
             ))
             trust_delta = max(-self.max_delta, min(self.max_delta,
-                int(data.get("trust_delta", 0))
+                int(normalized_data.get("trust_delta", 0))
             ))
 
             return AnalysisResult(
                 affinity_delta=affinity_delta,
                 trust_delta=trust_delta,
-                reasoning=data.get("reasoning", ""),
+                reasoning=normalized_data.get("reasoning", ""),
                 analyzed_at=datetime.now()
             )
 

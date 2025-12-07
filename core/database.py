@@ -182,14 +182,16 @@ CREATE TABLE relationships_new (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Copy and convert existing data:
+-- Copy and convert existing data with defensive handling:
+-- - COALESCE handles NULL values (default to neutral 0 for affinity, 0.5 for trust)
+-- - MIN/MAX clamps results to valid 0-100 range
 -- Old affinity: -1.0 to 1.0 -> New: 0 to 100 (formula: (old + 1) * 50)
 -- Old trust: 0.0 to 1.0 -> New: 0 to 100 (formula: old * 100)
 INSERT INTO relationships_new (id, affinity, trust, interaction_count, first_interaction, last_interaction, updated_at)
 SELECT id,
-       CAST(ROUND((affinity + 1.0) * 50) AS INTEGER),
-       CAST(ROUND(trust * 100) AS INTEGER),
-       interaction_count, first_interaction, last_interaction, updated_at
+       MIN(100, MAX(0, CAST(ROUND((COALESCE(affinity, 0) + 1.0) * 50) AS INTEGER))),
+       MIN(100, MAX(0, CAST(ROUND(COALESCE(trust, 0.5) * 100) AS INTEGER))),
+       COALESCE(interaction_count, 0), first_interaction, last_interaction, updated_at
 FROM relationships;
 
 -- Drop old table
@@ -276,26 +278,73 @@ class Database:
             return False
 
     def _apply_migrations(self, conn: sqlite3.Connection, from_version: int) -> None:
-        """Apply schema migrations from from_version to SCHEMA_VERSION."""
-        # Apply migrations incrementally
-        if from_version < 2:
-            log_config("Applying migration", "v1 → v2 (core_memories, relationships)", indent=1)
-            conn.executescript(MIGRATION_V2_SQL)
+        """
+        Apply schema migrations from from_version to SCHEMA_VERSION.
 
-        if from_version < 3:
-            log_config("Applying migration", "v2 → v3 (narrative category)", indent=1)
-            conn.executescript(MIGRATION_V3_SQL)
+        Raises:
+            Exception: If any migration fails - we fail hard to prevent
+                      running with a broken/inconsistent schema.
+        """
+        try:
+            # Apply migrations incrementally
+            if from_version < 2:
+                log_config("Applying migration", "v1 → v2 (core_memories, relationships)", indent=1)
+                conn.executescript(MIGRATION_V2_SQL)
 
-        if from_version < 4:
-            log_config("Applying migration", "v3 → v4 (relationships 0-100 scale)", indent=1)
-            conn.executescript(MIGRATION_V4_SQL)
+            if from_version < 3:
+                log_config("Applying migration", "v2 → v3 (narrative category)", indent=1)
+                conn.executescript(MIGRATION_V3_SQL)
 
-        # Record new version
-        conn.execute(
-            "INSERT INTO schema_version (version) VALUES (?)",
-            (SCHEMA_VERSION,)
-        )
-        log_config("Migration", f"v{from_version} → v{SCHEMA_VERSION}", indent=1)
+            if from_version < 4:
+                log_config("Applying migration", "v3 → v4 (relationships 0-100 scale)", indent=1)
+
+                # Idempotency check: see if relationships table already has integer scale
+                # by checking if the affinity column type/constraints match v4 schema
+                cursor = conn.execute("PRAGMA table_info(relationships)")
+                columns = {row[1]: row[2] for row in cursor.fetchall()}
+
+                # Check if affinity exists and appears to be on the new scale
+                # If relationships table doesn't exist or has unexpected schema, proceed with migration
+                if "affinity" in columns:
+                    # Check if we have integer values already (v4) vs float values (v3)
+                    cursor = conn.execute("SELECT affinity FROM relationships WHERE id = 1")
+                    row = cursor.fetchone()
+                    if row is not None:
+                        affinity_value = row[0]
+                        # If affinity is already an integer >= 0 and <= 100, likely already migrated
+                        # Old schema used -1.0 to 1.0 floats
+                        if isinstance(affinity_value, int) or (
+                            isinstance(affinity_value, float) and
+                            affinity_value == int(affinity_value) and
+                            0 <= affinity_value <= 100
+                        ):
+                            # Could be already migrated - check if value makes sense
+                            # Old scale: -1.0 to 1.0 would convert to 0-100
+                            # If value is clearly in 0-100 integer range, skip migration
+                            log_config("Skipping v4 migration", "relationships table appears already migrated", indent=1)
+                        else:
+                            conn.executescript(MIGRATION_V4_SQL)
+                    else:
+                        # No data, safe to run migration
+                        conn.executescript(MIGRATION_V4_SQL)
+                else:
+                    # Column doesn't exist or table doesn't exist, run migration
+                    conn.executescript(MIGRATION_V4_SQL)
+
+            # Record new version
+            conn.execute(
+                "INSERT INTO schema_version (version) VALUES (?)",
+                (SCHEMA_VERSION,)
+            )
+            log_config("Migration", f"v{from_version} → v{SCHEMA_VERSION}", indent=1)
+
+        except Exception as e:
+            # Fail hard - don't let the app continue with broken schema
+            log_error(f"Migration failed (v{from_version} → v{SCHEMA_VERSION}): {e}")
+            raise RuntimeError(
+                f"Database migration failed: {e}. "
+                f"Please fix the database or delete it to start fresh."
+            ) from e
 
     @contextmanager
     def get_connection(self) -> sqlite3.Connection:
