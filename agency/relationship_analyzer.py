@@ -38,23 +38,21 @@ Based on this interaction, assess changes to the relationship:
    - Positive signals: vulnerability, honesty, reliability, following through
    - Negative signals: evasion, broken promises, inconsistency, deception
 
-Respond with ONLY a JSON object (no markdown, no explanation):
-{
-  "affinity_delta": <float between -0.1 and 0.1>,
-  "trust_delta": <float between -0.1 and 0.1>,
-  "reasoning": "<brief explanation>"
-}
+Respond with ONLY a valid JSON object on a single line (no markdown, no explanation):
+{"affinity_delta": <integer -2 to 2>, "trust_delta": <integer -2 to 2>, "reasoning": "<brief explanation>"}
 
-If the interaction is neutral, use 0.0 for both deltas.
-Small interactions should have small deltas (0.01-0.03).
-Only significant positive/negative interactions warrant larger deltas."""
+Rules:
+- Use 0 for neutral interactions
+- Use 1 or -1 for minor positive/negative interactions
+- Use 2 or -2 only for significant positive/negative interactions
+- Output must be valid JSON on ONE line"""
 
 
 @dataclass
 class AnalysisResult:
     """Result of relationship analysis."""
-    affinity_delta: float
-    trust_delta: float
+    affinity_delta: int
+    trust_delta: int
     reasoning: str
     analyzed_at: datetime
 
@@ -73,7 +71,7 @@ class RelationshipAnalyzer:
         self,
         analysis_interval: int = 120,  # Analyze every 2 minutes
         min_turns_for_analysis: int = 4,  # Need at least 4 turns
-        max_delta: float = 0.1  # Maximum change per analysis
+        max_delta: int = 2  # Maximum change per analysis (on 0-100 scale)
     ):
         """
         Initialize the relationship analyzer.
@@ -81,7 +79,7 @@ class RelationshipAnalyzer:
         Args:
             analysis_interval: Seconds between analysis runs
             min_turns_for_analysis: Minimum turns needed to analyze
-            max_delta: Maximum affinity/trust change per analysis
+            max_delta: Maximum affinity/trust change per analysis (±2)
         """
         self.analysis_interval = analysis_interval
         self.min_turns_for_analysis = min_turns_for_analysis
@@ -165,8 +163,8 @@ class RelationshipAnalyzer:
             )
 
             log_info(
-                f"Relationship analyzed: affinity {result.affinity_delta:+.3f}, "
-                f"trust {result.trust_delta:+.3f} - {result.reasoning[:50]}...",
+                f"Relationship analyzed: affinity {result.affinity_delta:+d}, "
+                f"trust {result.trust_delta:+d} - {result.reasoning[:50]}...",
                 prefix="💕"
             )
 
@@ -214,9 +212,8 @@ class RelationshipAnalyzer:
             log_warning(f"Relationship analysis LLM call failed: {response.error}")
             return None
 
-        # Parse JSON response
+        # Parse JSON response with robust extraction
         try:
-            # Try to extract JSON from response
             text = response.text.strip()
 
             # Handle potential markdown code blocks
@@ -225,14 +222,22 @@ class RelationshipAnalyzer:
                 if match:
                     text = match.group(1)
 
+            # Try to find JSON object in the response (handles extra text/whitespace)
+            json_match = re.search(r'\{[^{}]*"affinity_delta"[^{}]*\}', text, re.DOTALL)
+            if json_match:
+                text = json_match.group(0)
+
+            # Normalize whitespace within JSON (fixes malformed responses with newlines)
+            text = re.sub(r'\s+', ' ', text).strip()
+
             data = json.loads(text)
 
-            # Clamp deltas
+            # Clamp deltas to ±max_delta (default ±2)
             affinity_delta = max(-self.max_delta, min(self.max_delta,
-                float(data.get("affinity_delta", 0))
+                int(data.get("affinity_delta", 0))
             ))
             trust_delta = max(-self.max_delta, min(self.max_delta,
-                float(data.get("trust_delta", 0))
+                int(data.get("trust_delta", 0))
             ))
 
             return AnalysisResult(
@@ -242,7 +247,7 @@ class RelationshipAnalyzer:
                 analyzed_at=datetime.now()
             )
 
-        except (json.JSONDecodeError, KeyError, ValueError) as e:
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             log_warning(f"Failed to parse relationship analysis: {e}")
             return None
 

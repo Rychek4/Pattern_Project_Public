@@ -431,9 +431,9 @@ Be genuine, curious, and responsive to the emotional tone of the conversation.""
             self.console.print("[dim]No relationship data yet[/dim]")
             return
 
-        # Create visual representation
-        affinity_bar = self._create_bar(state.affinity, -1, 1, 20)
-        trust_bar = self._create_bar(state.trust, 0, 1, 20)
+        # Create visual representation (0-100 scale)
+        affinity_bar = self._create_bar(state.affinity, 0, 100, 20)
+        trust_bar = self._create_bar(state.trust, 0, 100, 20)
 
         table = Table(title="Relationship Status", show_header=False)
         table.add_column("Metric", style="cyan")
@@ -442,12 +442,12 @@ Be genuine, curious, and responsive to the emotional tone of the conversation.""
 
         table.add_row(
             "Affinity",
-            f"{state.affinity:+.2f}",
+            f"{state.affinity}/100",
             affinity_bar
         )
         table.add_row(
             "Trust",
-            f"{state.trust:.2f}",
+            f"{state.trust}/100",
             trust_bar
         )
         table.add_row(

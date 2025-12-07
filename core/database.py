@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from core.logger import log_info, log_success, log_error, log_config, log_section
 
 # Schema version for migrations
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # SQL schema definition
 SCHEMA_SQL = """
@@ -82,11 +82,11 @@ CREATE TABLE IF NOT EXISTS core_memories (
     promoted_from_memory_id INTEGER REFERENCES memories(id)
 );
 
--- Relationship tracking: emergent affinity and trust
+-- Relationship tracking: emergent affinity and trust (0-100 scale)
 CREATE TABLE IF NOT EXISTS relationships (
     id INTEGER PRIMARY KEY DEFAULT 1,
-    affinity REAL DEFAULT 0.0 CHECK (affinity >= -1.0 AND affinity <= 1.0),
-    trust REAL DEFAULT 0.5 CHECK (trust >= 0.0 AND trust <= 1.0),
+    affinity INTEGER DEFAULT 50 CHECK (affinity >= 0 AND affinity <= 100),
+    trust INTEGER DEFAULT 50 CHECK (trust >= 0 AND trust <= 100),
     interaction_count INTEGER DEFAULT 0,
     first_interaction TIMESTAMP,
     last_interaction TIMESTAMP,
@@ -123,11 +123,11 @@ CREATE TABLE IF NOT EXISTS core_memories (
     promoted_from_memory_id INTEGER REFERENCES memories(id)
 );
 
--- Relationship tracking: emergent affinity and trust
+-- Relationship tracking: emergent affinity and trust (0-100 scale)
 CREATE TABLE IF NOT EXISTS relationships (
     id INTEGER PRIMARY KEY DEFAULT 1,
-    affinity REAL DEFAULT 0.0 CHECK (affinity >= -1.0 AND affinity <= 1.0),
-    trust REAL DEFAULT 0.5 CHECK (trust >= 0.0 AND trust <= 1.0),
+    affinity INTEGER DEFAULT 50 CHECK (affinity >= 0 AND affinity <= 100),
+    trust INTEGER DEFAULT 50 CHECK (trust >= 0 AND trust <= 100),
     interaction_count INTEGER DEFAULT 0,
     first_interaction TIMESTAMP,
     last_interaction TIMESTAMP,
@@ -164,6 +164,39 @@ ALTER TABLE core_memories_new RENAME TO core_memories;
 
 -- Recreate index
 CREATE INDEX IF NOT EXISTS idx_core_memories_category ON core_memories(category);
+"""
+
+# Migration SQL for v3 -> v4 (convert relationships to 0-100 integer scale)
+MIGRATION_V4_SQL = """
+-- Recreate relationships table with new 0-100 integer scale
+-- SQLite doesn't support ALTER TABLE for CHECK constraints or type changes
+
+-- Create new table with updated schema
+CREATE TABLE relationships_new (
+    id INTEGER PRIMARY KEY DEFAULT 1,
+    affinity INTEGER DEFAULT 50 CHECK (affinity >= 0 AND affinity <= 100),
+    trust INTEGER DEFAULT 50 CHECK (trust >= 0 AND trust <= 100),
+    interaction_count INTEGER DEFAULT 0,
+    first_interaction TIMESTAMP,
+    last_interaction TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Copy and convert existing data:
+-- Old affinity: -1.0 to 1.0 -> New: 0 to 100 (formula: (old + 1) * 50)
+-- Old trust: 0.0 to 1.0 -> New: 0 to 100 (formula: old * 100)
+INSERT INTO relationships_new (id, affinity, trust, interaction_count, first_interaction, last_interaction, updated_at)
+SELECT id,
+       CAST(ROUND((affinity + 1.0) * 50) AS INTEGER),
+       CAST(ROUND(trust * 100) AS INTEGER),
+       interaction_count, first_interaction, last_interaction, updated_at
+FROM relationships;
+
+-- Drop old table
+DROP TABLE relationships;
+
+-- Rename new table
+ALTER TABLE relationships_new RENAME TO relationships;
 """
 
 
@@ -252,6 +285,10 @@ class Database:
         if from_version < 3:
             log_config("Applying migration", "v2 → v3 (narrative category)", indent=1)
             conn.executescript(MIGRATION_V3_SQL)
+
+        if from_version < 4:
+            log_config("Applying migration", "v3 → v4 (relationships 0-100 scale)", indent=1)
+            conn.executescript(MIGRATION_V4_SQL)
 
         # Record new version
         conn.execute(
