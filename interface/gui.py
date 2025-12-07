@@ -144,16 +144,6 @@ class ChatWindow(QMainWindow):
 
         layout.addSpacing(20)
 
-        # Control buttons
-        self.pause_btn = QPushButton("Pause")
-        self.pause_btn.setCheckable(True)
-        self.pause_btn.clicked.connect(self._toggle_pause)
-        layout.addWidget(self.pause_btn)
-
-        self.clear_btn = QPushButton("Clear")
-        self.clear_btn.clicked.connect(self._clear_display)
-        layout.addWidget(self.clear_btn)
-
         self.settings_btn = QPushButton("Settings")
         self.settings_btn.clicked.connect(self._show_settings)
         layout.addWidget(self.settings_btn)
@@ -339,21 +329,10 @@ class ChatWindow(QMainWindow):
             prefix = "System"
 
         # Build HTML
-        affinity_int = int(affinity * 100)
-        trust_int = int(trust * 100)
-
-        scores_html = ""
-        if role == "assistant":
-            scores_html = (
-                f"<span style='color:{COLORS['affinity']};'>&#10084;</span>{affinity_int} "
-                f"<span style='color:{COLORS['trust']};'>&#128994;</span>{trust_int}"
-            )
-
         html = f"""
         <div style='margin-bottom: 10px;'>
             <span style='color:{COLORS['timestamp']};'>[{timestamp}]</span>
             <span style='color:{color}; font-weight:bold;'>{prefix}:</span>
-            {scores_html}
             <br/>
             <span style='color:{COLORS['text']}; margin-left: 20px;'>{content}</span>
         </div>
@@ -459,26 +438,6 @@ Be genuine, curious, and responsive to the emotional tone of the conversation.""
     def _update_timer_display(self, session_time: str, total_time: str):
         """Update timer display."""
         self.timer_label.setText(f"Session: {session_time} | Total: {total_time}")
-
-    def _toggle_pause(self):
-        """Toggle pause state."""
-        is_paused = self.pause_btn.isChecked()
-        self.pause_btn.setText("Resume" if is_paused else "Pause")
-
-        # TODO: Actually pause background processes
-        status = "Paused" if is_paused else "Ready"
-        self.status_label.setText(status)
-
-    def _clear_display(self):
-        """Clear the chat display."""
-        reply = QMessageBox.question(
-            self,
-            "Clear Chat",
-            "Clear the chat display? (History is preserved in database)",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        if reply == QMessageBox.Yes:
-            self.chat_display.clear()
 
     def _show_settings(self):
         """Show settings dialog."""
