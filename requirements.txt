@@ -17,6 +17,9 @@ torch>=2.0.0
 # CLI Interface
 rich>=13.0.0
 
+# GUI Interface
+PyQt5>=5.15.0
+
 # HTTP API
 flask>=3.0.0
 

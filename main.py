@@ -2,11 +2,17 @@
 """
 Pattern Project - Main Entry Point
 AI Companion System with persistent memory and proactive agency
+
+Usage:
+    python main.py           # Run in CLI mode (console)
+    python main.py --gui     # Run in GUI mode (PyQt5 window)
+    python main.py -g        # Short form for GUI mode
 """
 
 import sys
 import signal
 import threading
+import argparse
 from pathlib import Path
 
 # Ensure we can import from project root
@@ -318,6 +324,29 @@ def main() -> int:
     Returns:
         Exit code (0 for success, non-zero for error)
     """
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(
+        description="Pattern Project - AI Companion System",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--gui", "-g",
+        action="store_true",
+        help="Launch GUI mode instead of CLI"
+    )
+    args = parser.parse_args()
+
+    # GUI mode - use separate initialization
+    if args.gui:
+        try:
+            from interface.gui import run_gui
+            return run_gui()
+        except ImportError as e:
+            print(f"GUI mode requires PyQt5: {e}")
+            print("Install with: pip install PyQt5")
+            return 1
+
+    # CLI mode - original flow
     # Setup signal handlers
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
