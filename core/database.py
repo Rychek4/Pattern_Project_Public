@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from core.logger import log_info, log_success, log_error, log_config, log_section
 
 # Schema version for migrations
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # SQL schema definition
 SCHEMA_SQL = """
@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS memories (
 CREATE TABLE IF NOT EXISTS core_memories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     content TEXT NOT NULL,
-    category TEXT NOT NULL CHECK (category IN ('identity', 'relationship', 'preference', 'fact')),
+    category TEXT NOT NULL CHECK (category IN ('identity', 'relationship', 'preference', 'fact', 'narrative')),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     promoted_from_memory_id INTEGER REFERENCES memories(id)
 );
@@ -135,6 +135,34 @@ CREATE TABLE IF NOT EXISTS relationships (
 );
 
 -- Index for core memories
+CREATE INDEX IF NOT EXISTS idx_core_memories_category ON core_memories(category);
+"""
+
+# Migration SQL for v2 -> v3 (add 'narrative' to core_memories category)
+MIGRATION_V3_SQL = """
+-- Recreate core_memories table with 'narrative' category
+-- SQLite doesn't support ALTER TABLE for CHECK constraints
+
+-- Create new table with updated constraint
+CREATE TABLE core_memories_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content TEXT NOT NULL,
+    category TEXT NOT NULL CHECK (category IN ('identity', 'relationship', 'preference', 'fact', 'narrative')),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    promoted_from_memory_id INTEGER REFERENCES memories(id)
+);
+
+-- Copy existing data
+INSERT INTO core_memories_new (id, content, category, created_at, promoted_from_memory_id)
+SELECT id, content, category, created_at, promoted_from_memory_id FROM core_memories;
+
+-- Drop old table
+DROP TABLE core_memories;
+
+-- Rename new table
+ALTER TABLE core_memories_new RENAME TO core_memories;
+
+-- Recreate index
 CREATE INDEX IF NOT EXISTS idx_core_memories_category ON core_memories(category);
 """
 
@@ -220,6 +248,10 @@ class Database:
         if from_version < 2:
             log_config("Applying migration", "v1 → v2 (core_memories, relationships)", indent=1)
             conn.executescript(MIGRATION_V2_SQL)
+
+        if from_version < 3:
+            log_config("Applying migration", "v2 → v3 (narrative category)", indent=1)
+            conn.executescript(MIGRATION_V3_SQL)
 
         # Record new version
         conn.execute(

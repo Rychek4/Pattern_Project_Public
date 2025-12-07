@@ -59,26 +59,32 @@ class CoreMemorySource(ContextSource):
                 by_category[mem.category] = []
             by_category[mem.category].append(mem)
 
-        # Format into sections
-        lines = ["<core_knowledge>"]
+        lines = []
 
+        # Narrative content comes first as a cohesive identity block
+        if "narrative" in by_category:
+            for mem in by_category["narrative"]:
+                lines.append(mem.content)
+            # Add separator if there are other memories
+            other_categories = [c for c in by_category if c != "narrative"]
+            if other_categories:
+                lines.append("")  # Blank line separator
+
+        # Other categories as discrete memories (if any exist)
         category_order = ["identity", "relationship", "preference", "fact"]
-        for category in category_order:
-            if category in by_category:
-                lines.append(f"  <{category}>")
-                for mem in by_category[category]:
-                    lines.append(f"    - {mem.content}")
-                lines.append(f"  </{category}>")
+        has_discrete_memories = any(c in by_category for c in category_order)
 
-        # Any other categories
+        if has_discrete_memories:
+            for category in category_order:
+                if category in by_category:
+                    for mem in by_category[category]:
+                        lines.append(f"- [{category}] {mem.content}")
+
+        # Any other categories not in standard order
         for category, mems in by_category.items():
-            if category not in category_order:
-                lines.append(f"  <{category}>")
+            if category not in category_order and category != "narrative":
                 for mem in mems:
-                    lines.append(f"    - {mem.content}")
-                lines.append(f"  </{category}>")
-
-        lines.append("</core_knowledge>")
+                    lines.append(f"- [{category}] {mem.content}")
 
         return ContextBlock(
             source_name=self.source_name,
