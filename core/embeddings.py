@@ -58,7 +58,29 @@ def load_embedding_model(model_name: str = "all-MiniLM-L6-v2") -> bool:
             return True
 
         except Exception as e:
-            log_error(f"Failed to load embedding model: {e}")
+            error_msg = str(e)
+            log_error(f"Failed to load embedding model: {error_msg}")
+
+            # Provide Windows-specific troubleshooting for DLL errors
+            if "WinError 1114" in error_msg or "DLL" in error_msg:
+                log_error("")
+                log_error("=" * 60)
+                log_error("WINDOWS DLL ERROR - Common with Microsoft Store Python")
+                log_error("=" * 60)
+                log_error("Try these solutions:")
+                log_error("")
+                log_error("1. Install Visual C++ Redistributable:")
+                log_error("   https://aka.ms/vs/17/release/vc_redist.x64.exe")
+                log_error("")
+                log_error("2. Use standard Python instead of Microsoft Store version:")
+                log_error("   https://www.python.org/downloads/")
+                log_error("")
+                log_error("3. Try CPU-only PyTorch:")
+                log_error("   pip uninstall torch")
+                log_error("   pip install torch --index-url https://download.pytorch.org/whl/cpu")
+                log_error("")
+                log_error("=" * 60)
+
             return False
 
 

@@ -576,7 +576,12 @@ def run_gui():
     init_database(db_path=config.DATABASE_PATH, busy_timeout_ms=config.DB_BUSY_TIMEOUT_MS)
 
     print("Loading embedding model...")
-    load_embedding_model(config.EMBEDDING_MODEL)
+    embedding_loaded = load_embedding_model(config.EMBEDDING_MODEL)
+    if not embedding_loaded:
+        print("=" * 60)
+        print("WARNING: Running in degraded mode - semantic memory disabled")
+        print("Conversations will be stored, but memory recall won't work.")
+        print("=" * 60)
 
     print("Initializing components...")
     init_lock_manager()
