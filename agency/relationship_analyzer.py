@@ -88,16 +88,16 @@ class RelationshipAnalyzer:
         self.max_delta = max_delta
 
         self._thread: Optional[threading.Thread] = None
-        self._running = False
+        self._stop_event = threading.Event()
         self._last_analysis_turn_id: int = 0
         self._lock = threading.RLock()
 
     def start(self) -> None:
         """Start the background analysis thread."""
-        if self._running:
+        if self._thread is not None and self._thread.is_alive():
             return
 
-        self._running = True
+        self._stop_event.clear()
         self._thread = threading.Thread(
             target=self._analysis_loop,
             daemon=True,
@@ -108,23 +108,21 @@ class RelationshipAnalyzer:
 
     def stop(self) -> None:
         """Stop the background analysis thread."""
-        self._running = False
-        if self._thread:
-            self._thread.join(timeout=5)
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=5.0)
             self._thread = None
         log_info("Relationship analyzer stopped", prefix="⏹️")
 
     def _analysis_loop(self) -> None:
         """Background loop that periodically analyzes conversations."""
-        import time
-
-        while self._running:
+        while not self._stop_event.is_set():
             try:
                 self._run_analysis()
             except Exception as e:
                 log_error(f"Relationship analysis error: {e}")
 
-            time.sleep(self.analysis_interval)
+            self._stop_event.wait(self.analysis_interval)
 
     def _run_analysis(self) -> Optional[AnalysisResult]:
         """Run a single analysis cycle."""
