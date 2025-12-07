@@ -37,12 +37,23 @@ def confirm_action(action: str) -> bool:
 
 
 def reset_relationships(db: Database) -> None:
-    """Reset relationships table to default values."""
+    """Reset relationships table to default values with new 0-100 schema."""
     print("\n[Relationships] Resetting to defaults...")
 
     with db.get_connection() as conn:
-        # Delete existing relationship
-        conn.execute("DELETE FROM relationships")
+        # Drop and recreate table with new schema (handles old CHECK constraints)
+        conn.execute("DROP TABLE IF EXISTS relationships")
+        conn.execute("""
+            CREATE TABLE relationships (
+                id INTEGER PRIMARY KEY DEFAULT 1,
+                affinity INTEGER DEFAULT 50 CHECK (affinity >= 0 AND affinity <= 100),
+                trust INTEGER DEFAULT 50 CHECK (trust >= 0 AND trust <= 100),
+                interaction_count INTEGER DEFAULT 0,
+                first_interaction TIMESTAMP,
+                last_interaction TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
 
         # Insert fresh relationship with new defaults
         now = datetime.now().isoformat()
