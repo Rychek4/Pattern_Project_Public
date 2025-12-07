@@ -40,7 +40,7 @@ COLORS = {
 
 class MessageSignals(QObject):
     """Signals for thread-safe message passing to GUI."""
-    new_message = pyqtSignal(str, str, str, float, float)  # role, content, timestamp, affinity, trust
+    new_message = pyqtSignal(str, str, str, int, int)  # role, content, timestamp, affinity, trust
     update_status = pyqtSignal(str)
     update_timer = pyqtSignal(str, str)  # session_time, total_time
     response_complete = pyqtSignal()
@@ -134,12 +134,12 @@ class ChatWindow(QMainWindow):
         # Relationship indicators
         self.affinity_label = QLabel("--")
         self.affinity_label.setFont(QFont("Consolas", 12, QFont.Bold))
-        self.affinity_label.setToolTip("Affinity (-1.0 to +1.0)")
+        self.affinity_label.setToolTip("Affinity (0 to 100)")
         layout.addWidget(self.affinity_label)
 
         self.trust_label = QLabel("--")
         self.trust_label.setFont(QFont("Consolas", 12, QFont.Bold))
-        self.trust_label.setToolTip("Trust (0.0 to 1.0)")
+        self.trust_label.setToolTip("Trust (0 to 100)")
         layout.addWidget(self.trust_label)
 
         layout.addSpacing(20)
@@ -311,13 +311,13 @@ class ChatWindow(QMainWindow):
 
     def _update_relationship_display(self):
         """Update the visual relationship indicators."""
-        # Affinity: red heart with value
-        affinity_val = int(self._current_affinity * 100)
+        # Affinity: red heart with value (already 0-100 scale)
+        affinity_val = int(self._current_affinity)
         self.affinity_label.setText(f"<span style='color:{COLORS['affinity']};'>&#10084;</span> {affinity_val}")
         self.affinity_label.setStyleSheet(f"color: {COLORS['text']};")
 
-        # Trust: green shield with value
-        trust_val = int(self._current_trust * 100)
+        # Trust: green shield with value (already 0-100 scale)
+        trust_val = int(self._current_trust)
         self.trust_label.setText(f"<span style='color:{COLORS['trust']};'>&#128994;</span> {trust_val}")
         self.trust_label.setStyleSheet(f"color: {COLORS['text']};")
 
@@ -325,7 +325,7 @@ class ChatWindow(QMainWindow):
         """Get current timestamp string."""
         return datetime.now().strftime("%H:%M:%S")
 
-    def _append_message(self, role: str, content: str, timestamp: str, affinity: float, trust: float):
+    def _append_message(self, role: str, content: str, timestamp: str, affinity: int, trust: int):
         """Append a message to the chat display."""
         # Color based on role
         if role == "user":

@@ -13,22 +13,22 @@ from concurrency.db_retry import db_retry
 from core.logger import log_info
 
 
-# Clamp bounds for affinity and trust
-AFFINITY_MIN = -1.0
-AFFINITY_MAX = 1.0
-TRUST_MIN = 0.0
-TRUST_MAX = 1.0
+# Clamp bounds for affinity and trust (0-100 integer scale)
+AFFINITY_MIN = 0
+AFFINITY_MAX = 100
+TRUST_MIN = 0
+TRUST_MAX = 100
 
-# Default starting values
-DEFAULT_AFFINITY = 0.0  # Neutral
-DEFAULT_TRUST = 0.5     # Moderate trust
+# Default starting values (neutral at 50)
+DEFAULT_AFFINITY = 50  # Neutral
+DEFAULT_TRUST = 50     # Neutral
 
 
 @dataclass
 class RelationshipState:
     """Current state of the relationship."""
-    affinity: float      # -1.0 (distant) to 1.0 (close)
-    trust: float         # 0.0 (none) to 1.0 (complete)
+    affinity: int        # 0 (distant) to 100 (close)
+    trust: int           # 0 (none) to 100 (complete)
     interaction_count: int
     first_interaction: Optional[datetime]
     last_interaction: Optional[datetime]
@@ -40,11 +40,11 @@ class RelationshipSource(ContextSource):
     Provides relationship context for prompt injection.
 
     Tracks:
-    - Affinity: How close the relationship is (-1 to 1)
-    - Trust: How much the AI trusts/is trusted (0 to 1)
+    - Affinity: How close the relationship is (0 to 100)
+    - Trust: How much the AI trusts/is trusted (0 to 100)
 
-    These values are emergent - updated by algorithm based on
-    conversation analysis, not manually controlled.
+    Both start at 50 (neutral) and adjust based on conversation
+    analysis by the local LLM. Maximum change per analysis is ±2.
     """
 
     @property
@@ -72,8 +72,8 @@ class RelationshipSource(ContextSource):
         trust_desc = self._describe_trust(state.trust)
 
         lines = ["<relationship_context>"]
-        lines.append(f"  Affinity: {affinity_desc} ({state.affinity:+.2f})")
-        lines.append(f"  Trust: {trust_desc} ({state.trust:.2f})")
+        lines.append(f"  Affinity: {affinity_desc} ({state.affinity}/100)")
+        lines.append(f"  Trust: {trust_desc} ({state.trust}/100)")
 
         if state.interaction_count > 0:
             lines.append(f"  Interactions: {state.interaction_count}")
@@ -118,15 +118,15 @@ class RelationshipSource(ContextSource):
     @db_retry()
     def update(
         self,
-        affinity_delta: float = 0.0,
-        trust_delta: float = 0.0
+        affinity_delta: int = 0,
+        trust_delta: int = 0
     ) -> RelationshipState:
         """
         Update relationship values with clamping.
 
         Args:
-            affinity_delta: Change to affinity (-1 to 1)
-            trust_delta: Change to trust (0 to 1)
+            affinity_delta: Change to affinity (clamped to ±2)
+            trust_delta: Change to trust (clamped to ±2)
 
         Returns:
             Updated RelationshipState
@@ -163,8 +163,8 @@ class RelationshipSource(ContextSource):
         )
 
         log_info(
-            f"Relationship updated: affinity {affinity_delta:+.3f} → {new_affinity:.2f}, "
-            f"trust {trust_delta:+.3f} → {new_trust:.2f}",
+            f"Relationship updated: affinity {affinity_delta:+d} → {new_affinity}, "
+            f"trust {trust_delta:+d} → {new_trust}",
             prefix="💕"
         )
 
@@ -206,34 +206,34 @@ class RelationshipSource(ContextSource):
             updated_at=now
         )
 
-    def _describe_affinity(self, affinity: float) -> str:
-        """Convert affinity value to description."""
-        if affinity >= 0.8:
+    def _describe_affinity(self, affinity: int) -> str:
+        """Convert affinity value (0-100) to description."""
+        if affinity >= 90:
             return "very close"
-        elif affinity >= 0.5:
+        elif affinity >= 75:
             return "friendly"
-        elif affinity >= 0.2:
+        elif affinity >= 60:
             return "warm"
-        elif affinity >= -0.2:
+        elif affinity >= 40:
             return "neutral"
-        elif affinity >= -0.5:
+        elif affinity >= 25:
             return "cool"
-        elif affinity >= -0.8:
+        elif affinity >= 10:
             return "distant"
         else:
             return "cold"
 
-    def _describe_trust(self, trust: float) -> str:
-        """Convert trust value to description."""
-        if trust >= 0.9:
+    def _describe_trust(self, trust: int) -> str:
+        """Convert trust value (0-100) to description."""
+        if trust >= 90:
             return "complete"
-        elif trust >= 0.7:
+        elif trust >= 70:
             return "high"
-        elif trust >= 0.5:
+        elif trust >= 50:
             return "moderate"
-        elif trust >= 0.3:
+        elif trust >= 30:
             return "cautious"
-        elif trust >= 0.1:
+        elif trust >= 10:
             return "low"
         else:
             return "minimal"
