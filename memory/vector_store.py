@@ -255,13 +255,18 @@ class VectorStore:
             return results[:limit]
 
     def _compute_freshness(self, memory: Memory, now: datetime) -> float:
-        """Compute freshness score based on source timestamp."""
+        """Compute freshness score based on source timestamp.
+
+        Uses proper half-life decay: score = 0.5 at half_life_days.
+        Formula: exp(-ln(2) * age / half_life) = 2^(-age/half_life)
+        """
         if memory.temporal_relevance == "permanent":
             return 1.0
 
         if memory.source_timestamp:
             age_days = (now - memory.source_timestamp).days
-            return math.exp(-age_days / self.freshness_half_life_days)
+            # ln(2) ≈ 0.693 for proper half-life decay
+            return math.exp(-0.693 * age_days / self.freshness_half_life_days)
 
         return 0.5
 
