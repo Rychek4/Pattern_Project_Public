@@ -1,12 +1,13 @@
 """
 Pattern Project - Conversation Source
-Recent conversation history (last 15 exchanges)
+Recent conversation history with semantic timestamps
 """
 
 from typing import Optional, Dict, Any, List
 
 from prompt_builder.sources.base import ContextSource, ContextBlock, SourcePriority
 from memory.conversation import get_conversation_manager
+from core.temporal import format_fuzzy_relative_time
 
 
 # 15 exchanges = 30 turns (user + assistant pairs)
@@ -45,32 +46,32 @@ class ConversationSource(ContextSource):
         user_input: str,
         session_context: Dict[str, Any]
     ) -> Optional[ContextBlock]:
-        """Get recent conversation history."""
+        """Get recent conversation history with semantic timestamps."""
         conversation_mgr = get_conversation_manager()
 
-        # Get recent history (format: [{"role": ..., "content": ...}, ...])
-        history = conversation_mgr.get_recent_history(limit=self.turn_limit)
+        # Get full turn objects with timestamps
+        turns = conversation_mgr.get_session_history(limit=self.turn_limit)
 
-        if not history:
+        # Filter to user/assistant only
+        turns = [t for t in turns if t.role in ("user", "assistant")]
+
+        if not turns:
             return None
 
-        # Format for prompt
+        # Format for prompt with semantic timestamps
         lines = ["<recent_conversation>"]
 
-        for turn in history:
-            role = turn["role"]
-            content = turn["content"]
-
-            if role == "user":
-                lines.append(f"  User: {content}")
-            elif role == "assistant":
-                lines.append(f"  Assistant: {content}")
+        for turn in turns:
+            # Use "Claude" for assistant, "Brian" for user
+            name = "Claude" if turn.role == "assistant" else "Brian"
+            timestamp = format_fuzzy_relative_time(turn.created_at)
+            lines.append(f"  {name}: {turn.content} ({timestamp})")
 
         lines.append("</recent_conversation>")
 
         # Calculate actual exchange count
-        user_turns = sum(1 for t in history if t["role"] == "user")
-        assistant_turns = sum(1 for t in history if t["role"] == "assistant")
+        user_turns = sum(1 for t in turns if t.role == "user")
+        assistant_turns = sum(1 for t in turns if t.role == "assistant")
 
         return ContextBlock(
             source_name=self.source_name,
@@ -78,7 +79,7 @@ class ConversationSource(ContextSource):
             priority=self.priority,
             include_always=False,
             metadata={
-                "turn_count": len(history),
+                "turn_count": len(turns),
                 "user_turns": user_turns,
                 "assistant_turns": assistant_turns,
                 "exchange_limit": self.exchange_count

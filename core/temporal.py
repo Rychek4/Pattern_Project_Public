@@ -266,52 +266,132 @@ def format_relative_time(dt: datetime) -> str:
         return dt.strftime("%Y-%m-%d")
 
 
+def get_time_of_day(hour: int) -> str:
+    """
+    Convert hour to semantic time of day.
+
+    Args:
+        hour: Hour in 24-hour format (0-23)
+
+    Returns:
+        Semantic time period: 'Morning', 'Afternoon', 'Evening', or 'Night'
+    """
+    if 5 <= hour < 12:
+        return "Morning"
+    elif 12 <= hour < 17:
+        return "Afternoon"
+    elif 17 <= hour < 21:
+        return "Evening"
+    else:
+        return "Night"
+
+
+def get_month_position(day: int) -> str:
+    """
+    Convert day of month to semantic position.
+
+    Args:
+        day: Day of month (1-31)
+
+    Returns:
+        Semantic position: 'Early', 'Mid', or 'Late'
+    """
+    if day <= 10:
+        return "Early"
+    elif day <= 20:
+        return "Mid"
+    else:
+        return "Late"
+
+
+def format_semantic_current_time(dt: datetime) -> str:
+    """
+    Format datetime as semantic current time description.
+
+    Args:
+        dt: The datetime to format
+
+    Returns:
+        Semantic description like 'Sunday Morning. Early December.'
+    """
+    day_name = dt.strftime("%A")
+    time_of_day = get_time_of_day(dt.hour)
+    month_position = get_month_position(dt.day)
+    month_name = dt.strftime("%B")
+
+    return f"{day_name} {time_of_day}. {month_position} {month_name}."
+
+
+def format_fuzzy_relative_time(dt: datetime) -> str:
+    """
+    Format datetime relative to now using fuzzy, human-like descriptions.
+
+    Args:
+        dt: The datetime to format
+
+    Returns:
+        Fuzzy relative time like 'A few minutes ago', 'Earlier today', etc.
+    """
+    now = datetime.now()
+    diff = now - dt
+    seconds = diff.total_seconds()
+
+    # Handle future times (shouldn't happen, but be safe)
+    if seconds < 0:
+        return "Just now"
+
+    # Very recent
+    if seconds < 30:
+        return "Just now"
+    elif seconds < 120:  # 2 minutes
+        return "A moment ago"
+    elif seconds < 600:  # 10 minutes
+        return "A few minutes ago"
+    elif seconds < 1200:  # 20 minutes
+        return "Several minutes ago"
+    elif seconds < 2700:  # 45 minutes
+        return "Around half an hour ago"
+    elif seconds < 5400:  # 90 minutes
+        return "About an hour ago"
+    elif seconds < 10800:  # 3 hours
+        return "A couple hours ago"
+
+    # Same day check
+    if dt.date() == now.date():
+        return "Earlier today"
+
+    # Yesterday check
+    yesterday = now.date().toordinal() - 1
+    if dt.date().toordinal() == yesterday:
+        return "Yesterday"
+
+    # Days ago
+    days = diff.days
+    if days < 7:
+        return "A few days ago"
+    elif days < 14:
+        return "Last week"
+    elif days < 30:
+        return "A couple weeks ago"
+    elif days < 60:
+        return "Last month"
+    else:
+        return "A while ago"
+
+
 def temporal_context_to_semantic(context: TemporalContext) -> str:
     """
     Convert temporal context to semantic/natural language for prompts.
+
+    Returns a simple, human-like time description rather than precise timestamps.
 
     Args:
         context: The temporal context to convert
 
     Returns:
-        Natural language description of the temporal context
+        Semantic description like 'The current time is Sunday Morning. Early December.'
     """
-    parts = []
-
-    # Current time
-    parts.append(f"The current time is {context.current_time.strftime('%A, %B %d, %Y at %H:%M')}.")
-
-    # Session context
-    if context.session_duration:
-        duration_str = format_duration(context.session_duration.total_seconds())
-        parts.append(f"This conversation session has been going for {duration_str}.")
-
-    if context.turns_this_session > 0:
-        parts.append(f"There have been {context.turns_this_session} exchanges in this session.")
-
-    # Time since last turn
-    if context.time_since_last_turn:
-        if context.time_since_last_turn.total_seconds() > 60:
-            gap_str = format_duration(context.time_since_last_turn.total_seconds())
-            parts.append(f"It has been {gap_str} since the last message.")
-
-    # Historical context
-    if context.last_session_ended_at:
-        last_session_str = format_relative_time(context.last_session_ended_at)
-        parts.append(f"The previous session ended {last_session_str}.")
-
-    if context.total_sessions > 0:
-        total_time_str = format_duration(context.total_interaction_time.total_seconds())
-        parts.append(
-            f"Across {context.total_sessions} previous sessions, "
-            f"there has been {total_time_str} of interaction."
-        )
-
-    if context.first_interaction:
-        first_str = format_relative_time(context.first_interaction)
-        parts.append(f"The first interaction was {first_str}.")
-
-    return " ".join(parts)
+    return f"The current time is {format_semantic_current_time(context.current_time)}"
 
 
 # Global temporal tracker instance
