@@ -62,13 +62,13 @@ EMBEDDING_DIMENSIONS = 384
 # =============================================================================
 MEMORY_EXTRACTION_THRESHOLD = 10  # Turns before triggering extraction
 MEMORY_EXTRACTION_INTERVAL = 60  # Seconds between extraction checks
-MEMORY_MAX_PER_QUERY = 10  # Max memories to retrieve per query
-MEMORY_FRESHNESS_HALF_LIFE_DAYS = 30  # Decay rate for freshness scoring
+MEMORY_MAX_PER_QUERY = 3  # Max memories to retrieve per query (focused context)
+MEMORY_FRESHNESS_HALF_LIFE_DAYS = 14  # Decay rate for freshness scoring (more recency bias)
 
-# Scoring weights
-MEMORY_SEMANTIC_WEIGHT = 0.6
-MEMORY_FRESHNESS_WEIGHT = 0.3
-MEMORY_ACCESS_WEIGHT = 0.1
+# Scoring weights (must sum to 1.0)
+MEMORY_SEMANTIC_WEIGHT = 0.50  # Semantic similarity to query
+MEMORY_FRESHNESS_WEIGHT = 0.35  # Recency of memory source
+MEMORY_ACCESS_WEIGHT = 0.15  # How recently memory was recalled
 
 # =============================================================================
 # SESSION CONFIGURATION

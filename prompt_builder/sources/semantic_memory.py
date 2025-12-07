@@ -66,8 +66,12 @@ class SemanticMemorySource(ContextSource):
         if not results:
             return None
 
-        # Format memories for prompt
-        lines = ["<recalled_memories>"]
+        # Format memories as clean prose for prompt
+        lines = [
+            "<recalled_context>",
+            "The following are relevant memories from past conversations:",
+            ""
+        ]
 
         promotion_candidates = []
 
@@ -75,19 +79,15 @@ class SemanticMemorySource(ContextSource):
             mem = result.memory
             score = result.combined_score
 
-            # Format with type and importance indicators
-            type_indicator = self._get_type_indicator(mem.memory_type)
-            importance_indicator = self._get_importance_indicator(mem.importance)
-
-            lines.append(
-                f"  {type_indicator} [{importance_indicator}] {mem.content}"
-            )
+            # Simple bullet format with memory content
+            lines.append(f"- {mem.content}")
 
             # Track high-scoring memories for potential promotion
             if score >= self.promotion_threshold:
                 promotion_candidates.append(result)
 
-        lines.append("</recalled_memories>")
+        lines.append("")
+        lines.append("</recalled_context>")
 
         # Store promotion candidates in session context for later processing
         if promotion_candidates:

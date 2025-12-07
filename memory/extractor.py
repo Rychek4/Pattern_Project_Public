@@ -17,34 +17,36 @@ from llm.router import get_llm_router, TaskType
 from concurrency.locks import get_lock_manager
 
 
-# Prompt for memory extraction
-EXTRACTION_PROMPT = """You are a memory extraction system. Analyze the conversation to extract information specifically about the 'Human' user.
+# System prompt for memory extraction (Llama 3 format)
+EXTRACTION_SYSTEM_PROMPT = """You are a Conversation Analyst for a Vector Memory System.
 
-STRICT RULES:
-1. TARGET SUBJECT: Extract facts, preferences, and events related ONLY to the Human. Do NOT extract the AI's own personality, backstory, opinions, or training data references (e.g., do not record that the AI "reminds itself of coding").
-2. CONFIRMATION REQUIRED: Do not infer facts from the AI's questions. If the AI asks "Do you like X?", do not record that the user likes X unless the User explicitly confirms it in their reply.
-3. CONTEXT: Ignore polite filler (greetings, small talk) unless it reveals a specific user mood or trait.
+### GOAL
+Convert the raw conversation block into a list of "Dense Semantic Summaries."
+A Dense Semantic Summary is a standalone sentence that describes EXACTLY what happened in the interaction, preserving the Speaker and the Intent.
 
-For each memory, provide:
-1. A concise statement of the memory (1-2 sentences)
-2. The type: 'fact', 'preference', 'event', 'observation', or 'reflection'
-3. Importance: 0.0-1.0 (1.0 is critical info like name/job, 0.1 is trivial)
-4. Temporal relevance: 'permanent' (facts), 'recent' (current status), or 'dated' (specific time)
+### RULES
+1. THIRD-PERSON: Always use "User" and "AI" (e.g., "User asked...", "AI explained...").
+2. DENSITY: Replace pronouns like "it" or "that" with the actual topic.
+3. ATTRIBUTION: Never confuse who said what. If AI discusses pirates, write "AI discussed pirates."
+4. META-COGNITION: Capture intent (testing, joking, correcting) when obvious.
+5. ACCURACY: Only summarize what actually happened. Do not infer unstated facts.
 
-Output as JSON array:
+### EXAMPLE
+
+[INPUT]
+[1] User: Remember when we went to Venice?
+[2] AI: I don't remember that. I think you are testing me.
+[3] User: Haha yes, I am just flag planting keywords.
+
+[OUTPUT]
 [
-  {
-    "content": "The memory statement",
-    "type": "type_category",
-    "importance": 0.5,
-    "temporal_relevance": "temporal_category"
-  }
+  "User tested AI's memory reliability by falsely claiming they visited Venice together.",
+  "AI correctly identified the Venice claim as a potential hallucination test and declined to validate it.",
+  "User confirmed the Venice reference was a deliberate 'flag planting' test for the memory system."
 ]
 
-If no significant User memories are found, return an empty array: []
-
-Conversation to analyze:
-"""
+### INSTRUCTIONS
+Analyze the conversation block below and output ONLY a JSON array of summary strings. No other text."""
 
 
 class MemoryExtractor:
@@ -148,11 +150,12 @@ class MemoryExtractor:
                 # Format conversation for extraction
                 conversation_text = self._format_conversation(turns)
 
-                # Call local LLM for extraction
+                # Call local LLM for extraction with system prompt
                 response = router.generate(
-                    prompt=EXTRACTION_PROMPT + conversation_text,
+                    prompt=conversation_text,
+                    system_prompt=EXTRACTION_SYSTEM_PROMPT,
                     task_type=TaskType.EXTRACTION,
-                    temperature=0.3,
+                    temperature=0.2,
                     max_tokens=1024
                 )
 
@@ -203,15 +206,18 @@ class MemoryExtractor:
                 return 0
 
     def _format_conversation(self, turns: List[ConversationTurn]) -> str:
-        """Format conversation turns for extraction prompt."""
-        lines = []
-        for turn in turns:
-            role = "Human" if turn.role == "user" else "AI"
-            lines.append(f"{role}: {turn.content}")
+        """Format conversation turns with numbered lines for extraction."""
+        lines = ["Conversation Block:"]
+        for i, turn in enumerate(turns, 1):
+            role = "User" if turn.role == "user" else "AI"
+            lines.append(f"[{i}] {role}: {turn.content}")
         return "\n".join(lines)
 
     def _parse_extraction_response(self, response_text: str) -> List[Dict[str, Any]]:
-        """Parse the JSON response from extraction LLM."""
+        """Parse the JSON response from extraction LLM.
+
+        Expects a simple JSON array of strings (Dense Semantic Summaries).
+        """
         try:
             # Try to find JSON array in response
             text = response_text.strip()
@@ -227,26 +233,37 @@ class MemoryExtractor:
             end = text.rfind("]") + 1
 
             if start == -1 or end == 0:
+                log_warning(f"No JSON array found in extraction response")
                 return []
 
             json_str = text[start:end]
-            memories = json.loads(json_str)
+            summaries = json.loads(json_str)
 
-            # Validate structure
+            # Convert string summaries to memory dicts
             valid_memories = []
-            for mem in memories:
-                if isinstance(mem, dict) and "content" in mem:
+            for summary in summaries:
+                if isinstance(summary, str) and summary.strip():
                     valid_memories.append({
-                        "content": str(mem["content"]),
-                        "type": mem.get("type", "observation"),
-                        "importance": float(mem.get("importance", 0.5)),
-                        "temporal_relevance": mem.get("temporal_relevance", "recent")
+                        "content": summary.strip(),
+                        "type": "observation",  # Default type
+                        "importance": 0.5,      # Default importance
+                        "temporal_relevance": "recent"  # Default relevance
+                    })
+                elif isinstance(summary, dict) and "content" in summary:
+                    # Also handle legacy format for backwards compatibility
+                    valid_memories.append({
+                        "content": str(summary["content"]),
+                        "type": summary.get("type", "observation"),
+                        "importance": float(summary.get("importance", 0.5)),
+                        "temporal_relevance": summary.get("temporal_relevance", "recent")
                     })
 
+            log_info(f"Parsed {len(valid_memories)} summaries from extraction response")
             return valid_memories
 
         except (json.JSONDecodeError, ValueError) as e:
             log_warning(f"Failed to parse extraction response: {e}")
+            log_warning(f"Response was: {response_text[:500]}...")
             return []
 
     def get_stats(self) -> Dict[str, Any]:
