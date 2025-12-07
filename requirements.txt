@@ -7,9 +7,8 @@ python-dotenv>=1.0.0
 anthropic>=0.18.0
 requests>=2.31.0
 
-# Embeddings (lazy loaded)
+# Embeddings (lazy loaded - sentence-transformers pulls compatible torch)
 sentence-transformers>=2.2.0
-torch>=2.0.0
 
 # Database
 # sqlite3 is built-in

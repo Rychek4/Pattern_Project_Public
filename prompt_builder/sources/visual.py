@@ -65,7 +65,7 @@ class VisualSource(ContextSource):
         # Threading
         self._lock = threading.RLock()
         self._refresh_thread: Optional[threading.Thread] = None
-        self._running = False
+        self._stop_event = threading.Event()
 
         # Callbacks for capture (set by visual capture system)
         self._screenshot_callback: Optional[Callable[[], Optional[bytes]]] = None
@@ -177,10 +177,10 @@ class VisualSource(ContextSource):
 
     def start_refresh_loop(self) -> None:
         """Start the background refresh loop."""
-        if self._running:
+        if self._refresh_thread is not None and self._refresh_thread.is_alive():
             return
 
-        self._running = True
+        self._stop_event.clear()
         self._refresh_thread = threading.Thread(
             target=self._refresh_loop,
             daemon=True,
@@ -191,23 +191,21 @@ class VisualSource(ContextSource):
 
     def stop_refresh_loop(self) -> None:
         """Stop the background refresh loop."""
-        self._running = False
-        if self._refresh_thread:
-            self._refresh_thread.join(timeout=5)
+        self._stop_event.set()
+        if self._refresh_thread is not None:
+            self._refresh_thread.join(timeout=5.0)
             self._refresh_thread = None
         log_info("Visual refresh loop stopped", prefix="⏹️")
 
     def _refresh_loop(self) -> None:
         """Background loop that refreshes visual caches."""
-        import time
-
-        while self._running:
+        while not self._stop_event.is_set():
             try:
                 self._refresh_visuals()
             except Exception as e:
                 log_error(f"Visual refresh error: {e}")
 
-            time.sleep(self.refresh_interval)
+            self._stop_event.wait(self.refresh_interval)
 
     def _refresh_visuals(self) -> None:
         """Capture and interpret current visuals."""
