@@ -4,9 +4,9 @@ Pattern Project - Main Entry Point
 AI Companion System with persistent memory and proactive agency
 
 Usage:
-    python main.py           # Run in CLI mode (console)
-    python main.py --gui     # Run in GUI mode (PyQt5 window)
-    python main.py -g        # Short form for GUI mode
+    python main.py           # Run in GUI mode (PyQt5 window) - default
+    python main.py --cli     # Run in CLI mode (console)
+    python main.py -c        # Short form for CLI mode
 """
 
 import sys
@@ -330,22 +330,29 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument(
-        "--gui", "-g",
+        "--cli", "-c",
         action="store_true",
-        help="Launch GUI mode instead of CLI"
+        help="Launch CLI mode instead of GUI (console interface)"
     )
     args = parser.parse_args()
 
-    # GUI mode - use separate initialization
-    if args.gui:
-        try:
-            from interface.gui import run_gui
-            return run_gui()
-        except ImportError as e:
-            print(f"GUI mode requires PyQt5: {e}")
-            print("Install with: pip install PyQt5")
-            return 1
+    # CLI mode - only if explicitly requested
+    if args.cli:
+        return run_cli_mode()
 
+    # GUI mode - default
+    try:
+        from interface.gui import run_gui
+        return run_gui()
+    except ImportError as e:
+        print(f"GUI mode requires PyQt5: {e}")
+        print("Install with: pip install PyQt5")
+        print("Falling back to CLI mode...")
+        return run_cli_mode()
+
+
+def run_cli_mode() -> int:
+    """Run the application in CLI mode."""
     # CLI mode - original flow
     # Setup signal handlers
     signal.signal(signal.SIGINT, signal_handler)
