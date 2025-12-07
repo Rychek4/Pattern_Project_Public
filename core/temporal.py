@@ -80,12 +80,29 @@ class TemporalTracker:
         """
         End the current session.
 
+        Triggers a final memory extraction before ending to ensure
+        all conversation turns are processed, regardless of which
+        interface (CLI, HTTP, GUI) ends the session.
+
         Returns:
             Session summary dict, or None if no active session
         """
         with self._lock:
             if self._current_session_id is None:
                 return None
+
+            # Trigger final memory extraction before ending session
+            # This ensures all remaining unprocessed turns are captured
+            try:
+                # Import here to avoid circular imports
+                from memory.extractor import get_memory_extractor
+                extractor = get_memory_extractor()
+                extracted_count = extractor.extract_memories(force=True)
+                if extracted_count > 0:
+                    log_info(f"Final extraction: {extracted_count} memories saved", prefix="🧠")
+            except Exception as e:
+                # Log but don't fail session end - extraction is best-effort
+                log_info(f"Final extraction skipped: {e}", prefix="⚠️")
 
             db = get_database()
             now = datetime.now()
