@@ -24,7 +24,7 @@ import threading
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 from core.logger import log_info, log_warning, log_error, log_success
 from core.temporal import get_temporal_tracker
@@ -292,12 +292,14 @@ class MemoryExtractor:
             MEMORY_MIN_TURNS_PER_TOPIC,
             MEMORY_MAX_PER_EXTRACTION,
             MEMORY_SKIP_MINOR_TOPICS,
-            MEMORY_LARGE_TOPIC_THRESHOLD
+            MEMORY_LARGE_TOPIC_THRESHOLD,
+            MEMORY_SMALL_BATCH_THRESHOLD
         )
         self.min_turns_per_topic = MEMORY_MIN_TURNS_PER_TOPIC
         self.max_memories_per_extraction = MEMORY_MAX_PER_EXTRACTION
         self.skip_minor_topics = MEMORY_SKIP_MINOR_TOPICS
         self.large_topic_threshold = MEMORY_LARGE_TOPIC_THRESHOLD
+        self.small_batch_threshold = MEMORY_SMALL_BATCH_THRESHOLD
 
     # =========================================================================
     # THRESHOLD-BASED EXTRACTION TRIGGER
@@ -413,14 +415,28 @@ class MemoryExtractor:
                 session_id = tracker.current_session_id
                 memories_created = 0
 
+                # Track which turns were successfully incorporated into memories
+                successfully_processed_turn_ids = set()
+
+                # Adaptive minor topic handling: for small batches, preserve all topics
+                # This ensures short but meaningful conversations create episodic memories
+                effective_skip_minor = self.skip_minor_topics
+                if len(turns) < self.small_batch_threshold:
+                    effective_skip_minor = False
+                    log_info(
+                        f"Small batch ({len(turns)} turns < {self.small_batch_threshold}) - "
+                        "preserving minor topics for episodic memory",
+                        prefix="🧠"
+                    )
+
                 for topic in topics:
                     # Check if we've hit the memory cap for this extraction run
                     if memories_created >= self.max_memories_per_extraction:
                         log_info(f"Hit max memories per extraction ({self.max_memories_per_extraction})")
                         break
 
-                    # Skip minor topics if configured
-                    if self.skip_minor_topics and not topic.is_major():
+                    # Skip minor topics if configured (adaptive based on batch size)
+                    if effective_skip_minor and not topic.is_major():
                         log_info(f"Skipping minor topic: {topic.description}")
                         continue
 
@@ -457,6 +473,8 @@ class MemoryExtractor:
 
                         if memory_id:
                             memories_created += 1
+                            # Track turns that successfully became part of a memory
+                            successfully_processed_turn_ids.update(topic.turn_ids)
                             log_info(
                                 f"Created memory for topic '{topic.description[:40]}...' "
                                 f"(importance: {synthesized.importance:.2f})",
@@ -464,10 +482,30 @@ class MemoryExtractor:
                             )
 
                 # ─────────────────────────────────────────────────────────────
-                # CLEANUP: Mark all processed turns
+                # CLEANUP: Mark processed turns
+                # Only mark turns that were successfully incorporated into
+                # memories. If none succeeded, mark all anyway to prevent
+                # infinite retry loops, but log a warning.
                 # ─────────────────────────────────────────────────────────────
-                turn_ids = [t.id for t in turns]
-                conversation_mgr.mark_processed(turn_ids)
+                all_turn_ids = [t.id for t in turns]
+
+                if successfully_processed_turn_ids:
+                    # Normal case: mark only the turns that produced memories
+                    conversation_mgr.mark_processed(list(successfully_processed_turn_ids))
+                    unprocessed_count = len(all_turn_ids) - len(successfully_processed_turn_ids)
+                    if unprocessed_count > 0:
+                        log_info(
+                            f"Marked {len(successfully_processed_turn_ids)} turns as processed; "
+                            f"{unprocessed_count} turns will be retried next extraction"
+                        )
+                else:
+                    # No memories created - mark all to prevent infinite loops
+                    # This can happen if all topics were skipped or LLM/embedding failed
+                    log_warning(
+                        f"No memories created from {len(turns)} turns - "
+                        "marking all as processed to prevent infinite retry loop"
+                    )
+                    conversation_mgr.mark_processed(all_turn_ids)
 
                 self._extraction_count += memories_created
                 log_success(
@@ -508,8 +546,11 @@ class MemoryExtractor:
             List of TopicCluster objects, or empty list on failure
         """
         router = get_llm_router()
-        conversation_text = self._format_conversation_with_ids(turns)
-        valid_turn_ids = {t.id for t in turns}
+
+        # Format with sequential indices (1, 2, 3...) to match few-shot examples
+        # The index_to_id mapping lets us translate back to real DB IDs
+        conversation_text, index_to_id = self._format_conversation_indexed(turns)
+        valid_indices = set(index_to_id.keys())  # {1, 2, 3, ...}
 
         # =====================================================================
         # PASS 1: Identify topics (natural language output)
@@ -562,9 +603,9 @@ class MemoryExtractor:
             log_error(f"Turn assignment failed: {assignment_response.error}")
             return []
 
-        # Parse the turn assignments
+        # Parse the turn assignments (validates against sequential indices)
         turn_assignments = self._parse_turn_assignments(
-            assignment_response.text, valid_turn_ids
+            assignment_response.text, valid_indices
         )
 
         if not turn_assignments:
@@ -575,16 +616,24 @@ class MemoryExtractor:
 
         # =====================================================================
         # BUILD TopicCluster OBJECTS
+        # Translate sequential indices back to real database IDs
         # =====================================================================
         topics = []
-        for topic_num, turn_ids in turn_assignments.items():
+        for topic_num, turn_indices in turn_assignments.items():
             topic_idx = int(topic_num) - 1  # Convert 1-based to 0-based
 
             if topic_idx < 0 or topic_idx >= len(topic_descriptions):
                 log_warning(f"Invalid topic number: {topic_num}")
                 continue
 
+            if not turn_indices:
+                continue
+
+            # Translate indices back to real database IDs
+            turn_ids = [index_to_id[idx] for idx in turn_indices if idx in index_to_id]
+
             if not turn_ids:
+                log_warning(f"No valid turn IDs for topic {topic_num} after index translation")
                 continue
 
             # Significance calculated from turn count (no LLM needed!)
@@ -631,15 +680,20 @@ class MemoryExtractor:
     def _parse_turn_assignments(
         self,
         response_text: str,
-        valid_turn_ids: set
+        valid_indices: set
     ) -> Dict[str, List[int]]:
         """
         Parse turn assignments from simple JSON response.
 
         Expected format: {"1": [1, 2, 3], "2": [4, 5]}
 
+        Args:
+            response_text: Raw LLM response containing JSON
+            valid_indices: Set of valid sequential indices (1, 2, 3, ...)
+                          that the LLM was shown in the conversation
+
         Returns:
-            Dict mapping topic number (as string) to list of turn IDs
+            Dict mapping topic number (as string) to list of valid indices
         """
         try:
             text = response_text.strip()
@@ -661,20 +715,20 @@ class MemoryExtractor:
             json_str = text[start:end]
             data = json.loads(json_str)
 
-            # Validate and filter turn IDs
+            # Validate and filter to valid indices only
             result = {}
-            for topic_num, turn_ids in data.items():
-                if not isinstance(turn_ids, list):
+            for topic_num, indices in data.items():
+                if not isinstance(indices, list):
                     continue
 
-                # Filter to valid turn IDs only
-                valid_ids = [
-                    tid for tid in turn_ids
-                    if isinstance(tid, int) and tid in valid_turn_ids
+                # Filter to valid indices only
+                valid_idx_list = [
+                    idx for idx in indices
+                    if isinstance(idx, int) and idx in valid_indices
                 ]
 
-                if valid_ids:
-                    result[str(topic_num)] = valid_ids
+                if valid_idx_list:
+                    result[str(topic_num)] = valid_idx_list
 
             return result
 
@@ -862,24 +916,34 @@ class MemoryExtractor:
     # FORMATTING HELPERS
     # =========================================================================
 
-    def _format_conversation_with_ids(self, turns: List[ConversationTurn]) -> str:
+    def _format_conversation_indexed(
+        self,
+        turns: List[ConversationTurn]
+    ) -> Tuple[str, Dict[int, int]]:
         """
-        Format conversation turns with their database IDs for topic segmentation.
+        Format conversation turns with sequential 1..N indices for LLM consumption.
 
-        Uses actual turn IDs (not sequential numbers) so the LLM's topic assignments
-        can be directly mapped back to our database records.
+        This approach avoids confusion when database IDs are large numbers (e.g., 505, 506)
+        that don't match the few-shot examples which use small integers (1, 2, 3).
+        The LLM sees sequential indices; we translate back to real IDs in Python.
 
         Args:
             turns: List of conversation turns
 
         Returns:
-            Formatted string with [id] Role: content format
+            Tuple of (formatted_text, index_to_id_mapping)
+            - formatted_text: String with [1] Role: content, [2] Role: content, etc.
+            - index_to_id_mapping: Dict mapping sequential index to actual database ID
         """
         lines = []
-        for turn in turns:
+        index_to_id = {}
+
+        for i, turn in enumerate(turns, 1):  # 1-based indexing to match examples
             role = "User" if turn.role == "user" else "AI"
-            lines.append(f"[{turn.id}] {role}: {turn.content}")
-        return "\n".join(lines)
+            lines.append(f"[{i}] {role}: {turn.content}")
+            index_to_id[i] = turn.id
+
+        return "\n".join(lines), index_to_id
 
     def _format_turns_for_synthesis(self, turns: List[ConversationTurn]) -> str:
         """
@@ -929,7 +993,8 @@ class MemoryExtractor:
             "threshold": self.extraction_threshold,
             "min_turns_per_topic": self.min_turns_per_topic,
             "max_memories_per_extraction": self.max_memories_per_extraction,
-            "skip_minor_topics": self.skip_minor_topics
+            "skip_minor_topics": self.skip_minor_topics,
+            "small_batch_threshold": self.small_batch_threshold
         }
 
 
