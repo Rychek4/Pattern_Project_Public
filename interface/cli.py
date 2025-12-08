@@ -4,6 +4,7 @@ Rich terminal interface for conversation
 """
 
 import threading
+import queue
 from typing import Optional, Callable, Dict, Any
 
 from rich.console import Console
@@ -15,6 +16,7 @@ from rich.live import Live
 from rich.spinner import Spinner
 from rich.text import Text
 
+import config
 from core.logger import log_info, log_warning, log_error, log_success, get_timestamp
 from core.temporal import get_temporal_tracker, temporal_context_to_semantic
 from memory.conversation import get_conversation_manager
@@ -35,6 +37,7 @@ class ChatCLI:
     - Formatted input/output
     - Slash commands
     - Status displays
+    - System pulse timer integration
     """
 
     def __init__(self):
@@ -42,6 +45,8 @@ class ChatCLI:
         self._running = False
         self._lock_manager = get_lock_manager()
         self._commands: Dict[str, Callable] = {}
+        self._pulse_queue: queue.Queue = queue.Queue()
+        self._system_pulse_timer = None
         self._setup_commands()
 
     def _setup_commands(self) -> None:
@@ -61,6 +66,7 @@ class ChatCLI:
             "/core": self._cmd_core_memories,
             "/addcore": self._cmd_add_core,
             "/relationship": self._cmd_relationship,
+            "/pulse": self._cmd_pulse,
         }
 
     def start(self) -> None:
@@ -71,6 +77,12 @@ class ChatCLI:
         router = get_llm_router()
         prompt_builder = get_prompt_builder()
 
+        # Set up system pulse timer if enabled
+        if config.SYSTEM_PULSE_ENABLED:
+            from agency.system_pulse import get_system_pulse_timer
+            self._system_pulse_timer = get_system_pulse_timer()
+            self._system_pulse_timer.set_callback(self._on_pulse_fired)
+
         # Start a session if not already active
         if not tracker.is_session_active:
             tracker.start_session()
@@ -79,10 +91,17 @@ class ChatCLI:
         self.console.print(
             "[bold cyan]💬 Entering chat mode. Type '/help' for commands.[/bold cyan]"
         )
+        if config.SYSTEM_PULSE_ENABLED:
+            self.console.print(
+                f"[dim]System pulse active: AI will speak every {config.SYSTEM_PULSE_INTERVAL // 60} minutes if idle[/dim]"
+            )
         self.console.print()
 
         while self._running:
             try:
+                # Check for pending pulse before getting input
+                self._check_pulse_queue()
+
                 # Get user input
                 user_input = Prompt.ask("[bold green]You[/bold green]")
 
@@ -93,6 +112,11 @@ class ChatCLI:
                 if user_input.startswith("/"):
                     self._handle_command(user_input)
                     continue
+
+                # Reset pulse timer on user input
+                if self._system_pulse_timer:
+                    self._system_pulse_timer.reset()
+                    self._system_pulse_timer.pause()
 
                 # Store user message
                 conversation_mgr.add_turn(
@@ -135,6 +159,10 @@ class ChatCLI:
                         f"[bold red]Error:[/bold red] {response.error}"
                     )
 
+                # Resume pulse timer after response
+                if self._system_pulse_timer:
+                    self._system_pulse_timer.resume()
+
             except KeyboardInterrupt:
                 self.console.print("\n[dim]Use /quit to exit[/dim]")
             except EOFError:
@@ -161,6 +189,93 @@ class ChatCLI:
         )
         self.console.print(panel)
         self.console.print()
+
+    def _on_pulse_fired(self) -> None:
+        """Called when the system pulse timer fires (from background thread)."""
+        # Queue the pulse for processing in the main loop
+        self._pulse_queue.put(True)
+
+    def _check_pulse_queue(self) -> None:
+        """Check if there's a pending pulse to process."""
+        try:
+            # Non-blocking check
+            self._pulse_queue.get_nowait()
+            # Pulse is pending, process it
+            self._process_pulse()
+        except queue.Empty:
+            pass
+
+    def _process_pulse(self) -> None:
+        """Process a system pulse."""
+        from agency.system_pulse import PULSE_PROMPT, PULSE_STORED_MESSAGE
+
+        conversation_mgr = get_conversation_manager()
+        router = get_llm_router()
+        prompt_builder = get_prompt_builder()
+
+        try:
+            # Pause timer during processing
+            if self._system_pulse_timer:
+                self._system_pulse_timer.pause()
+
+            # Show pulse indicator
+            self.console.print()
+            self.console.print("[bold magenta]⏱️ System Pulse[/bold magenta]")
+
+            # Store abbreviated pulse message
+            conversation_mgr.add_turn(
+                role="user",
+                content=PULSE_STORED_MESSAGE,
+                input_type="system_pulse"
+            )
+
+            # Build prompt with full pulse message
+            assembled = prompt_builder.build(
+                user_input=PULSE_PROMPT,
+                system_prompt=""
+            )
+
+            # Get conversation history
+            history = conversation_mgr.get_recent_history(limit=30)
+
+            # Show thinking indicator
+            with self.console.status("[bold magenta]Pulse thinking...[/bold magenta]", spinner="dots"):
+                response = router.chat(
+                    messages=history,
+                    system_prompt=assembled.full_system_prompt,
+                    task_type=TaskType.CONVERSATION,
+                    temperature=0.7
+                )
+
+            if response.success:
+                # Store response
+                conversation_mgr.add_turn(
+                    role="assistant",
+                    content=response.text,
+                    input_type="text"
+                )
+
+                # Display with special styling
+                panel = Panel(
+                    Markdown(response.text),
+                    title=f"[bold magenta]AI (pulse)[/bold magenta] [dim]({response.provider.value})[/dim]",
+                    title_align="left",
+                    border_style="magenta",
+                    padding=(0, 1)
+                )
+                self.console.print(panel)
+                self.console.print()
+            else:
+                self.console.print(f"[bold red]Pulse error:[/bold red] {response.error}")
+
+        except Exception as e:
+            log_error(f"Pulse processing error: {e}")
+            self.console.print(f"[bold red]Pulse error:[/bold red] {e}")
+
+        finally:
+            # Resume timer
+            if self._system_pulse_timer:
+                self._system_pulse_timer.resume()
 
     def _handle_command(self, input_str: str) -> None:
         """Handle a slash command."""
@@ -191,6 +306,7 @@ class ChatCLI:
         table.add_row("/core", "Show core memories")
         table.add_row("/addcore <category> <content>", "Add core memory (identity/relationship/preference/fact)")
         table.add_row("/relationship", "Show relationship status")
+        table.add_row("/pulse", "Show system pulse timer status")
         table.add_row("/pause", "Pause background processes")
         table.add_row("/resume", "Resume background processes")
 
@@ -454,6 +570,34 @@ class ChatCLI:
         if state.first_interaction:
             days = (state.updated_at - state.first_interaction).days
             table.add_row("Known for", f"{days} days", "")
+
+        self.console.print(table)
+
+    def _cmd_pulse(self, args: str) -> None:
+        """Show system pulse timer status."""
+        if not config.SYSTEM_PULSE_ENABLED:
+            self.console.print("[dim]System pulse timer is disabled[/dim]")
+            return
+
+        if self._system_pulse_timer is None:
+            self.console.print("[dim]System pulse timer not initialized[/dim]")
+            return
+
+        stats = self._system_pulse_timer.get_stats()
+
+        table = Table(title="System Pulse Timer", show_header=False)
+        table.add_column("Property", style="cyan")
+        table.add_column("Value")
+
+        table.add_row("Enabled", "Yes" if stats["enabled"] else "No")
+        table.add_row("Running", "Yes" if stats["is_running"] else "No")
+        table.add_row("Paused", "Yes" if stats["paused"] else "No")
+        table.add_row("Interval", f"{stats['pulse_interval']}s ({stats['pulse_interval'] // 60}m)")
+
+        remaining = stats["seconds_remaining"]
+        minutes = remaining // 60
+        seconds = remaining % 60
+        table.add_row("Next Pulse In", f"{minutes}:{seconds:02d}")
 
         self.console.print(table)
 

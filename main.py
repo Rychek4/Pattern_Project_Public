@@ -43,6 +43,7 @@ from interface.http_api import init_http_server, get_http_server
 from agency.proactive import init_proactive_agent, get_proactive_agent
 from agency.relationship_analyzer import init_relationship_analyzer, get_relationship_analyzer
 from agency.visual_capture import init_visual_capture, get_visual_capture
+from agency.system_pulse import init_system_pulse_timer, get_system_pulse_timer
 from subprocess_mgmt.manager import init_subprocess_manager, get_subprocess_manager
 from subprocess_mgmt.audio_player import register_audio_player
 from subprocess_mgmt.chat_overlay import register_chat_overlay
@@ -120,8 +121,11 @@ def initialize_system() -> bool:
     # Initialize prompt builder (must come after memory/vector store)
     init_prompt_builder()
 
-    # Initialize agency
+    # Initialize agency (legacy - disabled)
     init_proactive_agent()
+
+    # Initialize system pulse timer
+    init_system_pulse_timer()
 
     # Initialize relationship analyzer
     init_relationship_analyzer()
@@ -234,10 +238,17 @@ def start_background_services() -> None:
     extractor.start()
     log_subsection("Memory extractor started")
 
-    # Start proactive agent
+    # Start proactive agent (legacy - disabled by default)
     proactive = get_proactive_agent()
     proactive.start()
-    log_subsection("Proactive agent started")
+    if config.AGENCY_ENABLED:
+        log_subsection("Proactive agent started")
+
+    # Start system pulse timer
+    if config.SYSTEM_PULSE_ENABLED:
+        pulse_timer = get_system_pulse_timer()
+        pulse_timer.start()
+        log_subsection(f"System pulse timer started ({config.SYSTEM_PULSE_INTERVAL}s interval)")
 
     # Start relationship analyzer
     relationship_analyzer = get_relationship_analyzer()
@@ -280,13 +291,23 @@ def stop_background_services() -> None:
     except Exception as e:
         log_error(f"Error stopping extractor: {e}")
 
-    # Stop proactive agent
+    # Stop proactive agent (legacy)
     try:
         proactive = get_proactive_agent()
         proactive.stop()
-        log_subsection("Proactive agent stopped")
+        if config.AGENCY_ENABLED:
+            log_subsection("Proactive agent stopped")
     except Exception as e:
         log_error(f"Error stopping proactive agent: {e}")
+
+    # Stop system pulse timer
+    if config.SYSTEM_PULSE_ENABLED:
+        try:
+            pulse_timer = get_system_pulse_timer()
+            pulse_timer.stop()
+            log_subsection("System pulse timer stopped")
+        except Exception as e:
+            log_error(f"Error stopping system pulse timer: {e}")
 
     # Stop relationship analyzer
     try:
