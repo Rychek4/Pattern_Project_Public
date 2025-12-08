@@ -93,7 +93,7 @@ AGENCY_IDLE_TRIGGER_SECONDS = 900  # 15 minutes before AI initiates
 # SYSTEM PULSE CONFIGURATION
 # =============================================================================
 SYSTEM_PULSE_ENABLED = True
-SYSTEM_PULSE_INTERVAL = 180  # 3 minutes between pulses
+SYSTEM_PULSE_INTERVAL = 600  # 10 minutes between pulses (default)
 
 # =============================================================================
 # HTTP API CONFIGURATION

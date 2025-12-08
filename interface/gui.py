@@ -21,7 +21,7 @@ from core.logger import log_info, log_error, log_warning
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QTextBrowser, QVBoxLayout, QHBoxLayout,
     QWidget, QPushButton, QLineEdit, QLabel, QDialog, QSlider, QCheckBox,
-    QSpinBox, QMessageBox, QFrame, QSizePolicy
+    QSpinBox, QMessageBox, QFrame, QSizePolicy, QComboBox
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject
 from PyQt5.QtGui import QFont, QTextCursor, QColor, QPalette
@@ -52,6 +52,7 @@ class MessageSignals(QObject):
     update_status = pyqtSignal(str)
     update_timer = pyqtSignal(str, str)  # session_time, total_time
     response_complete = pyqtSignal()
+    pulse_interval_change = pyqtSignal(int)  # new interval in seconds
 
 
 class ChatWindow(QMainWindow):
@@ -93,6 +94,7 @@ class ChatWindow(QMainWindow):
         self.signals.update_status.connect(self._update_status)
         self.signals.update_timer.connect(self._update_timer_display)
         self.signals.response_complete.connect(self._on_response_complete)
+        self.signals.pulse_interval_change.connect(self.set_pulse_interval_by_seconds)
 
     def _setup_ui(self):
         """Create the UI layout."""
@@ -146,6 +148,17 @@ class ChatWindow(QMainWindow):
         if not config.SYSTEM_PULSE_ENABLED:
             self.pulse_label.hide()
         layout.addWidget(self.pulse_label)
+
+        # Pulse interval dropdown
+        self.pulse_dropdown = QComboBox()
+        self.pulse_dropdown.setFont(QFont("Consolas", 11))
+        self.pulse_dropdown.addItems(["3 min", "10 min", "30 min", "1 hour", "6 hours"])
+        self.pulse_dropdown.setCurrentIndex(1)  # Default: 10 min
+        self.pulse_dropdown.setToolTip("Set pulse timer interval")
+        self.pulse_dropdown.currentIndexChanged.connect(self._on_pulse_interval_changed)
+        if not config.SYSTEM_PULSE_ENABLED:
+            self.pulse_dropdown.hide()
+        layout.addWidget(self.pulse_dropdown)
 
         layout.addStretch()
 
@@ -244,6 +257,25 @@ class ChatWindow(QMainWindow):
             QLabel {{
                 color: {COLORS['text']};
             }}
+            QComboBox {{
+                background-color: {COLORS['surface']};
+                color: {COLORS['pulse']};
+                border: 1px solid {COLORS['primary']};
+                border-radius: 5px;
+                padding: 4px 8px;
+                min-width: 80px;
+            }}
+            QComboBox:hover {{
+                border: 1px solid {COLORS['pulse']};
+            }}
+            QComboBox::drop-down {{
+                border: none;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {COLORS['surface']};
+                color: {COLORS['text']};
+                selection-background-color: {COLORS['primary']};
+            }}
         """)
 
         # Update relationship labels with colors
@@ -323,6 +355,63 @@ class ChatWindow(QMainWindow):
 
             self.pulse_label.setText(f"Pulse: {pulse_str}")
 
+    def _on_pulse_interval_changed(self, index: int):
+        """Handle pulse interval dropdown change."""
+        # Map dropdown index to seconds
+        interval_map = {
+            0: 180,    # 3 min
+            1: 600,    # 10 min
+            2: 1800,   # 30 min
+            3: 3600,   # 1 hour
+            4: 21600,  # 6 hours
+        }
+
+        new_interval = interval_map.get(index, 600)
+
+        if self._system_pulse_timer:
+            old_interval = self._system_pulse_timer.pulse_interval
+            self._system_pulse_timer.pulse_interval = new_interval
+            self._system_pulse_timer.reset()
+
+            # Log the change
+            from prompt_builder.sources.system_pulse import get_interval_label
+            old_label = get_interval_label(old_interval)
+            new_label = get_interval_label(new_interval)
+            log_info(f"Pulse timer changed: {old_label} -> {new_label}", prefix="⏱️")
+
+    def set_pulse_interval_by_seconds(self, seconds: int):
+        """Set the pulse interval and update dropdown to match.
+
+        Used when AI changes the interval via [[PULSE:Xm]] command.
+        """
+        # Map seconds to dropdown index
+        seconds_to_index = {
+            180: 0,    # 3 min
+            600: 1,    # 10 min
+            1800: 2,   # 30 min
+            3600: 3,   # 1 hour
+            21600: 4,  # 6 hours
+        }
+
+        index = seconds_to_index.get(seconds)
+        if index is not None:
+            # Block signals to avoid triggering _on_pulse_interval_changed twice
+            self.pulse_dropdown.blockSignals(True)
+            self.pulse_dropdown.setCurrentIndex(index)
+            self.pulse_dropdown.blockSignals(False)
+
+            # Update the timer
+            if self._system_pulse_timer:
+                old_interval = self._system_pulse_timer.pulse_interval
+                self._system_pulse_timer.pulse_interval = seconds
+                self._system_pulse_timer.reset()
+
+                # Log the change
+                from prompt_builder.sources.system_pulse import get_interval_label
+                old_label = get_interval_label(old_interval)
+                new_label = get_interval_label(seconds)
+                log_info(f"AI adjusted pulse timer: {old_label} -> {new_label}", prefix="⏱️")
+
     def _update_relationship(self):
         """Update relationship indicators from backend."""
         if self._relationship_source is None:
@@ -372,11 +461,55 @@ class ChatWindow(QMainWindow):
         # Pattern: single * not preceded/followed by *, then non-* content, then closing *
         pattern = r'(?<!\*)\*(?!\*)([^*]+)\*(?!\*)'
 
+        action_color = COLORS["action"]
+
         def replace_action(match):
             action_text = match.group(1)
-            return f"<span style='color:{COLORS[\"action\"]};'>{action_text}</span>"
+            return f"<span style='color:{action_color};'>{action_text}</span>"
 
         return re.sub(pattern, replace_action, escaped)
+
+    def _parse_pulse_command(self, text: str) -> Optional[int]:
+        """Parse [[PULSE:Xm]] command from response text.
+
+        Args:
+            text: The AI response text
+
+        Returns:
+            Interval in seconds if command found, None otherwise
+        """
+        from prompt_builder.sources.system_pulse import PULSE_COMMAND_TO_SECONDS
+
+        # Pattern: [[PULSE:3m]], [[PULSE:10m]], [[PULSE:30m]], [[PULSE:1h]], [[PULSE:6h]]
+        pattern = r'\[\[PULSE:(3m|10m|30m|1h|6h)\]\]'
+        match = re.search(pattern, text)
+
+        if match:
+            command = match.group(1)
+            return PULSE_COMMAND_TO_SECONDS.get(command)
+
+        return None
+
+    def _format_pulse_command(self, content: str) -> str:
+        """Format [[PULSE:Xm]] commands with purple color and emoji.
+
+        Args:
+            content: HTML content (already escaped)
+
+        Returns:
+            HTML with pulse commands styled
+        """
+        # Pattern matches the escaped version of [[PULSE:Xm]]
+        # In HTML-escaped text, brackets are still brackets
+        pattern = r'\[\[PULSE:(3m|10m|30m|1h|6h)\]\]'
+
+        pulse_color = COLORS["pulse"]
+
+        def replace_pulse(match):
+            full_match = match.group(0)
+            return f"<span style='color:{pulse_color};'>⏱️ {full_match}</span>"
+
+        return re.sub(pattern, replace_pulse, content)
 
     def _append_message(self, role: str, content: str, timestamp: str, affinity: int, trust: int):
         """Append a message to the chat display."""
@@ -391,9 +524,10 @@ class ChatWindow(QMainWindow):
             color = COLORS['system']
             prefix = "System"
 
-        # Format content - apply action text coloring for AI messages only
+        # Format content - apply action text and pulse command styling for AI messages
         if role == "assistant":
             formatted_content = self._format_action_text(content)
+            formatted_content = self._format_pulse_command(formatted_content)
         else:
             formatted_content = html.escape(content)
 
@@ -470,6 +604,11 @@ class ChatWindow(QMainWindow):
             )
 
             if response.success:
+                # Check for pulse timer command in response
+                pulse_interval = self._parse_pulse_command(response.text)
+                if pulse_interval is not None:
+                    self.signals.pulse_interval_change.emit(pulse_interval)
+
                 # Store response
                 self._conversation_mgr.add_turn(
                     role="assistant",
@@ -526,7 +665,13 @@ class ChatWindow(QMainWindow):
 
     def _process_pulse(self):
         """Process a system pulse in background thread."""
-        from agency.system_pulse import PULSE_PROMPT, PULSE_STORED_MESSAGE
+        from agency.system_pulse import get_pulse_prompt, PULSE_STORED_MESSAGE
+        from prompt_builder.sources.system_pulse import get_interval_label
+
+        # Get dynamic pulse prompt with current interval
+        current_interval = self._system_pulse_timer.pulse_interval if self._system_pulse_timer else 600
+        interval_label = get_interval_label(current_interval)
+        pulse_prompt = get_pulse_prompt(interval_label)
 
         log_info("=== PULSE DEBUG: Starting _process_pulse() ===", prefix="🔍")
 
@@ -564,7 +709,7 @@ class ChatWindow(QMainWindow):
             # Build prompt with full pulse message
             log_info("PULSE DEBUG: Building prompt...", prefix="🔍")
             assembled = self._prompt_builder.build(
-                user_input=PULSE_PROMPT,
+                user_input=pulse_prompt,
                 system_prompt=""
             )
             log_info(f"PULSE DEBUG: Prompt built, system_prompt length: {len(assembled.full_system_prompt)}", prefix="🔍")
@@ -583,8 +728,8 @@ class ChatWindow(QMainWindow):
 
             # Add the pulse prompt as the message to respond to
             # (role="user" is an API constraint, but content clarifies it's automated)
-            history.append({"role": "user", "content": PULSE_PROMPT})
-            log_info(f"PULSE DEBUG: Added PULSE_PROMPT to history, now {len(history)} messages", prefix="🔍")
+            history.append({"role": "user", "content": pulse_prompt})
+            log_info(f"PULSE DEBUG: Added pulse_prompt to history, now {len(history)} messages", prefix="🔍")
 
             # Get LLM response
             log_info("PULSE DEBUG: About to call _llm_router.chat()...", prefix="🔍")
@@ -604,6 +749,12 @@ class ChatWindow(QMainWindow):
 
             if response.success:
                 log_info(f"PULSE DEBUG: Response successful, text length: {len(response.text)}", prefix="🔍")
+
+                # Check for pulse timer command in response
+                pulse_interval = self._parse_pulse_command(response.text)
+                if pulse_interval is not None:
+                    self.signals.pulse_interval_change.emit(pulse_interval)
+
                 # Store response
                 self._conversation_mgr.add_turn(
                     role="assistant",

@@ -14,10 +14,23 @@ from core.logger import log_info, log_warning, log_error
 # The pulse message sent to the AI (full version for LLM context)
 # Note: This is sent with role="user" due to API constraints, but the content
 # makes clear this is an automated system mechanism, not human input.
-PULSE_PROMPT = """[AUTOMATED SYSTEM PULSE - Not human input]
-The 3-minute idle timer has fired. No new human message has been received.
+def get_pulse_prompt(interval_label: str = "10 minutes") -> str:
+    """Get the pulse prompt with the current interval.
+
+    Args:
+        interval_label: Human-readable interval label (e.g., "10 minutes")
+
+    Returns:
+        The formatted pulse prompt
+    """
+    return f"""[AUTOMATED SYSTEM PULSE - Not human input]
+The {interval_label} idle timer has fired. No new human message has been received.
 This is your opportunity to utilize agency: review the conversation for loose ends,
 introduce new ideas, or speak freely. Respond as you would naturally."""
+
+
+# Legacy constant for backward compatibility (uses default 10 minutes)
+PULSE_PROMPT = get_pulse_prompt("10 minutes")
 
 # Abbreviated version stored in conversation history
 PULSE_STORED_MESSAGE = "[System Pulse]"
