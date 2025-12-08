@@ -60,8 +60,7 @@ EMBEDDING_DIMENSIONS = 384
 # =============================================================================
 # MEMORY CONFIGURATION
 # =============================================================================
-MEMORY_EXTRACTION_THRESHOLD = 10  # Turns before triggering extraction
-MEMORY_EXTRACTION_INTERVAL = 60  # Seconds between extraction checks
+MEMORY_EXTRACTION_THRESHOLD = 10  # Unprocessed turns before triggering extraction
 MEMORY_MAX_PER_QUERY = 3  # Max memories to retrieve per query (focused context)
 MEMORY_FRESHNESS_HALF_LIFE_DAYS = 14  # Decay rate for freshness scoring (more recency bias)
 

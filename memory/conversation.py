@@ -49,6 +49,9 @@ class ConversationManager:
         """
         Add a conversation turn.
 
+        After storing the turn, checks if the memory extraction threshold
+        has been reached and triggers extraction asynchronously if so.
+
         Args:
             role: 'user', 'assistant', or 'system'
             content: The message content
@@ -88,7 +91,15 @@ class ConversationManager:
                 fetch=True
             )
 
-            return result[0]["id"]
+            turn_id = result[0]["id"]
+
+        # Check if memory extraction threshold reached (outside the lock)
+        # Import here to avoid circular imports
+        from memory.extractor import get_memory_extractor
+        extractor = get_memory_extractor()
+        extractor.check_and_extract()
+
+        return turn_id
 
     @db_retry()
     def get_turn(self, turn_id: int) -> Optional[ConversationTurn]:

@@ -1,6 +1,9 @@
 """
 Pattern Project - Memory Extractor
-Background thread that extracts memories from conversations using topic-based clustering.
+Extracts memories from conversations using topic-based clustering.
+
+Trigger: Extraction is triggered when unprocessed conversation turns reach a threshold
+(default: 10 turns). This happens immediately when the threshold is reached, not on a timer.
 
 Architecture:
     The extractor uses a TWO-PHASE approach to create high-quality, consolidated memories:
@@ -17,7 +20,6 @@ Architecture:
 """
 
 import threading
-import time
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -222,7 +224,7 @@ class SynthesizedMemory:
 
 class MemoryExtractor:
     """
-    Background thread that extracts memories from conversations using topic-based clustering.
+    Extracts memories from conversations using topic-based clustering.
 
     The extractor uses a two-phase approach:
 
@@ -233,29 +235,22 @@ class MemoryExtractor:
     the naive approach of ~1 memory per turn.
 
     Triggers:
-        - Accumulated conversation turns (threshold configurable)
-        - Session end (explicit trigger)
+        - Threshold reached: When unprocessed turns >= extraction_threshold (default: 10)
+        - Session end: Explicit trigger via extract_memories(force=True)
         - Manual /extract command
     """
 
-    def __init__(
-        self,
-        extraction_threshold: int = 10,
-        check_interval: float = 60.0
-    ):
+    def __init__(self, extraction_threshold: int = 10):
         """
         Initialize the memory extractor.
 
         Args:
             extraction_threshold: Minimum turns before triggering extraction
-            check_interval: Seconds between automatic extraction checks
         """
         self.extraction_threshold = extraction_threshold
-        self.check_interval = check_interval
-        self._thread: Optional[threading.Thread] = None
-        self._stop_event = threading.Event()
         self._lock_manager = get_lock_manager()
         self._extraction_count = 0
+        self._extraction_in_progress = threading.Event()
 
         # Load topic-based extraction settings
         from config import (
@@ -270,55 +265,57 @@ class MemoryExtractor:
         self.large_topic_threshold = MEMORY_LARGE_TOPIC_THRESHOLD
 
     # =========================================================================
-    # THREAD MANAGEMENT
+    # THRESHOLD-BASED EXTRACTION TRIGGER
     # =========================================================================
 
-    def start(self) -> None:
-        """Start the background extraction thread."""
-        if self._thread is not None and self._thread.is_alive():
+    def check_and_extract(self) -> None:
+        """
+        Check if threshold is reached and trigger extraction asynchronously.
+
+        Called after each conversation turn is added. If the number of unprocessed
+        turns meets the threshold, extraction runs in a background thread to avoid
+        blocking the conversation flow.
+
+        Thread-safe: Uses an event flag to prevent multiple concurrent extractions.
+        """
+        # Quick check without hitting the database if extraction is already running
+        if self._extraction_in_progress.is_set():
             return
 
-        self._stop_event.clear()
-        self._thread = threading.Thread(
-            target=self._extraction_loop,
-            daemon=True,
-            name="MemoryExtractor"
-        )
-        self._thread.start()
-        log_info("Memory extraction thread started (topic-based clustering)", prefix="🧠")
+        try:
+            conversation_mgr = get_conversation_manager()
+            unprocessed_count = conversation_mgr.get_unprocessed_count()
 
-    def stop(self) -> None:
-        """Stop the background extraction thread gracefully."""
-        self._stop_event.set()
-        if self._thread is not None:
-            self._thread.join(timeout=5.0)
-            self._thread = None
-        log_info("Memory extraction thread stopped", prefix="🧠")
+            if unprocessed_count >= self.extraction_threshold:
+                # Mark extraction as in progress before starting thread
+                if self._extraction_in_progress.is_set():
+                    return  # Another thread beat us to it
+                self._extraction_in_progress.set()
 
-    def _extraction_loop(self) -> None:
+                log_info(
+                    f"Extraction triggered: {unprocessed_count} unprocessed turns",
+                    prefix="🧠"
+                )
+
+                # Run extraction in background thread (fire-and-forget)
+                thread = threading.Thread(
+                    target=self._run_extraction,
+                    daemon=True,
+                    name="MemoryExtraction"
+                )
+                thread.start()
+
+        except Exception as e:
+            log_error(f"Error checking extraction threshold: {e}")
+
+    def _run_extraction(self) -> None:
         """
-        Main extraction loop - runs in background thread.
-
-        Checks periodically if there are enough unprocessed turns to trigger
-        extraction. Uses the two-phase topic-based approach.
+        Run extraction in background thread and clear the in-progress flag when done.
         """
-        while not self._stop_event.is_set():
-            try:
-                conversation_mgr = get_conversation_manager()
-                unprocessed_count = conversation_mgr.get_unprocessed_count()
-
-                if unprocessed_count >= self.extraction_threshold:
-                    log_info(
-                        f"Extraction triggered: {unprocessed_count} unprocessed turns",
-                        prefix="🧠"
-                    )
-                    self.extract_memories()
-
-            except Exception as e:
-                log_error(f"Error in extraction loop: {e}")
-
-            # Wait for next check (interruptible)
-            self._stop_event.wait(self.check_interval)
+        try:
+            self.extract_memories()
+        finally:
+            self._extraction_in_progress.clear()
 
     # =========================================================================
     # MAIN EXTRACTION ENTRY POINT
@@ -755,9 +752,8 @@ class MemoryExtractor:
         """
         return {
             "total_extractions": self._extraction_count,
-            "is_running": self._thread is not None and self._thread.is_alive(),
+            "extraction_in_progress": self._extraction_in_progress.is_set(),
             "threshold": self.extraction_threshold,
-            "check_interval": self.check_interval,
             "min_turns_per_topic": self.min_turns_per_topic,
             "max_memories_per_extraction": self.max_memories_per_extraction,
             "skip_minor_topics": self.skip_minor_topics
@@ -775,10 +771,9 @@ def get_memory_extractor() -> MemoryExtractor:
     """Get the global memory extractor instance (lazy initialization)."""
     global _extractor
     if _extractor is None:
-        from config import MEMORY_EXTRACTION_THRESHOLD, MEMORY_EXTRACTION_INTERVAL
+        from config import MEMORY_EXTRACTION_THRESHOLD
         _extractor = MemoryExtractor(
-            extraction_threshold=MEMORY_EXTRACTION_THRESHOLD,
-            check_interval=MEMORY_EXTRACTION_INTERVAL
+            extraction_threshold=MEMORY_EXTRACTION_THRESHOLD
         )
     return _extractor
 
@@ -786,9 +781,8 @@ def get_memory_extractor() -> MemoryExtractor:
 def init_memory_extractor() -> MemoryExtractor:
     """Initialize the global memory extractor (explicit initialization)."""
     global _extractor
-    from config import MEMORY_EXTRACTION_THRESHOLD, MEMORY_EXTRACTION_INTERVAL
+    from config import MEMORY_EXTRACTION_THRESHOLD
     _extractor = MemoryExtractor(
-        extraction_threshold=MEMORY_EXTRACTION_THRESHOLD,
-        check_interval=MEMORY_EXTRACTION_INTERVAL
+        extraction_threshold=MEMORY_EXTRACTION_THRESHOLD
     )
     return _extractor
