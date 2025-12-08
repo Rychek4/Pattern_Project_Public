@@ -7,6 +7,8 @@ session tracking, and system pulse countdown.
 """
 
 import sys
+import re
+import html
 import queue
 import threading
 import traceback
@@ -40,6 +42,7 @@ COLORS = {
     "trust": "#22c55e",     # Green shield
     "timestamp": "#6b7280", # Gray for timestamps
     "pulse": "#a855f7",     # Purple for pulse countdown
+    "action": "#c4a7e7",    # Soft purple for AI action text (*action*)
 }
 
 
@@ -350,6 +353,31 @@ class ChatWindow(QMainWindow):
         """Get current timestamp string."""
         return datetime.now().strftime("%H:%M:%S")
 
+    def _format_action_text(self, content: str) -> str:
+        """Format asterisk-wrapped action text with a different color.
+
+        Converts *action text* to colored spans for AI messages.
+        Ignores **bold** syntax (double asterisks).
+
+        Args:
+            content: The message content to format
+
+        Returns:
+            HTML-formatted string with action text colored
+        """
+        # First escape HTML to prevent issues with special characters
+        escaped = html.escape(content)
+
+        # Match *text* but not **text** (negative lookbehind/lookahead for asterisks)
+        # Pattern: single * not preceded/followed by *, then non-* content, then closing *
+        pattern = r'(?<!\*)\*(?!\*)([^*]+)\*(?!\*)'
+
+        def replace_action(match):
+            action_text = match.group(1)
+            return f"<span style='color:{COLORS[\"action\"]};'>{action_text}</span>"
+
+        return re.sub(pattern, replace_action, escaped)
+
     def _append_message(self, role: str, content: str, timestamp: str, affinity: int, trust: int):
         """Append a message to the chat display."""
         # Color based on role
@@ -363,17 +391,23 @@ class ChatWindow(QMainWindow):
             color = COLORS['system']
             prefix = "System"
 
-        # Build HTML
-        html = f"""
+        # Format content - apply action text coloring for AI messages only
+        if role == "assistant":
+            formatted_content = self._format_action_text(content)
+        else:
+            formatted_content = html.escape(content)
+
+        # Build HTML (using msg_html to avoid shadowing html module)
+        msg_html = f"""
         <div style='margin-bottom: 10px;'>
             <span style='color:{COLORS['timestamp']};'>[{timestamp}]</span>
             <span style='color:{color}; font-weight:bold;'>{prefix}:</span>
             <br/>
-            <span style='color:{COLORS['text']}; margin-left: 20px;'>{content}</span>
+            <span style='color:{COLORS['text']}; margin-left: 20px;'>{formatted_content}</span>
         </div>
         """
 
-        self.chat_display.append(html)
+        self.chat_display.append(msg_html)
         self.chat_display.moveCursor(QTextCursor.End)
 
     def _send_message(self):
