@@ -902,7 +902,7 @@ def run_gui():
     init_database(db_path=config.DATABASE_PATH, busy_timeout_ms=config.DB_BUSY_TIMEOUT_MS)
 
     # Load embedding model BEFORE Qt - this loads PyTorch DLLs
-    print("Loading embedding model...")
+    # Note: When called from main.py, model is already loaded (returns True immediately)
     embedding_loaded = load_embedding_model(config.EMBEDDING_MODEL)
     if not embedding_loaded:
         print("=" * 60)
@@ -952,7 +952,6 @@ def run_gui():
     if config.SYSTEM_PULSE_ENABLED:
         pulse_timer = get_system_pulse_timer()
         pulse_timer.start()
-        print(f"System pulse timer started ({config.SYSTEM_PULSE_INTERVAL}s interval)")
 
     # Create and configure window
     window = init_gui()
@@ -973,7 +972,6 @@ def run_gui():
 
     # Cleanup
     print("Shutting down...")
-    get_memory_extractor().stop()
     get_relationship_analyzer().stop()
     if config.SYSTEM_PULSE_ENABLED:
         get_system_pulse_timer().stop()
