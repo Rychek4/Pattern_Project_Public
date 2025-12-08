@@ -9,10 +9,12 @@ session tracking, and system pulse countdown.
 import sys
 import queue
 import threading
+import traceback
 from datetime import datetime, timedelta
 from typing import Optional, Callable
 
 import config
+from core.logger import log_info, log_error, log_warning
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QTextBrowser, QVBoxLayout, QHBoxLayout,
@@ -471,9 +473,14 @@ class ChatWindow(QMainWindow):
 
     def _on_pulse_fired(self):
         """Called when the system pulse timer fires."""
+        log_info("PULSE DEBUG: _on_pulse_fired() callback triggered", prefix="🔍")
+
         # Don't fire if already processing a message
         if self._is_processing:
+            log_warning("PULSE DEBUG: Skipping pulse - already processing (_is_processing=True)")
             return
+
+        log_info("PULSE DEBUG: Starting pulse processing thread...", prefix="🔍")
 
         # Process the pulse in a background thread
         thread = threading.Thread(
@@ -481,17 +488,22 @@ class ChatWindow(QMainWindow):
             daemon=True
         )
         thread.start()
+        log_info(f"PULSE DEBUG: Pulse thread started (thread={thread.name})", prefix="🔍")
 
     def _process_pulse(self):
         """Process a system pulse in background thread."""
         from agency.system_pulse import PULSE_PROMPT, PULSE_STORED_MESSAGE
 
+        log_info("=== PULSE DEBUG: Starting _process_pulse() ===", prefix="🔍")
+
         try:
             self._is_processing = True
+            log_info("PULSE DEBUG: Set _is_processing = True", prefix="🔍")
 
             # Pause timer during processing
             if self._system_pulse_timer:
                 self._system_pulse_timer.pause()
+                log_info("PULSE DEBUG: Timer paused", prefix="🔍")
 
             # Update UI status
             self.signals.update_status.emit("System pulse...")
@@ -502,6 +514,7 @@ class ChatWindow(QMainWindow):
                 "system", PULSE_STORED_MESSAGE, timestamp,
                 self._current_affinity, self._current_trust
             )
+            log_info("PULSE DEBUG: Emitted [System Pulse] to chat", prefix="🔍")
 
             # Store abbreviated pulse message in conversation history
             if self._conversation_mgr:
@@ -510,18 +523,37 @@ class ChatWindow(QMainWindow):
                     content=PULSE_STORED_MESSAGE,
                     input_type="system_pulse"
                 )
+                log_info("PULSE DEBUG: Added pulse turn to conversation", prefix="🔍")
+            else:
+                log_error("PULSE DEBUG: _conversation_mgr is None!")
 
             # Build prompt with full pulse message
+            log_info("PULSE DEBUG: Building prompt...", prefix="🔍")
             assembled = self._prompt_builder.build(
                 user_input=PULSE_PROMPT,
                 system_prompt=""
             )
+            log_info(f"PULSE DEBUG: Prompt built, system_prompt length: {len(assembled.full_system_prompt)}", prefix="🔍")
 
             # Get conversation history
+            log_info("PULSE DEBUG: Getting conversation history...", prefix="🔍")
             history = self._conversation_mgr.get_recent_history(limit=30)
+            log_info(f"PULSE DEBUG: Got {len(history)} messages in history", prefix="🔍")
+
+            # Log history details for debugging
+            if history:
+                for i, msg in enumerate(history[-3:]):  # Last 3 messages
+                    role = msg.get('role', 'unknown')
+                    content_preview = msg.get('content', '')[:50]
+                    log_info(f"PULSE DEBUG: History[-{len(history)-i}]: {role}: {content_preview}...", prefix="🔍")
 
             # Get LLM response
+            log_info("PULSE DEBUG: About to call _llm_router.chat()...", prefix="🔍")
             from llm.router import TaskType
+
+            log_info(f"PULSE DEBUG: Router type: {type(self._llm_router)}", prefix="🔍")
+            log_info(f"PULSE DEBUG: TaskType: {TaskType.CONVERSATION}", prefix="🔍")
+
             response = self._llm_router.chat(
                 messages=history,
                 system_prompt=assembled.full_system_prompt,
@@ -529,7 +561,10 @@ class ChatWindow(QMainWindow):
                 temperature=0.7
             )
 
+            log_info(f"PULSE DEBUG: Router returned! success={response.success}, provider={response.provider}", prefix="🔍")
+
             if response.success:
+                log_info(f"PULSE DEBUG: Response successful, text length: {len(response.text)}", prefix="🔍")
                 # Store response
                 self._conversation_mgr.add_turn(
                     role="assistant",
@@ -546,13 +581,36 @@ class ChatWindow(QMainWindow):
                     self._current_affinity,
                     self._current_trust
                 )
+                log_info("PULSE DEBUG: Emitted assistant response to chat", prefix="🔍")
             else:
-                self.signals.update_status.emit(f"Pulse error: {response.error}")
+                error_msg = f"Pulse API error: {response.error}"
+                log_error(f"PULSE DEBUG: API call failed - {error_msg}")
+
+                # Show error in CHAT (not just status bar) so it's visible
+                timestamp = self._get_timestamp()
+                self.signals.new_message.emit(
+                    "system", f"[Pulse Error: {response.error}]", timestamp,
+                    self._current_affinity, self._current_trust
+                )
+                self.signals.update_status.emit(error_msg)
 
         except Exception as e:
-            self.signals.update_status.emit(f"Pulse error: {str(e)}")
+            error_msg = f"Pulse exception: {str(e)}"
+            tb = traceback.format_exc()
+            log_error(f"PULSE DEBUG: Exception caught!")
+            log_error(f"PULSE DEBUG: {error_msg}")
+            log_error(f"PULSE DEBUG: Traceback:\n{tb}")
+
+            # Show error in CHAT (not just status bar) so it's visible
+            timestamp = self._get_timestamp()
+            self.signals.new_message.emit(
+                "system", f"[Pulse Exception: {str(e)}]", timestamp,
+                self._current_affinity, self._current_trust
+            )
+            self.signals.update_status.emit(error_msg)
 
         finally:
+            log_info("=== PULSE DEBUG: _process_pulse() completing ===", prefix="🔍")
             self.signals.response_complete.emit()
 
     def _update_status(self, status: str):

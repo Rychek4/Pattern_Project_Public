@@ -157,13 +157,20 @@ class LLMRouter:
         Returns:
             LLMResponse with generated text
         """
+        log_info(f"ROUTER DEBUG: chat() called with {len(messages)} messages, task_type={task_type}")
+
         # Determine provider
         if force_provider:
             provider = force_provider
+            log_info(f"ROUTER DEBUG: Using forced provider: {provider}")
         else:
             provider = self.get_provider_for_task(task_type)
+            log_info(f"ROUTER DEBUG: Selected provider for task: {provider}")
+
+        log_info(f"ROUTER DEBUG: Primary provider is {self.primary_provider}, fallback_enabled={self.fallback_enabled}")
 
         # Try primary provider
+        log_info(f"ROUTER DEBUG: Calling _send_to_provider({provider})...")
         response = self._send_to_provider(
             provider=provider,
             messages=messages,
@@ -171,6 +178,7 @@ class LLMRouter:
             max_tokens=max_tokens,
             temperature=temperature
         )
+        log_info(f"ROUTER DEBUG: _send_to_provider returned: success={response.success}, error={response.error}")
 
         # Handle fallback
         if not response.success and self.fallback_enabled:
@@ -190,7 +198,9 @@ class LLMRouter:
                 max_tokens=max_tokens,
                 temperature=temperature
             )
+            log_info(f"ROUTER DEBUG: Fallback returned: success={response.success}, error={response.error}")
 
+        log_info(f"ROUTER DEBUG: chat() returning response with success={response.success}")
         return response
 
     def _send_to_provider(
@@ -202,15 +212,24 @@ class LLMRouter:
         temperature: float
     ) -> LLMResponse:
         """Send request to a specific provider."""
+        import traceback
+
+        log_info(f"ROUTER DEBUG: _send_to_provider() called for {provider}")
+
         try:
             if provider == LLMProvider.ANTHROPIC:
+                log_info("ROUTER DEBUG: Getting Anthropic client...")
                 client = self._get_anthropic()
+                log_info(f"ROUTER DEBUG: Got Anthropic client, model={client.model}")
+
+                log_info(f"ROUTER DEBUG: Calling Anthropic chat with {len(messages)} messages...")
                 response = client.chat(
                     messages=messages,
                     system_prompt=system_prompt,
                     max_tokens=max_tokens,
                     temperature=temperature
                 )
+                log_info(f"ROUTER DEBUG: Anthropic returned: success={response.success}, error={response.error}")
 
                 llm_response = LLMResponse(
                     text=response.text,
@@ -222,6 +241,7 @@ class LLMRouter:
                 )
 
                 # Log the API request/response
+                log_info("ROUTER DEBUG: Logging API request...")
                 log_api_request(
                     provider=provider.value,
                     model=client.model,
@@ -234,17 +254,23 @@ class LLMRouter:
                     success=response.success,
                     error=response.error
                 )
+                log_info("ROUTER DEBUG: API request logged successfully")
 
                 return llm_response
 
             elif provider == LLMProvider.KOBOLD:
+                log_info("ROUTER DEBUG: Getting Kobold client...")
                 client = self._get_kobold()
+                log_info(f"ROUTER DEBUG: Got Kobold client, url={client.api_url}")
+
+                log_info(f"ROUTER DEBUG: Calling Kobold chat with {len(messages)} messages...")
                 response = client.chat(
                     messages=messages,
                     system_prompt=system_prompt,
                     max_length=max_tokens,
                     temperature=temperature
                 )
+                log_info(f"ROUTER DEBUG: Kobold returned: success={response.success}, error={response.error}")
 
                 llm_response = LLMResponse(
                     text=response.text,
@@ -255,6 +281,7 @@ class LLMRouter:
                 )
 
                 # Log the API request/response
+                log_info("ROUTER DEBUG: Logging API request...")
                 log_api_request(
                     provider=provider.value,
                     model=client.get_model_name() or "kobold-local",
@@ -267,10 +294,12 @@ class LLMRouter:
                     success=response.success,
                     error=response.error
                 )
+                log_info("ROUTER DEBUG: API request logged successfully")
 
                 return llm_response
 
             else:
+                log_error(f"ROUTER DEBUG: Unknown provider: {provider}")
                 return LLMResponse(
                     text="",
                     success=False,
@@ -279,6 +308,10 @@ class LLMRouter:
                 )
 
         except Exception as e:
+            tb = traceback.format_exc()
+            log_error(f"ROUTER DEBUG: EXCEPTION in _send_to_provider!")
+            log_error(f"ROUTER DEBUG: Exception: {str(e)}")
+            log_error(f"ROUTER DEBUG: Traceback:\n{tb}")
             return LLMResponse(
                 text="",
                 success=False,
