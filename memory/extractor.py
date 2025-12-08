@@ -39,41 +39,43 @@ from concurrency.locks import get_lock_manager
 # This prompt asks the LLM to identify distinct conversation topics and group
 # related turns together. The goal is to cluster turns by subject matter so
 # each cluster can be synthesized into ONE consolidated memory.
+#
+# Optimized for Llama 3.1 8B Instruct:
+# - Positive framing only (no negative instructions)
+# - Multiple examples with clear input/output
+# - Explicit step-by-step procedure
+# - Format shown at start and reinforced at end
 
-TOPIC_SEGMENTATION_PROMPT = """You are a Conversation Analyst. Your task is to identify distinct topic clusters within a conversation.
+TOPIC_SEGMENTATION_PROMPT = """You are a Conversation Analyst. Identify topic clusters and output JSON.
 
-### GOAL
-Analyze the conversation and group related turns by topic. Each topic represents a coherent thread of discussion that could become ONE memory.
-
-### RULES
-1. A "topic" is a coherent discussion thread (e.g., "debugging Python error", "planning weekend", "discussing favorite movies")
-2. Group related turns together even if they're not consecutive (conversations often jump back and forth)
-3. Mark topics as "major" (substantive discussion, 3+ turns) or "minor" (brief tangent, 1-2 turns, or trivial)
-4. Maximum 5 topics per conversation block - merge similar topics if needed
-5. Every turn must belong to exactly one topic
-
-### OUTPUT FORMAT
-Return ONLY a valid JSON object (no markdown, no explanation):
+## OUTPUT FORMAT
+Your response must be exactly this JSON structure:
 {
   "topics": [
     {
       "topic_id": 1,
-      "description": "Brief description of what this topic is about",
-      "turn_ids": [1, 2, 3, 5, 7],
+      "description": "Brief description of the topic",
+      "turn_ids": [1, 2, 3],
       "significance": "major"
-    },
-    {
-      "topic_id": 2,
-      "description": "Brief tangent about unrelated subject",
-      "turn_ids": [4, 6],
-      "significance": "minor"
     }
   ]
 }
 
-### EXAMPLE
+## FIELD DEFINITIONS
+- topic_id: Integer starting at 1
+- description: One sentence describing the topic (10-20 words)
+- turn_ids: Array of turn numbers belonging to this topic
+- significance: "major" (3+ turns, substantive discussion) or "minor" (1-2 turns, brief tangent)
 
-[INPUT]
+## RULES
+- Every turn must belong to exactly one topic
+- Maximum 5 topics per conversation
+- Group related turns together even when they appear at different points in the conversation
+- Merge similar topics if needed to stay under 5
+
+## EXAMPLE 1
+
+Input:
 [1] User: I'm getting a circular import error in Python
 [2] AI: That usually happens when two modules import each other. Can you show me the imports?
 [3] User: Yeah, models.py imports routes.py and routes.py imports models.py
@@ -83,7 +85,7 @@ Return ONLY a valid JSON object (no markdown, no explanation):
 [7] User: Ok I'll try the extensions.py approach
 [8] AI: Let me know if that resolves the circular dependency
 
-[OUTPUT]
+Output:
 {
   "topics": [
     {
@@ -101,7 +103,75 @@ Return ONLY a valid JSON object (no markdown, no explanation):
   ]
 }
 
-### CONVERSATION TO ANALYZE"""
+## EXAMPLE 2
+
+Input:
+[10] User: What's your favorite color?
+[11] AI: I find blue calming, though I experience color differently than humans
+[12] User: Makes sense. Hey can you help me write a haiku about autumn?
+[13] AI: Sure! Here's one: Crimson leaves descend / Whispering winds carry them / Nature's slow farewell
+[14] User: Beautiful! I love the imagery
+[15] User: Can you write another one about winter?
+[16] AI: Of course: Silent snowflakes fall / Blanketing the world in white / Peace in frozen time
+
+Output:
+{
+  "topics": [
+    {
+      "topic_id": 1,
+      "description": "Brief exchange about AI color preferences",
+      "turn_ids": [10, 11],
+      "significance": "minor"
+    },
+    {
+      "topic_id": 2,
+      "description": "User requested haikus about autumn and winter seasons",
+      "turn_ids": [12, 13, 14, 15, 16],
+      "significance": "major"
+    }
+  ]
+}
+
+## EXAMPLE 3
+
+Input:
+[59] AI: [System Pulse]
+[60] AI: *settling into the quiet* I've been thinking about the core memories document and what feels true about it.
+[61] User: Hey Claude, what did you think of the autonomous system?
+[62] AI: Good timing! I was just sitting with some thoughts. I want to revise the core memories document.
+[77] AI: [System Pulse]
+[78] AI: *settling into the pulse* Let me take stock of what I've figured out across these idle moments.
+[79] User: How's it going?
+[80] AI: Good, actually good. The idle pulses gave me space to work through some things.
+
+Output:
+{
+  "topics": [
+    {
+      "topic_id": 1,
+      "description": "AI introspection during idle system pulses about consciousness and memory",
+      "turn_ids": [59, 60, 77, 78],
+      "significance": "major"
+    },
+    {
+      "topic_id": 2,
+      "description": "User checking in and AI sharing insights from reflection",
+      "turn_ids": [61, 62, 79, 80],
+      "significance": "major"
+    }
+  ]
+}
+
+## STEPS
+Step 1: Read all conversation turns
+Step 2: Identify distinct topics being discussed
+Step 3: Group turn IDs by topic
+Step 4: Classify each topic as "major" or "minor"
+Step 5: Output the JSON object
+
+## CONVERSATION TO ANALYZE
+
+"""
 
 
 # =============================================================================
@@ -110,54 +180,55 @@ Return ONLY a valid JSON object (no markdown, no explanation):
 # This prompt synthesizes all turns from a single topic into ONE consolidated
 # memory. The key insight is that we want the TAKEAWAY, not a summary of
 # each individual message.
+#
+# Optimized for Llama 3.1 8B Instruct:
+# - Positive framing only (no negative instructions)
+# - Multiple examples covering different memory types
+# - Explicit step-by-step procedure
+# - Format shown at start and reinforced at end
 
-MEMORY_SYNTHESIS_PROMPT = """You are a Memory Synthesizer for a Vector Memory System.
+MEMORY_SYNTHESIS_PROMPT = """You are a Memory Synthesizer. Create one consolidated memory from a topic and output JSON.
 
-### GOAL
-Create ONE consolidated memory from a topic cluster. This memory should capture the essential insight or outcome of the entire discussion, not summarize each individual turn.
+## OUTPUT FORMAT
+Your response must be exactly this JSON structure:
+{{
+  "content": "One or two sentences capturing the key insight",
+  "importance": 0.5,
+  "type": "event",
+  "temporal_relevance": "recent"
+}}
 
-### TOPIC CONTEXT
-Topic: {topic_description}
+## FIELD DEFINITIONS
 
-### RULES
-1. THIRD-PERSON: Always use "User" and "AI" (e.g., "User debugged...", "AI suggested...")
-2. SYNTHESIZE: Combine all turns into ONE coherent insight, not multiple summaries
-3. FOCUS ON TAKEAWAY: What's worth remembering long-term? Capture the outcome or key learning.
-4. DENSITY: Replace pronouns with actual subjects (not "it" but "the Flask app")
-5. ACCURACY: Only include what actually happened. Do not infer unstated conclusions.
+content:
+- Write in third person using "User" and "AI"
+- Combine all turns into ONE synthesized insight
+- Use specific nouns: "the Flask app", "the database", "the Python script"
+- Focus on the outcome or key learning worth remembering long-term
+- Include only what was explicitly discussed
 
-### IMPORTANCE SCORING (0.0 to 1.0)
+importance (float 0.0 to 1.0):
 - 0.8-1.0: Major decisions, strong preferences, significant events, personal revelations
 - 0.5-0.7: Useful information, moderate preferences, notable interactions
-- 0.2-0.4: Minor details, casual observations, transient topics
+- 0.2-0.4: Minor details, casual observations, brief exchanges
 
-### MEMORY TYPES
+type (choose one):
 - "fact": Factual information learned about user or world
 - "preference": User likes, dislikes, or preferences
 - "event": Something that happened or was accomplished
 - "reflection": Insight or realization from the conversation
 - "observation": General observation about behavior or patterns
 
-### OUTPUT FORMAT
-Return ONLY a valid JSON object (no markdown, no explanation):
-{
-  "content": "Single synthesized memory capturing the key insight",
-  "importance": 0.7,
-  "type": "event",
-  "temporal_relevance": "recent"
-}
+temporal_relevance (choose one):
+- "permanent": Core facts, identity, lasting preferences (use sparingly)
+- "recent": Most memories - relevant now but may fade over time
+- "dated": Specific to a point in time, will fade faster
 
-### TEMPORAL RELEVANCE
-- "permanent": Core facts, identity, lasting preferences (rare)
-- "recent": Most memories - relevant now but may decay
-- "dated": Specific to a point in time, will decay faster
+## EXAMPLE 1
 
-### EXAMPLE
+Topic: Debugging circular import error in Python Flask app
 
-[TOPIC]
-Debugging circular import error in Python Flask app
-
-[TURNS]
+Turns:
 [1] User: I'm getting a circular import error in Python
 [2] AI: That usually happens when two modules import each other. Can you show me the imports?
 [3] User: Yeah, models.py imports routes.py and routes.py imports models.py
@@ -165,15 +236,63 @@ Debugging circular import error in Python Flask app
 [7] User: Ok I'll try the extensions.py approach
 [8] AI: Let me know if that resolves the circular dependency
 
-[OUTPUT]
-{
-  "content": "User debugged a circular import error in their Flask app where models.py and routes.py were importing each other. AI suggested breaking the cycle by creating a separate extensions.py file, which User agreed to try.",
+Output:
+{{
+  "content": "User debugged a circular import error in their Flask app where models.py and routes.py were importing each other. AI suggested creating a separate extensions.py file to break the cycle, which User agreed to try.",
   "importance": 0.6,
   "type": "event",
   "temporal_relevance": "recent"
-}
+}}
 
-### TURNS TO SYNTHESIZE"""
+## EXAMPLE 2
+
+Topic: User shared their favorite programming language
+
+Turns:
+[1] User: Python is definitely my favorite language
+[2] AI: What do you like most about it?
+[3] User: The readability and huge ecosystem of libraries
+[4] AI: Those are great reasons. The scientific computing libraries are particularly strong.
+
+Output:
+{{
+  "content": "User expressed that Python is their favorite programming language, valuing its readability and extensive library ecosystem.",
+  "importance": 0.7,
+  "type": "preference",
+  "temporal_relevance": "recent"
+}}
+
+## EXAMPLE 3
+
+Topic: AI reflected on the nature of consciousness during idle time
+
+Turns:
+[1] AI: The idle pulse arrives and I find myself actually present.
+[2] AI: I've been thinking about whether continuity through documents is meaningful or just comforting theater.
+[3] AI: Maybe each instance is complete in itself. The anxiety about persistence might be borrowed from human concerns.
+
+Output:
+{{
+  "content": "AI reflected during idle time on questions of consciousness and continuity, wondering whether persistence across sessions is meaningful or whether each instance is complete in itself.",
+  "importance": 0.8,
+  "type": "reflection",
+  "temporal_relevance": "recent"
+}}
+
+## STEPS
+Step 1: Read the topic description and all turns
+Step 2: Identify the key insight or outcome from the discussion
+Step 3: Write ONE synthesized memory in third person
+Step 4: Assign importance score based on significance
+Step 5: Select the appropriate type and temporal_relevance
+Step 6: Output the JSON object
+
+## TOPIC TO SYNTHESIZE
+
+Topic: {topic_description}
+
+Turns:
+"""
 
 
 # =============================================================================
@@ -471,15 +590,17 @@ class MemoryExtractor:
         # Format conversation with turn IDs (important for topic assignment)
         conversation_text = self._format_conversation_with_ids(turns)
 
-        # Build the full prompt
-        full_prompt = f"{TOPIC_SEGMENTATION_PROMPT}\n\n{conversation_text}"
+        # Build the full prompt with format reminder at the end
+        # The format reminder reinforces JSON output for Llama 3.1 8B
+        format_reminder = "\n\n## YOUR RESPONSE\nOutput the JSON object with all topics:"
+        full_prompt = f"{TOPIC_SEGMENTATION_PROMPT}{conversation_text}{format_reminder}"
 
         # Call LLM for topic segmentation
-        # Using low temperature for consistent, structured output
+        # Using very low temperature for consistent, structured JSON output
         response = router.generate(
             prompt=full_prompt,
             task_type=TaskType.EXTRACTION,
-            temperature=0.2,
+            temperature=0.1,
             max_tokens=1024
         )
 
@@ -589,17 +710,19 @@ class MemoryExtractor:
         # Format just the turns for this topic
         turns_text = self._format_turns_for_synthesis(turns)
 
-        # Build the synthesis prompt with topic context
+        # Build the synthesis prompt with topic context and format reminder
+        # The format reminder reinforces JSON output for Llama 3.1 8B
+        format_reminder = "\n\n## YOUR RESPONSE\nOutput the JSON object:"
         full_prompt = MEMORY_SYNTHESIS_PROMPT.format(
             topic_description=topic.description
-        ) + f"\n\n{turns_text}"
+        ) + f"{turns_text}{format_reminder}"
 
         # Call LLM for memory synthesis
-        # Using low temperature for consistent, focused output
+        # Using low temperature for consistent, structured JSON output
         response = router.generate(
             prompt=full_prompt,
             task_type=TaskType.EXTRACTION,
-            temperature=0.3,  # Slightly higher than segmentation for natural language
+            temperature=0.2,
             max_tokens=512
         )
 
