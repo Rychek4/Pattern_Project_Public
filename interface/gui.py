@@ -547,6 +547,11 @@ class ChatWindow(QMainWindow):
                     content_preview = msg.get('content', '')[:50]
                     log_info(f"PULSE DEBUG: History[-{len(history)-i}]: {role}: {content_preview}...", prefix="🔍")
 
+            # Add the pulse prompt as the message to respond to
+            # (role="user" is an API constraint, but content clarifies it's automated)
+            history.append({"role": "user", "content": PULSE_PROMPT})
+            log_info(f"PULSE DEBUG: Added PULSE_PROMPT to history, now {len(history)} messages", prefix="🔍")
+
             # Get LLM response
             log_info("PULSE DEBUG: About to call _llm_router.chat()...", prefix="🔍")
             from llm.router import TaskType

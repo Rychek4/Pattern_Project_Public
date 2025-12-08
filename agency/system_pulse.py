@@ -12,7 +12,12 @@ from core.logger import log_info, log_warning, log_error
 
 
 # The pulse message sent to the AI (full version for LLM context)
-PULSE_PROMPT = """System Pulse: 3-minute timer. There is no new user message. Instead of responding, utilize your agency. Review the conversation history: is there a loose end you want to tie up? Is there a new idea you want to introduce? Speak your mind freely."""
+# Note: This is sent with role="user" due to API constraints, but the content
+# makes clear this is an automated system mechanism, not human input.
+PULSE_PROMPT = """[AUTOMATED SYSTEM PULSE - Not human input]
+The 3-minute idle timer has fired. No new human message has been received.
+This is your opportunity to utilize agency: review the conversation for loose ends,
+introduce new ideas, or speak freely. Respond as you would naturally."""
 
 # Abbreviated version stored in conversation history
 PULSE_STORED_MESSAGE = "[System Pulse]"
