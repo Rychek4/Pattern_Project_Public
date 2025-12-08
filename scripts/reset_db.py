@@ -4,13 +4,15 @@ Pattern Project - Database Reset Utility
 
 Provides commands to reset specific database tables:
 - relationships: Reset relationship state to defaults (affinity=50, trust=50)
-- memories: Delete all memories from the vector store
+- memories: Delete all memories from the vector store (also resets processing flags)
 - conversations: Delete all conversation history
+- reprocess: Reset processing flags only (allows re-extraction without deleting memories)
 
 Usage:
     python scripts/reset_db.py relationships
     python scripts/reset_db.py memories
     python scripts/reset_db.py conversations
+    python scripts/reset_db.py reprocess
     python scripts/reset_db.py --all
 """
 
@@ -79,7 +81,7 @@ def reset_relationships(db: Database) -> None:
 
 
 def clear_memories(db: Database) -> None:
-    """Delete all memories from the database."""
+    """Delete all memories and reset processing flags for re-extraction."""
     print("\n[Memories] Clearing all memories...")
 
     with db.get_connection() as conn:
@@ -95,7 +97,19 @@ def clear_memories(db: Database) -> None:
         core_count = cursor.fetchone()[0]
         conn.execute("DELETE FROM core_memories")
 
+        # Reset processing flags so conversations can be re-extracted
+        cursor = conn.execute(
+            "SELECT COUNT(*) FROM conversations WHERE processed_for_memory = TRUE"
+        )
+        processed_count = cursor.fetchone()[0]
+
+        conn.execute("""
+            UPDATE conversations
+            SET processed_for_memory = FALSE, processed_at = NULL
+        """)
+
     print(f"[Memories] Cleared {count} memories and {core_count} core memories")
+    print(f"[Memories] Reset {processed_count} conversations for re-extraction")
 
 
 def clear_conversations(db: Database) -> None:
@@ -118,6 +132,35 @@ def clear_conversations(db: Database) -> None:
     print(f"[Conversations] Cleared {count} conversation turns and {session_count} sessions")
 
 
+def reset_processing_flags(db: Database) -> None:
+    """Reset processing flags only, allowing conversations to be re-extracted.
+
+    This is useful for testing prompt changes without deleting existing memories.
+    Conversations will be re-processed on next extraction trigger.
+    """
+    print("\n[Reprocess] Resetting processing flags...")
+
+    with db.get_connection() as conn:
+        # Count conversations that will be reset
+        cursor = conn.execute(
+            "SELECT COUNT(*) FROM conversations WHERE processed_for_memory = TRUE"
+        )
+        processed_count = cursor.fetchone()[0]
+
+        if processed_count == 0:
+            print("[Reprocess] No processed conversations to reset")
+            return
+
+        # Reset processing flags
+        conn.execute("""
+            UPDATE conversations
+            SET processed_for_memory = FALSE, processed_at = NULL
+        """)
+
+    print(f"[Reprocess] Reset {processed_count} conversations for re-extraction")
+    print("[Reprocess] Note: Existing memories are preserved. New extraction will add more memories.")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Reset specific database tables in Pattern Project",
@@ -125,8 +168,9 @@ def main():
         epilog="""
 Examples:
   python scripts/reset_db.py relationships   Reset relationship state
-  python scripts/reset_db.py memories        Delete all memories
+  python scripts/reset_db.py memories        Delete all memories (and reset processing flags)
   python scripts/reset_db.py conversations   Delete all conversations
+  python scripts/reset_db.py reprocess       Reset processing flags only (for re-extraction)
   python scripts/reset_db.py --all           Reset everything
         """
     )
@@ -134,8 +178,8 @@ Examples:
     parser.add_argument(
         "table",
         nargs="?",
-        choices=["relationships", "memories", "conversations"],
-        help="The table to reset"
+        choices=["relationships", "memories", "conversations", "reprocess"],
+        help="The table to reset (or 'reprocess' to reset processing flags only)"
     )
 
     parser.add_argument(
@@ -191,6 +235,8 @@ Examples:
             clear_memories(db)
         elif table == "conversations":
             clear_conversations(db)
+        elif table == "reprocess":
+            reset_processing_flags(db)
 
     print("\n" + "="*60)
     print("Reset complete!")
