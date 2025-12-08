@@ -37,7 +37,7 @@ from concurrency.locks import init_lock_manager, get_lock_manager
 from llm.router import init_llm_router, get_llm_router, LLMProvider
 from memory.conversation import init_conversation_manager
 from memory.vector_store import init_vector_store
-from memory.extractor import init_memory_extractor, get_memory_extractor
+from memory.extractor import init_memory_extractor
 from interface.cli import init_cli, get_cli
 from interface.http_api import init_http_server, get_http_server
 from agency.proactive import init_proactive_agent, get_proactive_agent
@@ -175,7 +175,7 @@ def print_configuration() -> None:
 
     # Background threads
     log_section("Background Threads", "🧵")
-    log_subsection(f"Memory Extractor: ENABLED (threshold: {config.MEMORY_EXTRACTION_THRESHOLD} turns)")
+    log_subsection(f"Memory Extractor: THRESHOLD-TRIGGERED (every {config.MEMORY_EXTRACTION_THRESHOLD} turns)")
     log_subsection(f"Health Monitor: ENABLED (interval: {config.HEALTH_CHECK_INTERVAL}s)")
     log_subsection(f"Lock Stats: ENABLED (interval: {config.LOCK_STATS_INTERVAL}s)")
 
@@ -233,10 +233,8 @@ def start_background_services() -> None:
     """Start all background services."""
     log_section("Starting Services", "🔧")
 
-    # Start memory extractor
-    extractor = get_memory_extractor()
-    extractor.start()
-    log_subsection("Memory extractor started")
+    # Memory extractor is threshold-triggered (no background thread to start)
+    log_subsection("Memory extractor ready (threshold-triggered)")
 
     # Start proactive agent (legacy - disabled by default)
     proactive = get_proactive_agent()
@@ -283,13 +281,8 @@ def stop_background_services() -> None:
     """Stop all background services gracefully."""
     log_section("Stopping Services", "🛑")
 
-    # Stop memory extractor
-    try:
-        extractor = get_memory_extractor()
-        extractor.stop()
-        log_subsection("Memory extractor stopped")
-    except Exception as e:
-        log_error(f"Error stopping extractor: {e}")
+    # Memory extractor is threshold-triggered (no background thread to stop)
+    log_subsection("Memory extractor: no cleanup needed")
 
     # Stop proactive agent (legacy)
     try:
