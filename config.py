@@ -77,6 +77,28 @@ MEMORY_FRESHNESS_WEIGHT = 0.35  # Recency of memory source
 MEMORY_ACCESS_WEIGHT = 0.15  # How recently memory was recalled
 
 # =============================================================================
+# DECAY CATEGORY CONFIGURATION
+# =============================================================================
+# Memories are assigned a decay_category that controls how quickly they fade
+# from relevance. This affects the freshness score used in memory retrieval.
+#
+# Categories:
+#   - permanent: Never decays (half_life = None). For core identity facts,
+#                lasting preferences, and biographical information.
+#   - standard:  Normal decay rate. For events, discussions, and insights
+#                that stay relevant for weeks/months.
+#   - ephemeral: Fast decay. For time-bound observations, current mood,
+#                temporary circumstances that lose relevance quickly.
+#
+# The half-life is the number of days until a memory's freshness score drops
+# to 50% of its original value. After 2 half-lives it's at 25%, etc.
+#
+# Decay category is inferred from memory_type and importance at extraction
+# time - no additional LLM call required.
+DECAY_HALF_LIFE_STANDARD = 30.0   # 30 days - normal memories
+DECAY_HALF_LIFE_EPHEMERAL = 7.0   # 7 days - fast-fading observations
+
+# =============================================================================
 # SESSION CONFIGURATION
 # =============================================================================
 SESSION_IDLE_WARNING_SECONDS = 600  # 10 minutes

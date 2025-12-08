@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from core.logger import log_info, log_success, log_error, log_config, log_section
 
 # Schema version for migrations
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 # SQL schema definition
 SCHEMA_SQL = """
@@ -66,7 +66,11 @@ CREATE TABLE IF NOT EXISTS memories (
     last_accessed_at TIMESTAMP,
     access_count INTEGER DEFAULT 0,
     source_timestamp TIMESTAMP,
-    temporal_relevance TEXT DEFAULT 'recent' CHECK (temporal_relevance IN ('permanent', 'recent', 'dated')),
+    -- decay_category controls how quickly memories fade from relevance:
+    --   'permanent': Never decays (core identity, lasting preferences)
+    --   'standard': 30-day half-life (events, discussions, insights)
+    --   'ephemeral': 7-day half-life (situational observations)
+    decay_category TEXT DEFAULT 'standard' CHECK (decay_category IN ('permanent', 'standard', 'ephemeral')),
 
     -- Scoring
     importance REAL DEFAULT 0.5 CHECK (importance >= 0 AND importance <= 1),
@@ -253,6 +257,79 @@ CREATE INDEX IF NOT EXISTS idx_conversations_created ON conversations(created_at
 PRAGMA foreign_keys=ON;
 """
 
+# Migration SQL for v5 -> v6 (rename temporal_relevance to decay_category)
+MIGRATION_V6_SQL = """
+-- Rename temporal_relevance column to decay_category and update values
+-- SQLite requires table recreation to rename columns and modify CHECK constraints
+--
+-- Value mapping:
+--   'permanent' -> 'permanent' (unchanged)
+--   'recent'    -> 'standard'  (normal decay)
+--   'dated'     -> 'ephemeral' (fast decay)
+--
+-- New decay categories control memory freshness decay rate:
+--   'permanent': Never decays (core identity, lasting preferences)
+--   'standard':  30-day half-life (events, discussions, insights)
+--   'ephemeral': 7-day half-life (situational observations)
+
+-- Disable foreign keys during migration
+PRAGMA foreign_keys=OFF;
+
+-- Create new table with decay_category column
+CREATE TABLE memories_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content TEXT NOT NULL,
+    embedding BLOB NOT NULL,
+
+    -- Source tracking
+    source_conversation_ids JSON,
+    source_session_id INTEGER REFERENCES sessions(id),
+
+    -- Temporal fields
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_accessed_at TIMESTAMP,
+    access_count INTEGER DEFAULT 0,
+    source_timestamp TIMESTAMP,
+    decay_category TEXT DEFAULT 'standard' CHECK (decay_category IN ('permanent', 'standard', 'ephemeral')),
+
+    -- Scoring
+    importance REAL DEFAULT 0.5 CHECK (importance >= 0 AND importance <= 1),
+    memory_type TEXT CHECK (memory_type IN ('fact', 'preference', 'event', 'reflection', 'observation'))
+);
+
+-- Copy existing data with value mapping
+INSERT INTO memories_new (
+    id, content, embedding, source_conversation_ids, source_session_id,
+    created_at, last_accessed_at, access_count, source_timestamp,
+    decay_category, importance, memory_type
+)
+SELECT
+    id, content, embedding, source_conversation_ids, source_session_id,
+    created_at, last_accessed_at, access_count, source_timestamp,
+    CASE temporal_relevance
+        WHEN 'permanent' THEN 'permanent'
+        WHEN 'dated' THEN 'ephemeral'
+        ELSE 'standard'  -- 'recent' and any other values become 'standard'
+    END,
+    importance, memory_type
+FROM memories;
+
+-- Drop old table
+DROP TABLE memories;
+
+-- Rename new table
+ALTER TABLE memories_new RENAME TO memories;
+
+-- Recreate indexes
+CREATE INDEX IF NOT EXISTS idx_memories_recency ON memories(last_accessed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memories_source_time ON memories(source_timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type);
+CREATE INDEX IF NOT EXISTS idx_memories_importance ON memories(importance DESC);
+
+-- Re-enable foreign keys
+PRAGMA foreign_keys=ON;
+"""
+
 
 class Database:
     """SQLite database manager with WAL mode and thread-safe connections."""
@@ -386,6 +463,10 @@ class Database:
             if from_version < 5:
                 log_config("Applying migration", "v4 → v5 (remove CHECK constraints from conversations)", indent=1)
                 conn.executescript(MIGRATION_V5_SQL)
+
+            if from_version < 6:
+                log_config("Applying migration", "v5 → v6 (rename temporal_relevance to decay_category)", indent=1)
+                conn.executescript(MIGRATION_V6_SQL)
 
             # Record new version
             conn.execute(

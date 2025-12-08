@@ -184,25 +184,34 @@ If primary fails & fallback enabled:
 
 ## Phase 5: Background Extraction
 
-A daemon thread runs every 60 seconds:
+Extraction is triggered when unprocessed turns reach a threshold (default: 10):
 
 ```
 IF unprocessed_turns >= 10:
     │
-    ├─ Collect last 50 unprocessed turns
-    ├─ Send to local LLM with extraction prompt
-    ├─ Parse JSON output:
-    │   [{
-    │     "content": "Memory text",
-    │     "type": "fact|preference|event|observation",
-    │     "importance": 0.0-1.0,
-    │     "temporal_relevance": "permanent|recent|dated"
-    │   }, ...]
+    ├─ Phase 1: Topic Segmentation (multi-pass LLM)
+    │   ├─ Pass 1: Identify topics (natural language)
+    │   └─ Pass 2: Assign turns to topics (simple JSON)
+    │
+    ├─ Phase 2: Memory Synthesis (multi-pass LLM per topic)
+    │   ├─ Pass 1: Write 1-2 sentence summary
+    │   ├─ Pass 2: Rate importance (0-10)
+    │   └─ Pass 3: Classify type (single word)
+    │
+    ├─ Infer decay_category from type + importance (no LLM needed):
+    │   - High-importance facts/preferences → 'permanent'
+    │   - Low-importance observations → 'ephemeral'
+    │   - Everything else → 'standard'
     │
     ├─ Generate embedding for each memory
-    ├─ Store in `memories` table
+    ├─ Store in `memories` table with decay_category
     └─ Mark source turns as processed
 ```
+
+**Decay categories** control how quickly memories fade from relevance:
+- `permanent`: Never decays (core identity, lasting preferences)
+- `standard`: 30-day half-life (events, discussions, insights)
+- `ephemeral`: 7-day half-life (situational observations)
 
 This is how conversations become **searchable memories** without bloating the context window.
 

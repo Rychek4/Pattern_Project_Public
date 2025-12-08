@@ -93,7 +93,7 @@ Output only the JSON object:"""
 #   Pass 1: Write a 1-2 sentence memory summary (natural language)
 #   Pass 2: Rate importance 0-10 (single number)
 #   Pass 3: Classify type (single word)
-#   temporal_relevance: Defaults to "recent" (no LLM needed)
+#   decay_category: Inferred from type + importance (no LLM needed)
 #
 # This approach is more reliable because:
 # - Each prompt has ONE simple task
@@ -177,13 +177,80 @@ class SynthesizedMemory:
 
     Created during Phase 2 (memory synthesis). Contains all the metadata
     needed to store in the vector store.
+
+    Attributes:
+        content: The synthesized memory text (1-2 sentences)
+        importance: Score from 0.0-1.0 indicating significance
+        memory_type: Category like 'fact', 'preference', 'event', etc.
+        decay_category: Controls freshness decay rate:
+            - 'permanent': Never decays (core identity, lasting preferences)
+            - 'standard': Normal 30-day half-life (events, discussions)
+            - 'ephemeral': Fast 7-day half-life (temporary observations)
+        source_turn_ids: Database IDs of conversation turns this came from
+        source_topic: Description of the topic cluster this was synthesized from
     """
     content: str
     importance: float
     memory_type: str
-    temporal_relevance: str
+    decay_category: str  # 'permanent', 'standard', or 'ephemeral'
     source_turn_ids: List[int] = field(default_factory=list)
-    source_topic: Optional[str] = None  # Description of the topic this came from
+    source_topic: Optional[str] = None
+
+
+# =============================================================================
+# DECAY CATEGORY INFERENCE
+# =============================================================================
+# Instead of asking the LLM to classify decay_category (which would add another
+# API call), we infer it from the memory_type and importance score. This is
+# deterministic, fast, and aligns with the multi-pass philosophy of keeping
+# each step simple.
+#
+# The logic:
+#   - High-importance facts/preferences about the user → permanent
+#     (e.g., "User is a software engineer", "User prefers Python")
+#   - Events, reflections, and moderate-importance items → standard
+#     (e.g., "User debugged a Flask app", "AI reflected on consciousness")
+#   - Low-importance observations → ephemeral
+#     (e.g., "User mentioned being tired", "Brief joke about lunch")
+
+def infer_decay_category(memory_type: str, importance: float) -> str:
+    """
+    Infer the appropriate decay category from memory type and importance.
+
+    This function determines how quickly a memory should fade from relevance
+    based on its characteristics. No LLM call required - purely deterministic.
+
+    Args:
+        memory_type: The classified type ('fact', 'preference', 'event',
+                     'reflection', 'observation')
+        importance: Score from 0.0 to 1.0
+
+    Returns:
+        One of: 'permanent', 'standard', 'ephemeral'
+
+    Inference Rules:
+        1. High-importance (≥0.7) facts or preferences → 'permanent'
+           These are core identity information that should never fade.
+
+        2. Observations with low importance (<0.5) → 'ephemeral'
+           Casual observations fade quickly as they're often situational.
+
+        3. Everything else → 'standard'
+           Events, reflections, and moderate-importance items decay normally.
+    """
+    # Rule 1: High-importance facts/preferences are permanent
+    # These represent core user identity and lasting preferences
+    if importance >= 0.7 and memory_type in ("fact", "preference"):
+        return "permanent"
+
+    # Rule 2: Low-importance observations are ephemeral
+    # These are often time-bound or situational
+    if memory_type == "observation" and importance < 0.5:
+        return "ephemeral"
+
+    # Rule 3: Everything else uses standard decay
+    # This includes events, reflections, moderate facts, etc.
+    return "standard"
 
 
 # =============================================================================
@@ -385,7 +452,7 @@ class MemoryExtractor:
                             source_timestamp=source_time,
                             importance=synthesized.importance,
                             memory_type=synthesized.memory_type,
-                            temporal_relevance=synthesized.temporal_relevance
+                            decay_category=synthesized.decay_category
                         )
 
                         if memory_id:
@@ -630,7 +697,7 @@ class MemoryExtractor:
         Pass 1: Write a 1-2 sentence memory summary (natural language)
         Pass 2: Rate importance 0-10 (single number)
         Pass 3: Classify type (single word)
-        temporal_relevance: Defaults to "recent" (no LLM needed)
+        decay_category: Inferred from type + importance (no LLM call needed)
 
         This multi-pass approach is more reliable than single-pass JSON because:
         - Each prompt has ONE simple task
@@ -702,13 +769,27 @@ class MemoryExtractor:
         memory_type = self._parse_type_response(type_response.text)
 
         # =====================================================================
+        # INFER DECAY CATEGORY
+        # =====================================================================
+        # Decay category determines how quickly this memory fades from relevance.
+        # We infer it from the memory type and importance rather than making
+        # another LLM call - this is fast, deterministic, and reliable.
+        decay_category = infer_decay_category(memory_type, importance)
+
+        log_info(
+            f"Memory: type={memory_type}, importance={importance:.2f}, "
+            f"decay={decay_category}",
+            prefix="🏷️"
+        )
+
+        # =====================================================================
         # BUILD MEMORY OBJECT
         # =====================================================================
         return SynthesizedMemory(
             content=content,
             importance=importance,
             memory_type=memory_type,
-            temporal_relevance="recent",  # Default, no LLM needed
+            decay_category=decay_category,
             source_turn_ids=topic.turn_ids,
             source_topic=topic.description
         )

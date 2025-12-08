@@ -27,7 +27,26 @@ from core.logger import log_info, log_error
 
 @dataclass
 class Memory:
-    """A stored memory with metadata."""
+    """
+    A stored memory with metadata.
+
+    Attributes:
+        id: Database primary key
+        content: The memory text content
+        embedding: Vector embedding for semantic search
+        source_conversation_ids: IDs of conversation turns this was extracted from
+        source_session_id: Session during which this memory was created
+        created_at: When the memory was stored in the database
+        last_accessed_at: When this memory was last retrieved in a search
+        access_count: Number of times this memory has been retrieved
+        source_timestamp: When the original conversation occurred
+        decay_category: Controls freshness decay rate:
+            - 'permanent': Never decays (identity facts, lasting preferences)
+            - 'standard': 30-day half-life (events, discussions)
+            - 'ephemeral': 7-day half-life (situational observations)
+        importance: Significance score from 0.0 to 1.0
+        memory_type: Category ('fact', 'preference', 'event', 'reflection', 'observation')
+    """
     id: int
     content: str
     embedding: np.ndarray
@@ -37,7 +56,7 @@ class Memory:
     last_accessed_at: Optional[datetime]
     access_count: int
     source_timestamp: Optional[datetime]
-    temporal_relevance: str
+    decay_category: str  # 'permanent', 'standard', or 'ephemeral'
     importance: float
     memory_type: Optional[str]
 
@@ -94,19 +113,22 @@ class VectorStore:
         source_timestamp: Optional[datetime] = None,
         importance: float = 0.5,
         memory_type: Optional[str] = None,
-        temporal_relevance: str = "recent"
+        decay_category: str = "standard"
     ) -> Optional[int]:
         """
         Add a new memory to the store.
 
         Args:
-            content: The memory content
-            source_conversation_ids: IDs of source conversations
-            source_session_id: Source session ID
-            source_timestamp: When the memory event occurred
-            importance: Importance score (0-1)
-            memory_type: Type of memory
-            temporal_relevance: 'permanent', 'recent', or 'dated'
+            content: The memory content text
+            source_conversation_ids: IDs of conversation turns this came from
+            source_session_id: Session ID where memory was extracted
+            source_timestamp: When the original conversation occurred
+            importance: Significance score (0.0-1.0)
+            memory_type: Category ('fact', 'preference', 'event', etc.)
+            decay_category: Controls freshness decay rate:
+                - 'permanent': Never decays (core identity, lasting preferences)
+                - 'standard': 30-day half-life (events, discussions)
+                - 'ephemeral': 7-day half-life (situational observations)
 
         Returns:
             The new memory ID, or None if embedding failed
@@ -128,11 +150,14 @@ class VectorStore:
             if source_timestamp is None:
                 source_timestamp = now
 
+            # Note: The database column is still named 'temporal_relevance' for
+            # backward compatibility until migration v6 renames it to 'decay_category'.
+            # The migration maps: 'recent' -> 'standard', 'dated' -> 'ephemeral'
             db.execute(
                 """
                 INSERT INTO memories
                 (content, embedding, source_conversation_ids, source_session_id,
-                 source_timestamp, importance, memory_type, temporal_relevance,
+                 source_timestamp, importance, memory_type, decay_category,
                  created_at, last_accessed_at, access_count)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
@@ -144,7 +169,7 @@ class VectorStore:
                     source_timestamp.isoformat(),
                     importance,
                     memory_type,
-                    temporal_relevance,
+                    decay_category,
                     now.isoformat(),
                     now.isoformat(),
                     0
@@ -255,20 +280,52 @@ class VectorStore:
             return results[:limit]
 
     def _compute_freshness(self, memory: Memory, now: datetime) -> float:
-        """Compute freshness score based on source timestamp.
-
-        Uses proper half-life decay: score = 0.5 at half_life_days.
-        Formula: exp(-ln(2) * age / half_life) = 2^(-age/half_life)
         """
-        if memory.temporal_relevance == "permanent":
+        Compute freshness score based on source timestamp and decay category.
+
+        Uses exponential decay with category-specific half-lives:
+          - permanent: No decay (always returns 1.0)
+          - standard: 30-day half-life (normal memories)
+          - ephemeral: 7-day half-life (fast-fading observations)
+
+        The half-life is the number of days until the score drops to 0.5.
+        Formula: score = exp(-ln(2) * age_days / half_life) = 2^(-age/half_life)
+
+        Args:
+            memory: The memory to compute freshness for
+            now: Current datetime for age calculation
+
+        Returns:
+            Freshness score from 0.0 to 1.0
+        """
+        # Import decay half-lives from config
+        from config import DECAY_HALF_LIFE_STANDARD, DECAY_HALF_LIFE_EPHEMERAL
+
+        # Permanent memories never decay - always fully fresh
+        if memory.decay_category == "permanent":
             return 1.0
 
-        if memory.source_timestamp:
-            age_days = (now - memory.source_timestamp).days
-            # ln(2) ≈ 0.693 for proper half-life decay
-            return math.exp(-0.693 * age_days / self.freshness_half_life_days)
+        # No timestamp means we can't compute age - use neutral score
+        if not memory.source_timestamp:
+            return 0.5
 
-        return 0.5
+        # Calculate age in days
+        age_days = (now - memory.source_timestamp).days
+
+        # Select half-life based on decay category
+        # Using a dict lookup with fallback to standard for any unexpected values
+        half_life_days = {
+            "standard": DECAY_HALF_LIFE_STANDARD,
+            "ephemeral": DECAY_HALF_LIFE_EPHEMERAL,
+            # Legacy values from old schema (pre-migration)
+            "recent": DECAY_HALF_LIFE_STANDARD,
+            "dated": DECAY_HALF_LIFE_EPHEMERAL,
+        }.get(memory.decay_category, DECAY_HALF_LIFE_STANDARD)
+
+        # Exponential decay: ln(2) ≈ 0.693 gives proper half-life behavior
+        # At age = half_life_days, score = 0.5
+        # At age = 2 * half_life_days, score = 0.25
+        return math.exp(-0.693 * age_days / half_life_days)
 
     def _compute_access_score(self, memory: Memory, now: datetime) -> float:
         """Compute access recency score."""
@@ -335,7 +392,12 @@ class VectorStore:
             return [self._row_to_memory(row) for row in result]
 
     def _row_to_memory(self, row) -> Memory:
-        """Convert a database row to Memory object."""
+        """
+        Convert a database row to Memory object.
+
+        Handles both old schema (temporal_relevance column) and new schema
+        (decay_category column) for backward compatibility during migration.
+        """
         # Parse dates
         created_at = row["created_at"]
         if isinstance(created_at, str):
@@ -354,6 +416,18 @@ class VectorStore:
         if row["source_conversation_ids"]:
             source_conversation_ids = json.loads(row["source_conversation_ids"])
 
+        # Handle decay_category with backward compatibility for old column name
+        # The migration renames temporal_relevance -> decay_category and maps values:
+        #   'recent' -> 'standard', 'dated' -> 'ephemeral', 'permanent' -> 'permanent'
+        decay_category = row.get("decay_category") or row.get("temporal_relevance", "standard")
+
+        # Map legacy values to new categories (in case migration hasn't run yet)
+        legacy_mapping = {
+            "recent": "standard",
+            "dated": "ephemeral",
+        }
+        decay_category = legacy_mapping.get(decay_category, decay_category)
+
         return Memory(
             id=row["id"],
             content=row["content"],
@@ -364,7 +438,7 @@ class VectorStore:
             last_accessed_at=last_accessed_at,
             access_count=row["access_count"],
             source_timestamp=source_timestamp,
-            temporal_relevance=row["temporal_relevance"],
+            decay_category=decay_category,
             importance=row["importance"],
             memory_type=row["memory_type"]
         )

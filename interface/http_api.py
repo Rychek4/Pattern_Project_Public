@@ -146,8 +146,13 @@ def create_app() -> Flask:
             "content": "Memory content",
             "memory_type": "fact|preference|event|observation|reflection",
             "importance": 0.5,
-            "temporal_relevance": "permanent|recent|dated"
+            "decay_category": "permanent|standard|ephemeral"
         }
+
+        decay_category controls how quickly the memory fades from relevance:
+          - permanent: Never decays (core identity, lasting preferences)
+          - standard: 30-day half-life (events, discussions, insights)
+          - ephemeral: 7-day half-life (situational observations)
         """
         try:
             data = request.get_json()
@@ -161,7 +166,7 @@ def create_app() -> Flask:
                 source_conversation_ids=[],
                 importance=data.get("importance", 0.5),
                 memory_type=data.get("memory_type"),
-                temporal_relevance=data.get("temporal_relevance", "recent")
+                decay_category=data.get("decay_category", "standard")
             )
 
             if memory_id:
