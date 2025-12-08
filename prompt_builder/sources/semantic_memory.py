@@ -7,6 +7,7 @@ from typing import Optional, Dict, Any, List
 
 from prompt_builder.sources.base import ContextSource, ContextBlock, SourcePriority
 from memory.vector_store import get_vector_store, MemorySearchResult
+from core.temporal import format_fuzzy_relative_time
 from config import MEMORY_MAX_PER_QUERY
 
 
@@ -79,8 +80,12 @@ class SemanticMemorySource(ContextSource):
             mem = result.memory
             score = result.combined_score
 
-            # Simple bullet format with memory content
-            lines.append(f"- {mem.content}")
+            # Format with temporal context if timestamp available
+            if mem.source_timestamp:
+                timestamp = format_fuzzy_relative_time(mem.source_timestamp)
+                lines.append(f"- {mem.content} ({timestamp})")
+            else:
+                lines.append(f"- {mem.content}")
 
             # Track high-scoring memories for potential promotion
             if score >= self.promotion_threshold:
