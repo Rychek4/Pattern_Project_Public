@@ -944,7 +944,7 @@ def run_gui():
     init_system_pulse_timer()
 
     # Start background services
-    get_memory_extractor().start()
+    # Note: Memory extractor is threshold-triggered (no background thread to start)
     get_relationship_analyzer().start()
 
     # Start system pulse timer if enabled
