@@ -377,14 +377,10 @@ class ChatWindow(QMainWindow):
                     input_type="text"
                 )
 
-            # Build prompt
-            system_prompt = """You are a thoughtful AI companion engaged in natural conversation.
-Your personality emerges from the context provided - memories, relationship history, and ongoing dialogue.
-Be genuine, curious, and responsive to the emotional tone of the conversation."""
-
+            # Build prompt (no base prompt - emergent personality from context)
             assembled = self._prompt_builder.build(
                 user_input=user_input,
-                system_prompt=system_prompt
+                system_prompt=""
             )
 
             # Get conversation history
