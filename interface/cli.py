@@ -71,11 +71,6 @@ class ChatCLI:
         router = get_llm_router()
         prompt_builder = get_prompt_builder()
 
-        # Default system prompt - emergent persona
-        system_prompt = """You are a thoughtful AI companion engaged in natural conversation.
-Your personality emerges from the context provided - memories, relationship history, and ongoing dialogue.
-Be genuine, curious, and responsive to the emotional tone of the conversation."""
-
         # Start a session if not already active
         if not tracker.is_session_active:
             tracker.start_session()
@@ -106,10 +101,10 @@ Be genuine, curious, and responsive to the emotional tone of the conversation.""
                     input_type="text"
                 )
 
-                # Build rich prompt with all context sources
+                # Build rich prompt with all context sources (no base prompt - emergent personality)
                 assembled = prompt_builder.build(
                     user_input=user_input,
-                    system_prompt=system_prompt
+                    system_prompt=""
                 )
 
                 # Get conversation history for LLM
