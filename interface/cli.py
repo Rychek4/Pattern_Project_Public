@@ -238,6 +238,10 @@ class ChatCLI:
             # Get conversation history
             history = conversation_mgr.get_recent_history(limit=30)
 
+            # Add the pulse prompt as the message to respond to
+            # (role="user" is an API constraint, but content clarifies it's automated)
+            history.append({"role": "user", "content": PULSE_PROMPT})
+
             # Show thinking indicator
             with self.console.status("[bold magenta]Pulse thinking...[/bold magenta]", spinner="dots"):
                 response = router.chat(

@@ -180,8 +180,9 @@ class LLMRouter:
         )
         log_info(f"ROUTER DEBUG: _send_to_provider returned: success={response.success}, error={response.error}")
 
-        # Handle fallback
-        if not response.success and self.fallback_enabled:
+        # Handle fallback - but NOT for conversation tasks
+        # Falling back to a weaker model for user-facing chat degrades experience
+        if not response.success and self.fallback_enabled and task_type != TaskType.CONVERSATION:
             fallback_provider = (
                 LLMProvider.KOBOLD if provider == LLMProvider.ANTHROPIC
                 else LLMProvider.ANTHROPIC
@@ -199,6 +200,8 @@ class LLMRouter:
                 temperature=temperature
             )
             log_info(f"ROUTER DEBUG: Fallback returned: success={response.success}, error={response.error}")
+        elif not response.success and task_type == TaskType.CONVERSATION:
+            log_warning(f"{provider.value} failed for CONVERSATION task - not falling back to preserve quality")
 
         log_info(f"ROUTER DEBUG: chat() returning response with success={response.success}")
         return response
