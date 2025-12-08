@@ -70,6 +70,7 @@ MEMORY_MIN_TURNS_PER_TOPIC = 2  # Minimum turns needed for a topic to warrant a 
 MEMORY_MAX_PER_EXTRACTION = 5  # Hard cap on memories created per extraction run
 MEMORY_SKIP_MINOR_TOPICS = True  # Skip topics marked as "minor" significance
 MEMORY_LARGE_TOPIC_THRESHOLD = 15  # Topics with more turns may get 2 memories
+MEMORY_SMALL_BATCH_THRESHOLD = 15  # Below this turn count, preserve all topics (don't skip minor)
 
 # Scoring weights (must sum to 1.0)
 MEMORY_SEMANTIC_WEIGHT = 0.50  # Semantic similarity to query
