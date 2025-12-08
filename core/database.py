@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from core.logger import log_info, log_success, log_error, log_config, log_section
 
 # Schema version for migrations
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 # SQL schema definition
 SCHEMA_SQL = """
@@ -38,9 +38,9 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE TABLE IF NOT EXISTS conversations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id INTEGER REFERENCES sessions(id),
-    role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+    role TEXT NOT NULL,
     content TEXT NOT NULL,
-    input_type TEXT DEFAULT 'text' CHECK (input_type IN ('text', 'voice', 'image')),
+    input_type TEXT DEFAULT 'text',
 
     -- Temporal fields
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -201,6 +201,58 @@ DROP TABLE relationships;
 ALTER TABLE relationships_new RENAME TO relationships;
 """
 
+# Migration SQL for v4 -> v5 (remove CHECK constraints from conversations table)
+MIGRATION_V5_SQL = """
+-- Remove restrictive CHECK constraints from conversations table
+-- SQLite requires table recreation to modify constraints
+
+-- Disable foreign keys during migration
+PRAGMA foreign_keys=OFF;
+
+-- Create new table without CHECK constraints
+CREATE TABLE conversations_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER REFERENCES sessions(id),
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    input_type TEXT DEFAULT 'text',
+
+    -- Temporal fields
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    time_since_last_turn_seconds REAL,
+
+    -- Processing state
+    processed_for_memory BOOLEAN DEFAULT FALSE,
+    processed_at TIMESTAMP
+);
+
+-- Copy all existing data
+INSERT INTO conversations_new (
+    id, session_id, role, content, input_type,
+    created_at, time_since_last_turn_seconds,
+    processed_for_memory, processed_at
+)
+SELECT
+    id, session_id, role, content, input_type,
+    created_at, time_since_last_turn_seconds,
+    processed_for_memory, processed_at
+FROM conversations;
+
+-- Drop old table
+DROP TABLE conversations;
+
+-- Rename new table
+ALTER TABLE conversations_new RENAME TO conversations;
+
+-- Recreate indexes
+CREATE INDEX IF NOT EXISTS idx_conversations_session ON conversations(session_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_unprocessed ON conversations(processed_for_memory) WHERE processed_for_memory = FALSE;
+CREATE INDEX IF NOT EXISTS idx_conversations_created ON conversations(created_at DESC);
+
+-- Re-enable foreign keys
+PRAGMA foreign_keys=ON;
+"""
+
 
 class Database:
     """SQLite database manager with WAL mode and thread-safe connections."""
@@ -330,6 +382,10 @@ class Database:
                 else:
                     # Column doesn't exist or table doesn't exist, run migration
                     conn.executescript(MIGRATION_V4_SQL)
+
+            if from_version < 5:
+                log_config("Applying migration", "v4 → v5 (remove CHECK constraints from conversations)", indent=1)
+                conn.executescript(MIGRATION_V5_SQL)
 
             # Record new version
             conn.execute(

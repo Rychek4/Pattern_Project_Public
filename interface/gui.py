@@ -519,9 +519,9 @@ class ChatWindow(QMainWindow):
             # Store abbreviated pulse message in conversation history
             if self._conversation_mgr:
                 self._conversation_mgr.add_turn(
-                    role="user",
+                    role="system",
                     content=PULSE_STORED_MESSAGE,
-                    input_type="system_pulse"
+                    input_type="system"
                 )
                 log_info("PULSE DEBUG: Added pulse turn to conversation", prefix="🔍")
             else:
