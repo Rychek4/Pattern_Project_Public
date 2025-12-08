@@ -16,6 +16,7 @@ class SourcePriority(IntEnum):
     """
     CORE_MEMORY = 10       # Foundational, always included
     RELATIONSHIP = 20      # Who the user is, how we relate
+    SYSTEM_PULSE = 25      # Pulse timer control (AI agency)
     TEMPORAL = 30          # Time awareness
     VISUAL = 40            # Current visual context
     SEMANTIC_MEMORY = 50   # Retrieved memories

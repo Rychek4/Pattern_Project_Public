@@ -208,6 +208,7 @@ def create_default_builder() -> PromptBuilder:
     from prompt_builder.sources.relationship import RelationshipSource
     from prompt_builder.sources.temporal import TemporalSource
     from prompt_builder.sources.visual import VisualSource
+    from prompt_builder.sources.system_pulse import SystemPulseSource
 
     builder = PromptBuilder()
 
@@ -217,6 +218,7 @@ def create_default_builder() -> PromptBuilder:
     sources = [
         CoreMemorySource(),
         RelationshipSource(),
+        SystemPulseSource(),
         TemporalSource(),
         VisualSource(),
         SemanticMemorySource(),
