@@ -145,10 +145,16 @@ class SystemPulseTimer:
                 if not is_paused:
                     self._tick()
 
-                    # Check if it's time to fire
+                    # Check if it's time to fire (check inside lock, fire outside)
+                    should_fire = False
                     with self._elapsed_lock:
                         if self._elapsed_seconds >= self.pulse_interval:
-                            self._fire_pulse()
+                            should_fire = True
+
+                    # Fire outside the lock to avoid deadlock
+                    # (_fire_pulse calls _reset_elapsed which also needs the lock)
+                    if should_fire:
+                        self._fire_pulse()
 
             except Exception as e:
                 log_error(f"System pulse timer error: {e}")
