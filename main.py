@@ -246,7 +246,6 @@ def start_background_services() -> None:
     if config.SYSTEM_PULSE_ENABLED:
         pulse_timer = get_system_pulse_timer()
         pulse_timer.start()
-        log_subsection(f"System pulse timer started ({config.SYSTEM_PULSE_INTERVAL}s interval)")
 
     # Start relationship analyzer
     relationship_analyzer = get_relationship_analyzer()

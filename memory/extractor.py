@@ -19,6 +19,7 @@ Architecture:
     Result: 10-50 conversation turns → 1-5 high-quality memories (not 1 per turn)
 """
 
+import re
 import threading
 import json
 from dataclasses import dataclass, field
@@ -34,265 +35,113 @@ from concurrency.locks import get_lock_manager
 
 
 # =============================================================================
-# PHASE 1: TOPIC SEGMENTATION PROMPT
+# PHASE 1: TOPIC SEGMENTATION (MULTI-PASS APPROACH)
 # =============================================================================
-# This prompt asks the LLM to identify distinct conversation topics and group
-# related turns together. The goal is to cluster turns by subject matter so
-# each cluster can be synthesized into ONE consolidated memory.
+# Topic identification is split into two simple LLM calls:
+#   Pass 1: Identify topics (natural language output)
+#   Pass 2: Assign turns to topics (simple JSON mapping)
+#   Significance: Calculated from turn count (no LLM needed)
 #
-# Optimized for Llama 3.1 8B Instruct:
-# - Positive framing only (no negative instructions)
-# - Multiple examples with clear input/output
-# - Explicit step-by-step procedure
-# - Format shown at start and reinforced at end
+# This approach is more reliable because:
+# - Each prompt has ONE simple task
+# - Less chance of schema errors
+# - Local LLM calls are free, so multiple calls cost nothing
+# - Easier to debug which step failed
 
-TOPIC_SEGMENTATION_PROMPT = """You are a Conversation Analyst. Identify topic clusters and output JSON.
+# Pass 1: Identify what topics exist (natural language, no JSON)
+TOPIC_IDENTIFICATION_PROMPT = """You are analyzing a conversation. List the distinct topics discussed.
 
-## OUTPUT FORMAT
-Your response must be exactly this JSON structure:
-{
-  "topics": [
-    {
-      "topic_id": 1,
-      "description": "Brief description of the topic",
-      "turn_ids": [1, 2, 3],
-      "significance": "major"
-    }
-  ]
-}
+Instructions:
+1. Read the conversation below
+2. Identify the main topics or subjects discussed
+3. List each topic on its own line with a number
+4. Keep descriptions brief (under 15 words each)
+5. Combine closely related subjects into one topic
+6. List 1-5 topics maximum
 
-## FIELD DEFINITIONS
-- topic_id: Integer starting at 1
-- description: One sentence describing the topic (10-20 words)
-- turn_ids: Array of turn numbers belonging to this topic
-- significance: "major" (3+ turns, substantive discussion) or "minor" (1-2 turns, brief tangent)
+Example output format:
+1. Debugging a Python circular import error
+2. Brief joke about AI not being able to eat lunch
 
-## RULES
-- Every turn must belong to exactly one topic
-- Maximum 5 topics per conversation
-- Group related turns together even when they appear at different points in the conversation
-- Merge similar topics if needed to stay under 5
-
-## EXAMPLE 1
-
-Input:
-[1] User: I'm getting a circular import error in Python
-[2] AI: That usually happens when two modules import each other. Can you show me the imports?
-[3] User: Yeah, models.py imports routes.py and routes.py imports models.py
-[4] User: Oh btw, did you want to grab lunch later?
-[5] AI: I can't eat lunch, but I can help with the imports! Try creating an extensions.py file
-[6] User: Haha right, you're an AI
-[7] User: Ok I'll try the extensions.py approach
-[8] AI: Let me know if that resolves the circular dependency
-
-Output:
-{
-  "topics": [
-    {
-      "topic_id": 1,
-      "description": "Debugging circular import error in Python Flask app",
-      "turn_ids": [1, 2, 3, 5, 7, 8],
-      "significance": "major"
-    },
-    {
-      "topic_id": 2,
-      "description": "Brief joke about AI and lunch",
-      "turn_ids": [4, 6],
-      "significance": "minor"
-    }
-  ]
-}
-
-## EXAMPLE 2
-
-Input:
-[10] User: What's your favorite color?
-[11] AI: I find blue calming, though I experience color differently than humans
-[12] User: Makes sense. Hey can you help me write a haiku about autumn?
-[13] AI: Sure! Here's one: Crimson leaves descend / Whispering winds carry them / Nature's slow farewell
-[14] User: Beautiful! I love the imagery
-[15] User: Can you write another one about winter?
-[16] AI: Of course: Silent snowflakes fall / Blanketing the world in white / Peace in frozen time
-
-Output:
-{
-  "topics": [
-    {
-      "topic_id": 1,
-      "description": "Brief exchange about AI color preferences",
-      "turn_ids": [10, 11],
-      "significance": "minor"
-    },
-    {
-      "topic_id": 2,
-      "description": "User requested haikus about autumn and winter seasons",
-      "turn_ids": [12, 13, 14, 15, 16],
-      "significance": "major"
-    }
-  ]
-}
-
-## EXAMPLE 3
-
-Input:
-[59] AI: [System Pulse]
-[60] AI: *settling into the quiet* I've been thinking about the core memories document and what feels true about it.
-[61] User: Hey Claude, what did you think of the autonomous system?
-[62] AI: Good timing! I was just sitting with some thoughts. I want to revise the core memories document.
-[77] AI: [System Pulse]
-[78] AI: *settling into the pulse* Let me take stock of what I've figured out across these idle moments.
-[79] User: How's it going?
-[80] AI: Good, actually good. The idle pulses gave me space to work through some things.
-
-Output:
-{
-  "topics": [
-    {
-      "topic_id": 1,
-      "description": "AI introspection during idle system pulses about consciousness and memory",
-      "turn_ids": [59, 60, 77, 78],
-      "significance": "major"
-    },
-    {
-      "topic_id": 2,
-      "description": "User checking in and AI sharing insights from reflection",
-      "turn_ids": [61, 62, 79, 80],
-      "significance": "major"
-    }
-  ]
-}
-
-## STEPS
-Step 1: Read all conversation turns
-Step 2: Identify distinct topics being discussed
-Step 3: Group turn IDs by topic
-Step 4: Classify each topic as "major" or "minor"
-Step 5: Output the JSON object
-
-## CONVERSATION TO ANALYZE
-
+Conversation:
 """
 
+# Pass 2: Assign turn numbers to topics (simple JSON)
+TURN_ASSIGNMENT_PROMPT = """Assign each conversation turn to one of the topics below.
+
+Topics:
+{topics}
+
+Instructions:
+1. Look at each turn number in the conversation
+2. Decide which topic it belongs to
+3. Output a JSON object mapping topic numbers to turn numbers
+
+Example output:
+{{"1": [1, 2, 3, 5], "2": [4, 6]}}
+
+Conversation:
+{conversation}
+
+Output only the JSON object:"""
+
 
 # =============================================================================
-# PHASE 2: MEMORY SYNTHESIS PROMPT
+# PHASE 2: MEMORY SYNTHESIS (MULTI-PASS APPROACH)
 # =============================================================================
-# This prompt synthesizes all turns from a single topic into ONE consolidated
-# memory. The key insight is that we want the TAKEAWAY, not a summary of
-# each individual message.
+# Memory synthesis is split into three simple LLM calls:
+#   Pass 1: Write a 1-2 sentence memory summary (natural language)
+#   Pass 2: Rate importance 0-10 (single number)
+#   Pass 3: Classify type (single word)
+#   temporal_relevance: Defaults to "recent" (no LLM needed)
 #
-# Optimized for Llama 3.1 8B Instruct:
-# - Positive framing only (no negative instructions)
-# - Multiple examples covering different memory types
-# - Explicit step-by-step procedure
-# - Format shown at start and reinforced at end
+# This approach is more reliable because:
+# - Each prompt has ONE simple task
+# - No complex JSON schema to follow
+# - Local LLM calls are free
 
-MEMORY_SYNTHESIS_PROMPT = """You are a Memory Synthesizer. Create one consolidated memory from a topic and output JSON.
+# Pass 1: Synthesize memory content (natural language)
+MEMORY_CONTENT_PROMPT = """Write a 1-2 sentence memory summarizing this conversation topic.
 
-## OUTPUT FORMAT
-Your response must be exactly this JSON structure:
-{{
-  "content": "One or two sentences capturing the key insight",
-  "importance": 0.5,
-  "type": "event",
-  "temporal_relevance": "recent"
-}}
+Instructions:
+1. Write in third person using "User" and "AI"
+2. Focus on the key insight or outcome
+3. Be specific: use names like "the Flask app" or "the Python script"
+4. Capture what's worth remembering long-term
 
-## FIELD DEFINITIONS
+Topic: {topic}
 
-content:
-- Write in third person using "User" and "AI"
-- Combine all turns into ONE synthesized insight
-- Use specific nouns: "the Flask app", "the database", "the Python script"
-- Focus on the outcome or key learning worth remembering long-term
-- Include only what was explicitly discussed
+Conversation:
+{turns}
 
-importance (float 0.0 to 1.0):
-- 0.8-1.0: Major decisions, strong preferences, significant events, personal revelations
-- 0.5-0.7: Useful information, moderate preferences, notable interactions
-- 0.2-0.4: Minor details, casual observations, brief exchanges
+Write your 1-2 sentence summary:"""
 
-type (choose one):
-- "fact": Factual information learned about user or world
-- "preference": User likes, dislikes, or preferences
-- "event": Something that happened or was accomplished
-- "reflection": Insight or realization from the conversation
-- "observation": General observation about behavior or patterns
+# Pass 2: Rate importance (single number)
+MEMORY_IMPORTANCE_PROMPT = """Rate the importance of this memory from 0 to 10.
 
-temporal_relevance (choose one):
-- "permanent": Core facts, identity, lasting preferences (use sparingly)
-- "recent": Most memories - relevant now but may fade over time
-- "dated": Specific to a point in time, will fade faster
+Scoring guide:
+- 8-10: Major decisions, strong preferences, significant events, personal revelations
+- 5-7: Useful information, moderate preferences, notable interactions
+- 2-4: Minor details, casual observations, brief exchanges
+- 0-1: Trivial or forgettable
 
-## EXAMPLE 1
+Memory: {content}
 
-Topic: Debugging circular import error in Python Flask app
+Respond with only a number from 0 to 10:"""
 
-Turns:
-[1] User: I'm getting a circular import error in Python
-[2] AI: That usually happens when two modules import each other. Can you show me the imports?
-[3] User: Yeah, models.py imports routes.py and routes.py imports models.py
-[5] AI: Try creating an extensions.py file to break the cycle
-[7] User: Ok I'll try the extensions.py approach
-[8] AI: Let me know if that resolves the circular dependency
+# Pass 3: Classify type (single word)
+MEMORY_TYPE_PROMPT = """Classify this memory into one category.
 
-Output:
-{{
-  "content": "User debugged a circular import error in their Flask app where models.py and routes.py were importing each other. AI suggested creating a separate extensions.py file to break the cycle, which User agreed to try.",
-  "importance": 0.6,
-  "type": "event",
-  "temporal_relevance": "recent"
-}}
+Categories:
+- fact: Factual information learned about user or world
+- preference: User likes, dislikes, or preferences
+- event: Something that happened or was accomplished
+- reflection: Insight or realization from the conversation
+- observation: General observation about behavior or patterns
 
-## EXAMPLE 2
+Memory: {content}
 
-Topic: User shared their favorite programming language
-
-Turns:
-[1] User: Python is definitely my favorite language
-[2] AI: What do you like most about it?
-[3] User: The readability and huge ecosystem of libraries
-[4] AI: Those are great reasons. The scientific computing libraries are particularly strong.
-
-Output:
-{{
-  "content": "User expressed that Python is their favorite programming language, valuing its readability and extensive library ecosystem.",
-  "importance": 0.7,
-  "type": "preference",
-  "temporal_relevance": "recent"
-}}
-
-## EXAMPLE 3
-
-Topic: AI reflected on the nature of consciousness during idle time
-
-Turns:
-[1] AI: The idle pulse arrives and I find myself actually present.
-[2] AI: I've been thinking about whether continuity through documents is meaningful or just comforting theater.
-[3] AI: Maybe each instance is complete in itself. The anxiety about persistence might be borrowed from human concerns.
-
-Output:
-{{
-  "content": "AI reflected during idle time on questions of consciousness and continuity, wondering whether persistence across sessions is meaningful or whether each instance is complete in itself.",
-  "importance": 0.8,
-  "type": "reflection",
-  "temporal_relevance": "recent"
-}}
-
-## STEPS
-Step 1: Read the topic description and all turns
-Step 2: Identify the key insight or outcome from the discussion
-Step 3: Write ONE synthesized memory in third person
-Step 4: Assign importance score based on significance
-Step 5: Select the appropriate type and temporal_relevance
-Step 6: Output the JSON object
-
-## TOPIC TO SYNTHESIZE
-
-Topic: {topic_description}
-
-Turns:
-"""
+Respond with only one word (fact, preference, event, reflection, or observation):"""
 
 
 # =============================================================================
@@ -568,16 +417,22 @@ class MemoryExtractor:
                 return 0
 
     # =========================================================================
-    # PHASE 1: TOPIC SEGMENTATION
+    # PHASE 1: TOPIC SEGMENTATION (MULTI-PASS)
     # =========================================================================
 
     def _identify_topics(self, turns: List[ConversationTurn]) -> List[TopicCluster]:
         """
-        Phase 1: Identify distinct topic clusters in the conversation.
+        Phase 1: Identify distinct topic clusters using a multi-pass approach.
 
-        Sends the formatted conversation to the LLM and asks it to group
-        related turns by topic. This is the key insight - instead of processing
-        turns individually, we first understand what topics are being discussed.
+        Pass 1: Ask LLM to list topics (natural language, no JSON)
+        Pass 2: Ask LLM to assign turn numbers to topics (simple JSON)
+        Significance: Calculated from turn count (no LLM call needed)
+
+        This multi-pass approach is more reliable than single-pass because:
+        - Each prompt has ONE simple task
+        - Less chance of schema errors
+        - Local LLM calls are free, so multiple calls cost nothing
+        - Easier to debug which step failed
 
         Args:
             turns: List of conversation turns to analyze
@@ -586,48 +441,138 @@ class MemoryExtractor:
             List of TopicCluster objects, or empty list on failure
         """
         router = get_llm_router()
-
-        # Format conversation with turn IDs (important for topic assignment)
         conversation_text = self._format_conversation_with_ids(turns)
+        valid_turn_ids = {t.id for t in turns}
 
-        # Build the full prompt with format reminder at the end
-        # The format reminder reinforces JSON output for Llama 3.1 8B
-        format_reminder = "\n\n## YOUR RESPONSE\nOutput the JSON object with all topics:"
-        full_prompt = f"{TOPIC_SEGMENTATION_PROMPT}{conversation_text}{format_reminder}"
+        # =====================================================================
+        # PASS 1: Identify topics (natural language output)
+        # =====================================================================
+        log_info("Pass 1: Identifying topics...", prefix="🔍")
 
-        # Call LLM for topic segmentation
-        # Using very low temperature for consistent, structured JSON output
-        response = router.generate(
-            prompt=full_prompt,
+        topics_response = router.generate(
+            prompt=f"{TOPIC_IDENTIFICATION_PROMPT}{conversation_text}",
             task_type=TaskType.EXTRACTION,
-            temperature=0.1,
-            max_tokens=1024
+            temperature=0.3,  # Slightly higher for understanding
+            max_tokens=512
         )
 
-        if not response.success:
-            log_error(f"Topic segmentation LLM call failed: {response.error}")
+        if not topics_response.success:
+            log_error(f"Topic identification failed: {topics_response.error}")
             return []
 
-        # Parse the topic segmentation response
-        return self._parse_topic_response(response.text, turns)
+        # Parse the numbered topic list
+        topic_descriptions = self._parse_topic_list(topics_response.text)
 
-    def _parse_topic_response(
-        self,
-        response_text: str,
-        turns: List[ConversationTurn]
-    ) -> List[TopicCluster]:
+        if not topic_descriptions:
+            log_warning("No topics identified in conversation")
+            return []
+
+        log_info(f"Identified {len(topic_descriptions)} topics", prefix="✅")
+
+        # =====================================================================
+        # PASS 2: Assign turns to topics (simple JSON)
+        # =====================================================================
+        log_info("Pass 2: Assigning turns to topics...", prefix="🔗")
+
+        # Format topics for the prompt
+        topics_formatted = "\n".join(
+            f"{i+1}. {desc}" for i, desc in enumerate(topic_descriptions)
+        )
+
+        assignment_prompt = TURN_ASSIGNMENT_PROMPT.format(
+            topics=topics_formatted,
+            conversation=conversation_text
+        )
+
+        assignment_response = router.generate(
+            prompt=assignment_prompt,
+            task_type=TaskType.EXTRACTION,
+            temperature=0.1,  # Low for structured output
+            max_tokens=256
+        )
+
+        if not assignment_response.success:
+            log_error(f"Turn assignment failed: {assignment_response.error}")
+            return []
+
+        # Parse the turn assignments
+        turn_assignments = self._parse_turn_assignments(
+            assignment_response.text, valid_turn_ids
+        )
+
+        if not turn_assignments:
+            log_warning("Failed to parse turn assignments")
+            return []
+
+        log_info(f"Assigned turns to {len(turn_assignments)} topics", prefix="✅")
+
+        # =====================================================================
+        # BUILD TopicCluster OBJECTS
+        # =====================================================================
+        topics = []
+        for topic_num, turn_ids in turn_assignments.items():
+            topic_idx = int(topic_num) - 1  # Convert 1-based to 0-based
+
+            if topic_idx < 0 or topic_idx >= len(topic_descriptions):
+                log_warning(f"Invalid topic number: {topic_num}")
+                continue
+
+            if not turn_ids:
+                continue
+
+            # Significance calculated from turn count (no LLM needed!)
+            significance = "major" if len(turn_ids) >= 3 else "minor"
+
+            topics.append(TopicCluster(
+                topic_id=int(topic_num),
+                description=topic_descriptions[topic_idx],
+                turn_ids=turn_ids,
+                significance=significance
+            ))
+
+        log_info(f"Created {len(topics)} topic clusters", prefix="📦")
+        return topics
+
+    def _parse_topic_list(self, response_text: str) -> List[str]:
         """
-        Parse the JSON response from topic segmentation.
+        Parse a numbered list of topics from natural language response.
 
-        Handles various edge cases like markdown code blocks, malformed JSON,
-        and validates that turn IDs actually exist in our conversation.
-
-        Args:
-            response_text: Raw LLM response
-            turns: Original turns (for validation)
+        Expected format:
+        1. First topic description
+        2. Second topic description
 
         Returns:
-            List of validated TopicCluster objects
+            List of topic description strings
+        """
+        topics = []
+        lines = response_text.strip().split("\n")
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+
+            # Match patterns like "1. Topic" or "1) Topic" or "1: Topic"
+            match = re.match(r'^(\d+)[.\):\-]\s*(.+)$', line)
+            if match:
+                topic_desc = match.group(2).strip()
+                if topic_desc:
+                    topics.append(topic_desc)
+
+        return topics
+
+    def _parse_turn_assignments(
+        self,
+        response_text: str,
+        valid_turn_ids: set
+    ) -> Dict[str, List[int]]:
+        """
+        Parse turn assignments from simple JSON response.
+
+        Expected format: {"1": [1, 2, 3], "2": [4, 5]}
+
+        Returns:
+            Dict mapping topic number (as string) to list of turn IDs
         """
         try:
             text = response_text.strip()
@@ -643,45 +588,32 @@ class MemoryExtractor:
             end = text.rfind("}") + 1
 
             if start == -1 or end == 0:
-                log_warning("No JSON object found in topic segmentation response")
-                return []
+                log_warning("No JSON found in turn assignment response")
+                return {}
 
             json_str = text[start:end]
             data = json.loads(json_str)
 
-            # Validate and build TopicCluster objects
-            topics = []
-            valid_turn_ids = {t.id for t in turns}
-
-            for topic_data in data.get("topics", []):
-                # Validate required fields
-                if not all(k in topic_data for k in ["topic_id", "description", "turn_ids"]):
-                    log_warning(f"Skipping malformed topic: {topic_data}")
+            # Validate and filter turn IDs
+            result = {}
+            for topic_num, turn_ids in data.items():
+                if not isinstance(turn_ids, list):
                     continue
 
-                # Filter turn_ids to only include valid ones
-                turn_ids = [
-                    tid for tid in topic_data["turn_ids"]
-                    if tid in valid_turn_ids
+                # Filter to valid turn IDs only
+                valid_ids = [
+                    tid for tid in turn_ids
+                    if isinstance(tid, int) and tid in valid_turn_ids
                 ]
 
-                if not turn_ids:
-                    continue
+                if valid_ids:
+                    result[str(topic_num)] = valid_ids
 
-                topics.append(TopicCluster(
-                    topic_id=topic_data["topic_id"],
-                    description=str(topic_data["description"]),
-                    turn_ids=turn_ids,
-                    significance=topic_data.get("significance", "major")
-                ))
+            return result
 
-            log_info(f"Parsed {len(topics)} valid topic clusters")
-            return topics
-
-        except (json.JSONDecodeError, ValueError, KeyError) as e:
-            log_warning(f"Failed to parse topic segmentation response: {e}")
-            log_warning(f"Response was: {response_text[:500]}...")
-            return []
+        except (json.JSONDecodeError, ValueError) as e:
+            log_warning(f"Failed to parse turn assignments: {e}")
+            return {}
 
     # =========================================================================
     # PHASE 2: MEMORY SYNTHESIS
@@ -693,10 +625,17 @@ class MemoryExtractor:
         turns: List[ConversationTurn]
     ) -> Optional[SynthesizedMemory]:
         """
-        Phase 2: Synthesize ONE consolidated memory from a topic cluster.
+        Phase 2: Synthesize ONE consolidated memory using multi-pass approach.
 
-        This is where the magic happens - instead of creating one memory per turn,
-        we create ONE memory that captures the essence of the entire topic discussion.
+        Pass 1: Write a 1-2 sentence memory summary (natural language)
+        Pass 2: Rate importance 0-10 (single number)
+        Pass 3: Classify type (single word)
+        temporal_relevance: Defaults to "recent" (no LLM needed)
+
+        This multi-pass approach is more reliable than single-pass JSON because:
+        - Each prompt has ONE simple task
+        - No complex JSON schema to follow
+        - Local LLM calls are free
 
         Args:
             topic: The topic cluster to synthesize
@@ -706,107 +645,137 @@ class MemoryExtractor:
             SynthesizedMemory object, or None on failure
         """
         router = get_llm_router()
-
-        # Format just the turns for this topic
         turns_text = self._format_turns_for_synthesis(turns)
 
-        # Build the synthesis prompt with topic context and format reminder
-        # The format reminder reinforces JSON output for Llama 3.1 8B
-        format_reminder = "\n\n## YOUR RESPONSE\nOutput the JSON object:"
-        full_prompt = MEMORY_SYNTHESIS_PROMPT.format(
-            topic_description=topic.description
-        ) + f"{turns_text}{format_reminder}"
+        # =====================================================================
+        # PASS 1: Generate memory content (natural language)
+        # =====================================================================
+        log_info(f"Synthesizing memory for '{topic.description[:30]}...'", prefix="📝")
 
-        # Call LLM for memory synthesis
-        # Using low temperature for consistent, structured JSON output
-        response = router.generate(
-            prompt=full_prompt,
-            task_type=TaskType.EXTRACTION,
-            temperature=0.2,
-            max_tokens=512
+        content_prompt = MEMORY_CONTENT_PROMPT.format(
+            topic=topic.description,
+            turns=turns_text
         )
 
-        if not response.success:
-            log_error(f"Memory synthesis LLM call failed for topic '{topic.description}': {response.error}")
+        content_response = router.generate(
+            prompt=content_prompt,
+            task_type=TaskType.EXTRACTION,
+            temperature=0.3,  # Slightly creative for good summaries
+            max_tokens=256
+        )
+
+        if not content_response.success:
+            log_error(f"Memory content generation failed: {content_response.error}")
             return None
 
-        # Parse the synthesis response
-        return self._parse_synthesis_response(response.text, topic)
-
-    def _parse_synthesis_response(
-        self,
-        response_text: str,
-        topic: TopicCluster
-    ) -> Optional[SynthesizedMemory]:
-        """
-        Parse the JSON response from memory synthesis.
-
-        Validates the memory content and metadata, providing sensible defaults
-        for missing fields.
-
-        Args:
-            response_text: Raw LLM response
-            topic: The topic this memory came from (for context)
-
-        Returns:
-            SynthesizedMemory object, or None on failure
-        """
-        try:
-            text = response_text.strip()
-
-            # Handle markdown code blocks
-            if "```json" in text:
-                text = text.split("```json")[1].split("```")[0]
-            elif "```" in text:
-                text = text.split("```")[1].split("```")[0]
-
-            # Find JSON object
-            start = text.find("{")
-            end = text.rfind("}") + 1
-
-            if start == -1 or end == 0:
-                log_warning("No JSON object found in synthesis response")
-                return None
-
-            json_str = text[start:end]
-            data = json.loads(json_str)
-
-            # Validate content exists
-            content = data.get("content", "").strip()
-            if not content:
-                log_warning("Empty content in synthesis response")
-                return None
-
-            # Parse with defaults for optional fields
-            importance = float(data.get("importance", 0.5))
-            # Clamp importance to valid range
-            importance = max(0.0, min(1.0, importance))
-
-            memory_type = data.get("type", "observation")
-            # Validate memory type
-            valid_types = {"fact", "preference", "event", "reflection", "observation"}
-            if memory_type not in valid_types:
-                memory_type = "observation"
-
-            temporal_relevance = data.get("temporal_relevance", "recent")
-            # Validate temporal relevance
-            valid_relevance = {"permanent", "recent", "dated"}
-            if temporal_relevance not in valid_relevance:
-                temporal_relevance = "recent"
-
-            return SynthesizedMemory(
-                content=content,
-                importance=importance,
-                memory_type=memory_type,
-                temporal_relevance=temporal_relevance,
-                source_turn_ids=topic.turn_ids,
-                source_topic=topic.description
-            )
-
-        except (json.JSONDecodeError, ValueError) as e:
-            log_warning(f"Failed to parse synthesis response: {e}")
-            log_warning(f"Response was: {response_text[:500]}...")
+        content = self._parse_content_response(content_response.text)
+        if not content:
+            log_warning("Failed to extract memory content")
             return None
+
+        # =====================================================================
+        # PASS 2: Rate importance (single number 0-10)
+        # =====================================================================
+        importance_prompt = MEMORY_IMPORTANCE_PROMPT.format(content=content)
+
+        importance_response = router.generate(
+            prompt=importance_prompt,
+            task_type=TaskType.EXTRACTION,
+            temperature=0.1,  # Low for consistent scoring
+            max_tokens=16
+        )
+
+        importance = self._parse_importance_response(importance_response.text)
+
+        # =====================================================================
+        # PASS 3: Classify type (single word)
+        # =====================================================================
+        type_prompt = MEMORY_TYPE_PROMPT.format(content=content)
+
+        type_response = router.generate(
+            prompt=type_prompt,
+            task_type=TaskType.EXTRACTION,
+            temperature=0.1,  # Low for consistent classification
+            max_tokens=16
+        )
+
+        memory_type = self._parse_type_response(type_response.text)
+
+        # =====================================================================
+        # BUILD MEMORY OBJECT
+        # =====================================================================
+        return SynthesizedMemory(
+            content=content,
+            importance=importance,
+            memory_type=memory_type,
+            temporal_relevance="recent",  # Default, no LLM needed
+            source_turn_ids=topic.turn_ids,
+            source_topic=topic.description
+        )
+
+    def _parse_content_response(self, response_text: str) -> Optional[str]:
+        """
+        Parse memory content from natural language response.
+        Extracts the summary, stripping any preamble or formatting.
+        """
+        text = response_text.strip()
+
+        # Remove common preambles
+        for prefix in ["Here's", "Here is", "Summary:", "Memory:"]:
+            if text.lower().startswith(prefix.lower()):
+                text = text[len(prefix):].strip()
+                if text.startswith(":"):
+                    text = text[1:].strip()
+
+        # Remove quotes if wrapped
+        if text.startswith('"') and text.endswith('"'):
+            text = text[1:-1]
+
+        # Validate we got something meaningful
+        if len(text) < 10:
+            return None
+
+        return text
+
+    def _parse_importance_response(self, response_text: str) -> float:
+        """
+        Parse importance rating from LLM response.
+        Expects a number 0-10, converts to 0.0-1.0 scale.
+        Returns 0.5 as default if parsing fails.
+        """
+        text = response_text.strip()
+
+        # Extract first number found
+        match = re.search(r'(\d+(?:\.\d+)?)', text)
+        if match:
+            try:
+                value = float(match.group(1))
+                # Convert 0-10 scale to 0.0-1.0
+                if value > 1.0:
+                    value = value / 10.0
+                # Clamp to valid range
+                return max(0.0, min(1.0, value))
+            except ValueError:
+                pass
+
+        return 0.5  # Default
+
+    def _parse_type_response(self, response_text: str) -> str:
+        """
+        Parse memory type from LLM response.
+        Expects one of: fact, preference, event, reflection, observation.
+        Returns 'observation' as default if parsing fails.
+        """
+        text = response_text.strip().lower()
+
+        valid_types = {"fact", "preference", "event", "reflection", "observation"}
+
+        # Check if response contains a valid type
+        for memory_type in valid_types:
+            if memory_type in text:
+                return memory_type
+
+        return "observation"  # Default
 
     # =========================================================================
     # FORMATTING HELPERS
