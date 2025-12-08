@@ -188,6 +188,38 @@ class RelationshipAnalyzer:
             lines.append(f"- {result.memory.content}")
         return "\n".join(lines)
 
+    def _normalize_key(self, key: str) -> str:
+        """
+        Normalize a JSON key by removing quotes, escapes, and extra whitespace.
+
+        Handles malformed LLM outputs like:
+        - "affinity_delta" -> affinity_delta
+        - 'affinity_delta' -> affinity_delta
+        - \"affinity_delta\" -> affinity_delta
+        - "\"affinity_delta\"" -> affinity_delta
+        """
+        # Remove all quote characters and backslashes
+        normalized = re.sub(r'["\'\\\`]', '', str(key))
+        # Strip whitespace and lowercase for case-insensitive matching
+        return normalized.strip().lower()
+
+    def _find_key_value(self, data: dict, target: str) -> Optional[Any]:
+        """
+        Find a value by normalized key matching.
+
+        Args:
+            data: Parsed JSON dictionary
+            target: Key to find (e.g., "affinity_delta")
+
+        Returns:
+            Value if found, None otherwise
+        """
+        target_normalized = self._normalize_key(target)
+        for key, value in data.items():
+            if self._normalize_key(key) == target_normalized:
+                return value
+        return None
+
     def _analyze_with_llm(
         self,
         conversation: str,
@@ -223,32 +255,36 @@ class RelationshipAnalyzer:
                     text = match.group(1)
 
             # Try to find JSON object in the response (handles extra text/whitespace)
-            json_match = re.search(r'\{[^{}]*"affinity_delta"[^{}]*\}', text, re.DOTALL)
+            # Use flexible pattern that matches any key containing affinity_delta
+            json_match = re.search(r'\{[^{}]*affinity_delta[^{}]*\}', text, re.DOTALL | re.IGNORECASE)
             if json_match:
                 text = json_match.group(0)
-
-            # Fix common LLM escaping errors where keys have embedded quotes
-            # e.g., {"\"affinity_delta\"": 1} or {"'affinity_delta'": 1}
-            text = re.sub(r'"\\"([^"]+)\\""\s*:', r'"\1":', text)  # Fix \"key\" -> key
-            text = re.sub(r"\"'([^']+)'\"\s*:", r'"\1":', text)    # Fix "'key'" -> key
 
             # Normalize whitespace within JSON (fixes malformed responses with newlines)
             text = re.sub(r'\s+', ' ', text).strip()
 
+            # Fix common quote escaping issues before parsing
+            # Handle \"key\" patterns
+            text = re.sub(r'"\\"([^"]+)\\""\s*:', r'"\1":', text)
+            # Handle "'key'" patterns
+            text = re.sub(r"\"'([^']+)'\"\s*:", r'"\1":', text)
+
             data = json.loads(text)
 
-            # Normalize dictionary keys by stripping any embedded quotes
-            normalized_data = {k.strip('"\'').strip(): v for k, v in data.items()}
+            # Use fuzzy key lookup to handle malformed keys
+            affinity_delta_raw = self._find_key_value(data, "affinity_delta")
+            trust_delta_raw = self._find_key_value(data, "trust_delta")
+            reasoning_raw = self._find_key_value(data, "reasoning")
 
             # Validate required keys exist
-            if "affinity_delta" not in normalized_data:
+            if affinity_delta_raw is None:
                 log_warning(
                     f"Missing 'affinity_delta' in response. "
                     f"Found keys: {list(data.keys())}. Raw text: {text[:200]}"
                 )
                 return None
 
-            if "trust_delta" not in normalized_data:
+            if trust_delta_raw is None:
                 log_warning(
                     f"Missing 'trust_delta' in response. "
                     f"Found keys: {list(data.keys())}. Raw text: {text[:200]}"
@@ -256,17 +292,13 @@ class RelationshipAnalyzer:
                 return None
 
             # Clamp deltas to ±max_delta (default ±2)
-            affinity_delta = max(-self.max_delta, min(self.max_delta,
-                int(normalized_data.get("affinity_delta", 0))
-            ))
-            trust_delta = max(-self.max_delta, min(self.max_delta,
-                int(normalized_data.get("trust_delta", 0))
-            ))
+            affinity_delta = max(-self.max_delta, min(self.max_delta, int(affinity_delta_raw)))
+            trust_delta = max(-self.max_delta, min(self.max_delta, int(trust_delta_raw)))
 
             return AnalysisResult(
                 affinity_delta=affinity_delta,
                 trust_delta=trust_delta,
-                reasoning=normalized_data.get("reasoning", ""),
+                reasoning=str(reasoning_raw) if reasoning_raw else "",
                 analyzed_at=datetime.now()
             )
 
