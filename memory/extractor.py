@@ -19,6 +19,7 @@ Architecture:
     Result: 10-50 conversation turns → 1-5 high-quality memories (not 1 per turn)
 """
 
+import re
 import threading
 import json
 from dataclasses import dataclass, field
@@ -34,142 +35,55 @@ from concurrency.locks import get_lock_manager
 
 
 # =============================================================================
-# PHASE 1: TOPIC SEGMENTATION PROMPT
+# PHASE 1: TOPIC SEGMENTATION (MULTI-PASS APPROACH)
 # =============================================================================
-# This prompt asks the LLM to identify distinct conversation topics and group
-# related turns together. The goal is to cluster turns by subject matter so
-# each cluster can be synthesized into ONE consolidated memory.
+# Topic identification is split into two simple LLM calls:
+#   Pass 1: Identify topics (natural language output)
+#   Pass 2: Assign turns to topics (simple JSON mapping)
+#   Significance: Calculated from turn count (no LLM needed)
 #
-# Optimized for Llama 3.1 8B Instruct:
-# - Positive framing only (no negative instructions)
-# - Multiple examples with clear input/output
-# - Explicit step-by-step procedure
-# - Format shown at start and reinforced at end
+# This approach is more reliable because:
+# - Each prompt has ONE simple task
+# - Less chance of schema errors
+# - Local LLM calls are free, so multiple calls cost nothing
+# - Easier to debug which step failed
 
-TOPIC_SEGMENTATION_PROMPT = """You are a Conversation Analyst. Your task is to group conversation turns into topic clusters and output JSON.
+# Pass 1: Identify what topics exist (natural language, no JSON)
+TOPIC_IDENTIFICATION_PROMPT = """You are analyzing a conversation. List the distinct topics discussed.
 
-## STEP-BY-STEP INSTRUCTIONS
+Instructions:
+1. Read the conversation below
+2. Identify the main topics or subjects discussed
+3. List each topic on its own line with a number
+4. Keep descriptions brief (under 15 words each)
+5. Combine closely related subjects into one topic
+6. List 1-5 topics maximum
 
-1. Read all the conversation turns below
-2. Identify distinct topics being discussed
-3. Assign each turn number to exactly one topic
-4. Output a JSON object with your topic clusters
-
-## REQUIRED JSON FORMAT
-
-You must output exactly this JSON structure with these exact field names:
-
-{
-  "topics": [
-    {
-      "topic_id": 1,
-      "description": "One sentence describing what this topic is about",
-      "turn_ids": [1, 2, 5, 7],
-      "significance": "major"
-    }
-  ]
-}
-
-## FIELD REQUIREMENTS (use these exact names)
-
-- topic_id: An integer starting at 1, incrementing for each topic (1, 2, 3...)
-- description: A brief sentence describing the topic (10-20 words)
-- turn_ids: An array of integers listing which turn numbers belong to this topic
-- significance: Either "major" (3 or more turns) or "minor" (1-2 turns)
-
-IMPORTANT: The turn_ids field is required. Every turn number from the conversation must appear in exactly one topic's turn_ids array.
-
-## EXAMPLE 1: Technical Discussion with Tangent
+Example output format:
+1. Debugging a Python circular import error
+2. Brief joke about AI not being able to eat lunch
 
 Conversation:
-[1] User: I'm getting a circular import error in Python
-[2] AI: That usually happens when two modules import each other. Can you show me the imports?
-[3] User: Yeah, models.py imports routes.py and routes.py imports models.py
-[4] User: Oh btw, did you want to grab lunch later?
-[5] AI: I can't eat lunch, but I can help with the imports! Try creating an extensions.py file
-[6] User: Haha right, you're an AI
-[7] User: Ok I'll try the extensions.py approach
-[8] AI: Let me know if that resolves the circular dependency
-
-Correct output:
-{
-  "topics": [
-    {
-      "topic_id": 1,
-      "description": "Debugging circular import error in Python Flask application",
-      "turn_ids": [1, 2, 3, 5, 7, 8],
-      "significance": "major"
-    },
-    {
-      "topic_id": 2,
-      "description": "Brief humorous exchange about AI limitations",
-      "turn_ids": [4, 6],
-      "significance": "minor"
-    }
-  ]
-}
-
-## EXAMPLE 2: Creative Writing Request
-
-Conversation:
-[10] User: What's your favorite color?
-[11] AI: I find blue calming, though I experience color differently than humans
-[12] User: Makes sense. Hey can you help me write a haiku about autumn?
-[13] AI: Sure! Here's one: Crimson leaves descend / Whispering winds carry them / Nature's slow farewell
-[14] User: Beautiful! I love the imagery
-[15] User: Can you write another one about winter?
-[16] AI: Of course: Silent snowflakes fall / Blanketing the world in white / Peace in frozen time
-
-Correct output:
-{
-  "topics": [
-    {
-      "topic_id": 1,
-      "description": "Brief exchange about AI color perception and preferences",
-      "turn_ids": [10, 11],
-      "significance": "minor"
-    },
-    {
-      "topic_id": 2,
-      "description": "Writing seasonal haiku poems about autumn and winter",
-      "turn_ids": [12, 13, 14, 15, 16],
-      "significance": "major"
-    }
-  ]
-}
-
-## EXAMPLE 3: Single Focused Topic
-
-Conversation:
-[20] User: How do I center a div in CSS?
-[21] AI: The modern approach is using flexbox. Add display: flex, justify-content: center, and align-items: center to the parent.
-[22] User: What if I need to support older browsers?
-[23] AI: For older browsers, use margin: 0 auto for horizontal centering, combined with position absolute and transform for vertical.
-[24] User: Perfect, the flexbox approach worked great!
-
-Correct output:
-{
-  "topics": [
-    {
-      "topic_id": 1,
-      "description": "CSS techniques for centering div elements using flexbox and legacy methods",
-      "turn_ids": [20, 21, 22, 23, 24],
-      "significance": "major"
-    }
-  ]
-}
-
-## BEFORE YOU RESPOND - CHECKLIST
-
-Verify your JSON has these exact field names:
-- topic_id (integer like 1, 2, 3)
-- description (string)
-- turn_ids (array of integers from the conversation)
-- significance ("major" or "minor")
-
-## CONVERSATION TO ANALYZE
-
 """
+
+# Pass 2: Assign turn numbers to topics (simple JSON)
+TURN_ASSIGNMENT_PROMPT = """Assign each conversation turn to one of the topics below.
+
+Topics:
+{topics}
+
+Instructions:
+1. Look at each turn number in the conversation
+2. Decide which topic it belongs to
+3. Output a JSON object mapping topic numbers to turn numbers
+
+Example output:
+{{"1": [1, 2, 3, 5], "2": [4, 6]}}
+
+Conversation:
+{conversation}
+
+Output only the JSON object:"""
 
 
 # =============================================================================
@@ -566,19 +480,22 @@ class MemoryExtractor:
                 return 0
 
     # =========================================================================
-    # PHASE 1: TOPIC SEGMENTATION
+    # PHASE 1: TOPIC SEGMENTATION (MULTI-PASS)
     # =========================================================================
 
     def _identify_topics(self, turns: List[ConversationTurn]) -> List[TopicCluster]:
         """
-        Phase 1: Identify distinct topic clusters in the conversation.
+        Phase 1: Identify distinct topic clusters using a multi-pass approach.
 
-        Sends the formatted conversation to the LLM and asks it to group
-        related turns by topic. This is the key insight - instead of processing
-        turns individually, we first understand what topics are being discussed.
+        Pass 1: Ask LLM to list topics (natural language, no JSON)
+        Pass 2: Ask LLM to assign turn numbers to topics (simple JSON)
+        Significance: Calculated from turn count (no LLM call needed)
 
-        Includes one retry attempt if schema validation fails - sends a correction
-        prompt asking the LLM to fix its JSON response.
+        This multi-pass approach is more reliable than single-pass because:
+        - Each prompt has ONE simple task
+        - Less chance of schema errors
+        - Local LLM calls are free, so multiple calls cost nothing
+        - Easier to debug which step failed
 
         Args:
             turns: List of conversation turns to analyze
@@ -587,83 +504,139 @@ class MemoryExtractor:
             List of TopicCluster objects, or empty list on failure
         """
         router = get_llm_router()
-
-        # Format conversation with turn IDs (important for topic assignment)
         conversation_text = self._format_conversation_with_ids(turns)
+        valid_turn_ids = {t.id for t in turns}
 
-        # Build the full prompt with format reminder at the end
-        # The format reminder reinforces JSON output for Llama 3.1 8B
-        format_reminder = "\n\n## YOUR RESPONSE\nOutput the JSON object with all topics:"
-        full_prompt = f"{TOPIC_SEGMENTATION_PROMPT}{conversation_text}{format_reminder}"
+        # =====================================================================
+        # PASS 1: Identify topics (natural language output)
+        # =====================================================================
+        log_info("Pass 1: Identifying topics...", prefix="🔍")
 
-        # Call LLM for topic segmentation
-        # Using very low temperature for consistent, structured JSON output
-        response = router.generate(
-            prompt=full_prompt,
+        topics_response = router.generate(
+            prompt=f"{TOPIC_IDENTIFICATION_PROMPT}{conversation_text}",
             task_type=TaskType.EXTRACTION,
-            temperature=0.1,
-            max_tokens=1024
+            temperature=0.3,  # Slightly higher for understanding
+            max_tokens=512
         )
 
-        if not response.success:
-            log_error(f"Topic segmentation LLM call failed: {response.error}")
+        if not topics_response.success:
+            log_error(f"Topic identification failed: {topics_response.error}")
             return []
 
-        # Parse the topic segmentation response
-        topics, schema_errors = self._parse_topic_response(response.text, turns)
+        # Parse the numbered topic list
+        topic_descriptions = self._parse_topic_list(topics_response.text)
 
-        # If we got valid topics, return them
-        if topics:
-            return topics
+        if not topic_descriptions:
+            log_warning("No topics identified in conversation")
+            return []
 
-        # If schema errors detected, try one correction attempt
-        if schema_errors:
-            log_info("Requesting schema correction from LLM", prefix="🔄")
+        log_info(f"Identified {len(topic_descriptions)} topics", prefix="✅")
 
-            correction_prompt = self._build_correction_prompt(
-                response.text, schema_errors
-            )
+        # =====================================================================
+        # PASS 2: Assign turns to topics (simple JSON)
+        # =====================================================================
+        log_info("Pass 2: Assigning turns to topics...", prefix="🔗")
 
-            retry_response = router.generate(
-                prompt=correction_prompt,
-                task_type=TaskType.EXTRACTION,
-                temperature=0.1,
-                max_tokens=1024
-            )
+        # Format topics for the prompt
+        topics_formatted = "\n".join(
+            f"{i+1}. {desc}" for i, desc in enumerate(topic_descriptions)
+        )
 
-            if retry_response.success:
-                topics, _ = self._parse_topic_response(retry_response.text, turns)
-                if topics:
-                    log_info(f"Schema correction successful: {len(topics)} topics", prefix="✅")
-                    return topics
-                else:
-                    log_warning("Schema correction failed - no valid topics after retry")
+        assignment_prompt = TURN_ASSIGNMENT_PROMPT.format(
+            topics=topics_formatted,
+            conversation=conversation_text
+        )
 
-        return []
+        assignment_response = router.generate(
+            prompt=assignment_prompt,
+            task_type=TaskType.EXTRACTION,
+            temperature=0.1,  # Low for structured output
+            max_tokens=256
+        )
 
-    def _parse_topic_response(
-        self,
-        response_text: str,
-        turns: List[ConversationTurn]
-    ) -> tuple:
+        if not assignment_response.success:
+            log_error(f"Turn assignment failed: {assignment_response.error}")
+            return []
+
+        # Parse the turn assignments
+        turn_assignments = self._parse_turn_assignments(
+            assignment_response.text, valid_turn_ids
+        )
+
+        if not turn_assignments:
+            log_warning("Failed to parse turn assignments")
+            return []
+
+        log_info(f"Assigned turns to {len(turn_assignments)} topics", prefix="✅")
+
+        # =====================================================================
+        # BUILD TopicCluster OBJECTS
+        # =====================================================================
+        topics = []
+        for topic_num, turn_ids in turn_assignments.items():
+            topic_idx = int(topic_num) - 1  # Convert 1-based to 0-based
+
+            if topic_idx < 0 or topic_idx >= len(topic_descriptions):
+                log_warning(f"Invalid topic number: {topic_num}")
+                continue
+
+            if not turn_ids:
+                continue
+
+            # Significance calculated from turn count (no LLM needed!)
+            significance = "major" if len(turn_ids) >= 3 else "minor"
+
+            topics.append(TopicCluster(
+                topic_id=int(topic_num),
+                description=topic_descriptions[topic_idx],
+                turn_ids=turn_ids,
+                significance=significance
+            ))
+
+        log_info(f"Created {len(topics)} topic clusters", prefix="📦")
+        return topics
+
+    def _parse_topic_list(self, response_text: str) -> List[str]:
         """
-        Parse the JSON response from topic segmentation with schema validation.
+        Parse a numbered list of topics from natural language response.
 
-        Handles various edge cases like markdown code blocks, malformed JSON,
-        and validates that turn IDs actually exist in our conversation.
-        Collects schema errors for potential retry with correction prompt.
-
-        Args:
-            response_text: Raw LLM response
-            turns: Original turns (for validation)
+        Expected format:
+        1. First topic description
+        2. Second topic description
 
         Returns:
-            Tuple of (topics, schema_errors):
-            - topics: List of validated TopicCluster objects
-            - schema_errors: List of schema error messages for retry
+            List of topic description strings
         """
-        schema_errors = []
+        topics = []
+        lines = response_text.strip().split("\n")
 
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+
+            # Match patterns like "1. Topic" or "1) Topic" or "1: Topic"
+            match = re.match(r'^(\d+)[.\):\-]\s*(.+)$', line)
+            if match:
+                topic_desc = match.group(2).strip()
+                if topic_desc:
+                    topics.append(topic_desc)
+
+        return topics
+
+    def _parse_turn_assignments(
+        self,
+        response_text: str,
+        valid_turn_ids: set
+    ) -> Dict[str, List[int]]:
+        """
+        Parse turn assignments from simple JSON response.
+
+        Expected format: {"1": [1, 2, 3], "2": [4, 5]}
+
+        Returns:
+            Dict mapping topic number (as string) to list of turn IDs
+        """
         try:
             text = response_text.strip()
 
@@ -678,105 +651,32 @@ class MemoryExtractor:
             end = text.rfind("}") + 1
 
             if start == -1 or end == 0:
-                log_warning("No JSON object found in topic segmentation response")
-                return [], ["No JSON object found in response"]
+                log_warning("No JSON found in turn assignment response")
+                return {}
 
             json_str = text[start:end]
             data = json.loads(json_str)
 
-            # Validate and build TopicCluster objects
-            topics = []
-            valid_turn_ids = {t.id for t in turns}
-
-            for topic_data in data.get("topics", []):
-                # Validate schema using helper method
-                is_valid, error = self._validate_topic_schema(topic_data)
-
-                if not is_valid:
-                    schema_errors.append(error)
-                    log_warning(f"Schema error in topic: {error}")
+            # Validate and filter turn IDs
+            result = {}
+            for topic_num, turn_ids in data.items():
+                if not isinstance(turn_ids, list):
                     continue
 
-                # Filter turn_ids to only include valid ones
-                turn_ids = [
-                    tid for tid in topic_data["turn_ids"]
-                    if tid in valid_turn_ids
+                # Filter to valid turn IDs only
+                valid_ids = [
+                    tid for tid in turn_ids
+                    if isinstance(tid, int) and tid in valid_turn_ids
                 ]
 
-                if not turn_ids:
-                    continue
+                if valid_ids:
+                    result[str(topic_num)] = valid_ids
 
-                topics.append(TopicCluster(
-                    topic_id=topic_data["topic_id"],
-                    description=str(topic_data["description"]),
-                    turn_ids=turn_ids,
-                    significance=topic_data.get("significance", "major")
-                ))
+            return result
 
-            log_info(f"Parsed {len(topics)} valid topic clusters")
-            return topics, schema_errors
-
-        except json.JSONDecodeError as e:
-            log_warning(f"JSON parse error: {e}")
-            return [], [f"Invalid JSON: {e}"]
-        except (ValueError, KeyError) as e:
-            log_warning(f"Failed to parse topic segmentation response: {e}")
-            return [], []
-
-    def _validate_topic_schema(self, topic_data: dict) -> tuple:
-        """
-        Validate a topic dict has the required schema.
-
-        Returns:
-            (is_valid, error_message) - error_message describes what to fix
-        """
-        errors = []
-
-        # Check for wrong field names (common LLM mistakes)
-        if "id" in topic_data and "topic_id" not in topic_data:
-            errors.append("Use 'topic_id' instead of 'id'")
-
-        if "name" in topic_data and "description" not in topic_data:
-            errors.append("Use 'description' instead of 'name'")
-
-        # Check for missing required fields
-        if "topic_id" not in topic_data and "id" not in topic_data:
-            errors.append("Missing 'topic_id' field")
-
-        if "description" not in topic_data and "name" not in topic_data:
-            errors.append("Missing 'description' field")
-
-        if "turn_ids" not in topic_data:
-            errors.append("Missing 'turn_ids' field - must include array of turn numbers")
-
-        if errors:
-            return False, "; ".join(errors)
-
-        return True, ""
-
-    def _build_correction_prompt(self, original_response: str, errors: List[str]) -> str:
-        """
-        Build a prompt asking the LLM to fix its JSON response.
-        """
-        error_list = "\n".join(f"- {e}" for e in errors)
-
-        return f"""Your previous JSON response has schema errors. Please fix and resubmit.
-
-## ERRORS FOUND
-{error_list}
-
-## REQUIRED FORMAT
-Each topic must have exactly these fields:
-- topic_id: integer (1, 2, 3...)
-- description: string describing the topic
-- turn_ids: array of integers listing which turns belong to this topic
-- significance: "major" or "minor"
-
-## YOUR PREVIOUS RESPONSE
-{original_response}
-
-## CORRECTED JSON
-Output only the corrected JSON object:"""
+        except (json.JSONDecodeError, ValueError) as e:
+            log_warning(f"Failed to parse turn assignments: {e}")
+            return {}
 
     # =========================================================================
     # PHASE 2: MEMORY SYNTHESIS
