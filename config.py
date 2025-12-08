@@ -77,11 +77,17 @@ SESSION_IDLE_WARNING_SECONDS = 600  # 10 minutes
 SESSION_AUTO_EXTRACT_ON_END = True
 
 # =============================================================================
-# AGENCY CONFIGURATION
+# AGENCY CONFIGURATION (Legacy - Disabled in favor of System Pulse)
 # =============================================================================
-AGENCY_ENABLED = True
+AGENCY_ENABLED = False  # Disabled - replaced by System Pulse Timer
 AGENCY_CHECK_INTERVAL = 300  # 5 minutes
 AGENCY_IDLE_TRIGGER_SECONDS = 900  # 15 minutes before AI initiates
+
+# =============================================================================
+# SYSTEM PULSE CONFIGURATION
+# =============================================================================
+SYSTEM_PULSE_ENABLED = True
+SYSTEM_PULSE_INTERVAL = 180  # 3 minutes between pulses
 
 # =============================================================================
 # HTTP API CONFIGURATION

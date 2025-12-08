@@ -3,7 +3,7 @@ Pattern Project - PyQt5 Chat GUI
 Version: 0.1.0
 
 A visual chat interface with timestamps, relationship indicators,
-and session tracking.
+session tracking, and system pulse countdown.
 """
 
 import sys
@@ -11,6 +11,8 @@ import queue
 import threading
 from datetime import datetime, timedelta
 from typing import Optional, Callable
+
+import config
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QTextBrowser, QVBoxLayout, QHBoxLayout,
@@ -35,6 +37,7 @@ COLORS = {
     "affinity": "#ef4444",  # Red heart
     "trust": "#22c55e",     # Green shield
     "timestamp": "#6b7280", # Gray for timestamps
+    "pulse": "#a855f7",     # Purple for pulse countdown
 }
 
 
@@ -73,6 +76,7 @@ class ChatWindow(QMainWindow):
         self._prompt_builder = None
         self._temporal_tracker = None
         self._relationship_source = None
+        self._system_pulse_timer = None
 
         self._setup_ui()
         self._setup_timers()
@@ -117,17 +121,26 @@ class ChatWindow(QMainWindow):
         layout.addWidget(self.status_label)
 
     def _create_header(self) -> QFrame:
-        """Create the header with timer and controls."""
+        """Create the header with timer, pulse countdown, and controls."""
         header = QFrame()
         header.setFrameStyle(QFrame.StyledPanel)
         layout = QHBoxLayout(header)
         layout.setContentsMargins(10, 5, 10, 5)
 
         # Session timer
-        self.timer_label = QLabel("Session: --:-- | Total: --:--")
+        self.timer_label = QLabel("Session: --:--")
         self.timer_label.setFont(QFont("Consolas", 13, QFont.Bold))
         self.timer_label.setStyleSheet(f"color: {COLORS['text']};")
         layout.addWidget(self.timer_label)
+
+        # Pulse countdown (only if enabled)
+        self.pulse_label = QLabel("Pulse: --:--")
+        self.pulse_label.setFont(QFont("Consolas", 13, QFont.Bold))
+        self.pulse_label.setStyleSheet(f"color: {COLORS['pulse']};")
+        self.pulse_label.setToolTip("Time until next system pulse")
+        if not config.SYSTEM_PULSE_ENABLED:
+            self.pulse_label.hide()
+        layout.addWidget(self.pulse_label)
 
         layout.addStretch()
 
@@ -237,7 +250,8 @@ class ChatWindow(QMainWindow):
         llm_router,
         prompt_builder,
         temporal_tracker,
-        relationship_source
+        relationship_source,
+        system_pulse_timer=None
     ):
         """Set backend references for communication."""
         self._conversation_mgr = conversation_mgr
@@ -245,6 +259,11 @@ class ChatWindow(QMainWindow):
         self._prompt_builder = prompt_builder
         self._temporal_tracker = temporal_tracker
         self._relationship_source = relationship_source
+        self._system_pulse_timer = system_pulse_timer
+
+        # Set up pulse callback if timer is provided
+        if self._system_pulse_timer:
+            self._system_pulse_timer.set_callback(self._on_pulse_fired)
 
         # Start session if not active
         if not temporal_tracker.is_session_active:
@@ -273,17 +292,31 @@ class ChatWindow(QMainWindow):
             return f"{days}d {hours}h"
 
     def _update_timer(self):
-        """Update the session timer display."""
+        """Update the session timer and pulse countdown display."""
         if self._session_start is None:
             return
 
         session_duration = datetime.now() - self._session_start
-        total_duration = datetime.now() - self._first_session_start if self._first_session_start else session_duration
-
         session_str = self._format_duration(session_duration)
-        total_str = self._format_duration(total_duration)
+        self.timer_label.setText(f"Session: {session_str}")
 
-        self.timer_label.setText(f"Session: {session_str} | Total: {total_str}")
+        # Update pulse countdown
+        if self._system_pulse_timer and config.SYSTEM_PULSE_ENABLED:
+            remaining = self._system_pulse_timer.get_seconds_remaining()
+            minutes = remaining // 60
+            seconds = remaining % 60
+            pulse_str = f"{minutes}:{seconds:02d}"
+
+            # Change color when paused or close to firing
+            if self._system_pulse_timer.is_paused():
+                self.pulse_label.setStyleSheet(f"color: {COLORS['text_dim']};")
+                pulse_str = f"{pulse_str} (paused)"
+            elif remaining <= 30:
+                self.pulse_label.setStyleSheet(f"color: {COLORS['accent']};")
+            else:
+                self.pulse_label.setStyleSheet(f"color: {COLORS['pulse']};")
+
+            self.pulse_label.setText(f"Pulse: {pulse_str}")
 
     def _update_relationship(self):
         """Update relationship indicators from backend."""
@@ -351,6 +384,11 @@ class ChatWindow(QMainWindow):
         self._is_processing = True
         self.send_btn.setEnabled(False)
         self.status_label.setText("Thinking...")
+
+        # Reset and pause the pulse timer (user is active)
+        if self._system_pulse_timer:
+            self._system_pulse_timer.reset()
+            self._system_pulse_timer.pause()
 
         # Add user message to display immediately
         timestamp = self._get_timestamp()
@@ -426,6 +464,96 @@ class ChatWindow(QMainWindow):
         self._is_processing = False
         self.send_btn.setEnabled(True)
         self.status_label.setText("Ready")
+
+        # Resume the pulse timer
+        if self._system_pulse_timer:
+            self._system_pulse_timer.resume()
+
+    def _on_pulse_fired(self):
+        """Called when the system pulse timer fires."""
+        # Don't fire if already processing a message
+        if self._is_processing:
+            return
+
+        # Process the pulse in a background thread
+        thread = threading.Thread(
+            target=self._process_pulse,
+            daemon=True
+        )
+        thread.start()
+
+    def _process_pulse(self):
+        """Process a system pulse in background thread."""
+        from agency.system_pulse import PULSE_PROMPT, PULSE_STORED_MESSAGE
+
+        try:
+            self._is_processing = True
+
+            # Pause timer during processing
+            if self._system_pulse_timer:
+                self._system_pulse_timer.pause()
+
+            # Update UI status
+            self.signals.update_status.emit("System pulse...")
+
+            # Show system message in chat
+            timestamp = self._get_timestamp()
+            self.signals.new_message.emit(
+                "system", PULSE_STORED_MESSAGE, timestamp,
+                self._current_affinity, self._current_trust
+            )
+
+            # Store abbreviated pulse message in conversation history
+            if self._conversation_mgr:
+                self._conversation_mgr.add_turn(
+                    role="user",
+                    content=PULSE_STORED_MESSAGE,
+                    input_type="system_pulse"
+                )
+
+            # Build prompt with full pulse message
+            assembled = self._prompt_builder.build(
+                user_input=PULSE_PROMPT,
+                system_prompt=""
+            )
+
+            # Get conversation history
+            history = self._conversation_mgr.get_recent_history(limit=30)
+
+            # Get LLM response
+            from llm.router import TaskType
+            response = self._llm_router.chat(
+                messages=history,
+                system_prompt=assembled.full_system_prompt,
+                task_type=TaskType.CONVERSATION,
+                temperature=0.7
+            )
+
+            if response.success:
+                # Store response
+                self._conversation_mgr.add_turn(
+                    role="assistant",
+                    content=response.text,
+                    input_type="text"
+                )
+
+                # Emit to GUI
+                timestamp = self._get_timestamp()
+                self.signals.new_message.emit(
+                    "assistant",
+                    response.text,
+                    timestamp,
+                    self._current_affinity,
+                    self._current_trust
+                )
+            else:
+                self.signals.update_status.emit(f"Pulse error: {response.error}")
+
+        except Exception as e:
+            self.signals.update_status.emit(f"Pulse error: {str(e)}")
+
+        finally:
+            self.signals.response_complete.emit()
 
     def _update_status(self, status: str):
         """Update status bar."""
@@ -550,6 +678,7 @@ def run_gui():
     from prompt_builder import init_prompt_builder, get_prompt_builder
     from prompt_builder.sources.relationship import get_relationship_source
     from agency.relationship_analyzer import init_relationship_analyzer, get_relationship_analyzer
+    from agency.system_pulse import init_system_pulse_timer, get_system_pulse_timer
 
     # Initialize remaining components
     print("Initializing components...")
@@ -564,10 +693,18 @@ def run_gui():
     init_memory_extractor()
     init_prompt_builder()
     init_relationship_analyzer()
+    init_system_pulse_timer()
 
     # Start background services
     get_memory_extractor().start()
     get_relationship_analyzer().start()
+
+    # Start system pulse timer if enabled
+    pulse_timer = None
+    if config.SYSTEM_PULSE_ENABLED:
+        pulse_timer = get_system_pulse_timer()
+        pulse_timer.start()
+        print(f"System pulse timer started ({config.SYSTEM_PULSE_INTERVAL}s interval)")
 
     # Create and configure window
     window = init_gui()
@@ -576,7 +713,8 @@ def run_gui():
         llm_router=get_llm_router(),
         prompt_builder=get_prompt_builder(),
         temporal_tracker=get_temporal_tracker(),
-        relationship_source=get_relationship_source()
+        relationship_source=get_relationship_source(),
+        system_pulse_timer=pulse_timer
     )
 
     window.show()
@@ -589,6 +727,8 @@ def run_gui():
     print("Shutting down...")
     get_memory_extractor().stop()
     get_relationship_analyzer().stop()
+    if config.SYSTEM_PULSE_ENABLED:
+        get_system_pulse_timer().stop()
 
     return exit_code
 
