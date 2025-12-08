@@ -4,7 +4,7 @@ Pattern Project - Database Reset Utility
 
 Provides commands to reset specific database tables:
 - relationships: Reset relationship state to defaults (affinity=50, trust=50)
-- memories: Delete all memories from the vector store (also resets processing flags)
+- memories: Delete episodic memories only (core memories are preserved)
 - conversations: Delete all conversation history
 - reprocess: Reset processing flags only (allows re-extraction without deleting memories)
 
@@ -81,21 +81,20 @@ def reset_relationships(db: Database) -> None:
 
 
 def clear_memories(db: Database) -> None:
-    """Delete all memories and reset processing flags for re-extraction."""
-    print("\n[Memories] Clearing all memories...")
+    """Delete all episodic memories and reset processing flags for re-extraction.
+
+    Note: This only clears the 'memories' table (episodic memories).
+    Core memories are preserved - use 'core_memories' command to clear those.
+    """
+    print("\n[Memories] Clearing episodic memories...")
 
     with db.get_connection() as conn:
         # Get count before deletion
         cursor = conn.execute("SELECT COUNT(*) FROM memories")
         count = cursor.fetchone()[0]
 
-        # Delete all memories
+        # Delete all episodic memories (NOT core memories)
         conn.execute("DELETE FROM memories")
-
-        # Also clear core memories
-        cursor = conn.execute("SELECT COUNT(*) FROM core_memories")
-        core_count = cursor.fetchone()[0]
-        conn.execute("DELETE FROM core_memories")
 
         # Reset processing flags so conversations can be re-extracted
         cursor = conn.execute(
@@ -108,7 +107,7 @@ def clear_memories(db: Database) -> None:
             SET processed_for_memory = FALSE, processed_at = NULL
         """)
 
-    print(f"[Memories] Cleared {count} memories and {core_count} core memories")
+    print(f"[Memories] Cleared {count} episodic memories (core memories preserved)")
     print(f"[Memories] Reset {processed_count} conversations for re-extraction")
 
 
@@ -168,10 +167,10 @@ def main():
         epilog="""
 Examples:
   python scripts/reset_db.py relationships   Reset relationship state
-  python scripts/reset_db.py memories        Delete all memories (and reset processing flags)
+  python scripts/reset_db.py memories        Delete episodic memories (preserves core memories)
   python scripts/reset_db.py conversations   Delete all conversations
   python scripts/reset_db.py reprocess       Reset processing flags only (for re-extraction)
-  python scripts/reset_db.py --all           Reset everything
+  python scripts/reset_db.py --all           Reset everything (except core memories)
         """
     )
 
