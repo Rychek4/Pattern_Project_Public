@@ -66,19 +66,19 @@ Example output format:
 Conversation:
 """
 
-# Pass 2: Assign turn numbers to topics (simple JSON)
-TURN_ASSIGNMENT_PROMPT = """Assign each conversation turn to one of the topics below.
+# Pass 2: Classify each turn into a topic (Linear method - one decision at a time)
+TURN_ASSIGNMENT_PROMPT = """Classify each turn into one of the topics below.
 
 Topics:
 {topics}
 
 Instructions:
-1. Look at each turn number in the conversation
-2. Decide which topic it belongs to
-3. Output a JSON object mapping topic numbers to turn numbers
+1. For each turn, decide which single topic it belongs to
+2. Output a JSON object where the key is the Turn Number (string) and the value is the Topic Number (integer)
+3. Topic numbers must be between 1 and {num_topics}
 
 Example output:
-{{"1": [1, 2, 3, 5], "2": [4, 6]}}
+{{"1": 1, "2": 1, "3": 2, "4": 3}}
 
 Conversation:
 {conversation}
@@ -589,6 +589,7 @@ class MemoryExtractor:
 
         assignment_prompt = TURN_ASSIGNMENT_PROMPT.format(
             topics=topics_formatted,
+            num_topics=len(topic_descriptions),
             conversation=conversation_text
         )
 
@@ -603,9 +604,11 @@ class MemoryExtractor:
             log_error(f"Turn assignment failed: {assignment_response.error}")
             return []
 
-        # Parse the turn assignments (validates against sequential indices)
+        # Parse the turn assignments (validates turn indices and topic numbers)
         turn_assignments = self._parse_turn_assignments(
-            assignment_response.text, valid_indices
+            assignment_response.text,
+            valid_indices,
+            num_topics=len(topic_descriptions)
         )
 
         if not turn_assignments:
@@ -680,20 +683,26 @@ class MemoryExtractor:
     def _parse_turn_assignments(
         self,
         response_text: str,
-        valid_indices: set
+        valid_indices: set,
+        num_topics: int
     ) -> Dict[str, List[int]]:
         """
-        Parse turn assignments from simple JSON response.
+        Parse turn assignments from Linear method JSON response.
 
-        Expected format: {"1": [1, 2, 3], "2": [4, 5]}
+        Expected format: {"1": 2, "2": 2, "3": 1, "4": 3}
+        (turn_number -> topic_number)
+
+        This function flips the mapping to: {"1": [3], "2": [1, 2], "3": [4]}
+        (topic_number -> [turn_numbers])
 
         Args:
             response_text: Raw LLM response containing JSON
-            valid_indices: Set of valid sequential indices (1, 2, 3, ...)
+            valid_indices: Set of valid sequential turn indices (1, 2, 3, ...)
                           that the LLM was shown in the conversation
+            num_topics: Number of valid topics (1 to num_topics are valid)
 
         Returns:
-            Dict mapping topic number (as string) to list of valid indices
+            Dict mapping topic number (as string) to list of valid turn indices
         """
         try:
             text = response_text.strip()
@@ -715,20 +724,36 @@ class MemoryExtractor:
             json_str = text[start:end]
             data = json.loads(json_str)
 
-            # Validate and filter to valid indices only
-            result = {}
-            for topic_num, indices in data.items():
-                if not isinstance(indices, list):
+            # Flip from {turn: topic} to {topic: [turns]}
+            # While validating both turn indices and topic numbers
+            result: Dict[str, List[int]] = {}
+
+            for turn_str, topic_num in data.items():
+                # Validate turn number
+                try:
+                    turn_idx = int(turn_str)
+                except (ValueError, TypeError):
+                    log_warning(f"Invalid turn number: {turn_str}")
                     continue
 
-                # Filter to valid indices only
-                valid_idx_list = [
-                    idx for idx in indices
-                    if isinstance(idx, int) and idx in valid_indices
-                ]
+                if turn_idx not in valid_indices:
+                    log_warning(f"Turn index out of range: {turn_idx}")
+                    continue
 
-                if valid_idx_list:
-                    result[str(topic_num)] = valid_idx_list
+                # Validate topic number
+                if not isinstance(topic_num, int):
+                    log_warning(f"Invalid topic type for turn {turn_idx}: {topic_num}")
+                    continue
+
+                if topic_num < 1 or topic_num > num_topics:
+                    log_warning(f"Invalid topic number: {topic_num} (valid: 1-{num_topics})")
+                    continue
+
+                # Add to flipped result
+                topic_str = str(topic_num)
+                if topic_str not in result:
+                    result[topic_str] = []
+                result[topic_str].append(turn_idx)
 
             return result
 
