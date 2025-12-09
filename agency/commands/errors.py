@@ -16,9 +16,11 @@ class ToolErrorType(Enum):
     """
     FORMAT_ERROR = "format"      # Wrong syntax/structure
     VALIDATION = "validation"    # Invalid values provided
+    INVALID_INPUT = "invalid"    # Invalid input data
     NOT_FOUND = "not_found"      # Resource doesn't exist
     PARSE_ERROR = "parse"        # Couldn't parse/interpret input
     SYSTEM_ERROR = "system"      # Database/internal failure
+    RATE_LIMITED = "rate_limit"  # Rate limit exceeded
 
 
 @dataclass

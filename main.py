@@ -123,6 +123,25 @@ def initialize_system() -> bool:
     # Initialize prompt builder (must come after memory/vector store)
     init_prompt_builder()
 
+    # Initialize communication gateways if enabled
+    if config.EMAIL_GATEWAY_ENABLED or config.SMS_GATEWAY_ENABLED:
+        from communication.email_gateway import init_email_gateway
+        from communication.sms_gateway import init_sms_gateway
+        from communication.rate_limiter import init_rate_limiter
+
+        # Initialize rate limiter
+        init_rate_limiter(
+            email_max_per_hour=config.EMAIL_MAX_PER_HOUR,
+            sms_max_per_hour=config.SMS_MAX_PER_HOUR
+        )
+
+        # Initialize email gateway (used by both email and SMS)
+        init_email_gateway()
+
+        # Initialize SMS gateway if enabled
+        if config.SMS_GATEWAY_ENABLED:
+            init_sms_gateway()
+
     # Initialize agency (legacy - disabled)
     init_proactive_agent()
 
@@ -198,6 +217,17 @@ def print_configuration() -> None:
         log_subsection(f"Capture Interval: {config.VISUAL_CAPTURE_INTERVAL}s")
         log_subsection(f"Screenshot: {'ENABLED' if config.VISUAL_SCREENSHOT_ENABLED else 'DISABLED'}")
         log_subsection(f"Webcam: {'ENABLED' if config.VISUAL_WEBCAM_ENABLED else 'DISABLED'}")
+
+    # Communication settings
+    if config.EMAIL_GATEWAY_ENABLED or config.SMS_GATEWAY_ENABLED:
+        log_section("Communication", "📱")
+        log_subsection(f"Email: {'ENABLED' if config.EMAIL_GATEWAY_ENABLED else 'DISABLED'}")
+        log_subsection(f"SMS: {'ENABLED' if config.SMS_GATEWAY_ENABLED else 'DISABLED'}")
+        if config.SMS_GATEWAY_ENABLED:
+            phone = config.SMS_RECIPIENT_PHONE
+            masked = f"***-***-{phone[-4:]}" if len(phone) >= 4 else "not set"
+            log_subsection(f"SMS Recipient: {masked}")
+        log_subsection(f"Rate Limits: {config.EMAIL_MAX_PER_HOUR} email/hr, {config.SMS_MAX_PER_HOUR} SMS/hr")
 
 
 def check_llm_providers() -> None:

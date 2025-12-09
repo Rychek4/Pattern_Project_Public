@@ -81,6 +81,18 @@ def _register_default_handlers(processor: CommandProcessor) -> None:
     processor.register(AppendFileHandler())
     processor.register(ListFilesHandler())
 
+    # Register communication handlers (SMS/Email)
+    # Import config to check feature flags
+    import config
+
+    if config.SMS_GATEWAY_ENABLED:
+        from agency.commands.handlers.sms_handler import SendSMSHandler
+        processor.register(SendSMSHandler())
+
+    if config.EMAIL_GATEWAY_ENABLED:
+        from agency.commands.handlers.email_handler import SendEmailHandler
+        processor.register(SendEmailHandler())
+
 
 __all__ = [
     # Processor

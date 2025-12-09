@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from core.logger import log_info, log_success, log_error, log_config, log_section
 
 # Schema version for migrations
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 # SQL schema definition
 SCHEMA_SQL = """
@@ -126,6 +126,18 @@ CREATE TABLE IF NOT EXISTS intentions (
     source_session_id INTEGER REFERENCES sessions(id)
 );
 
+-- Communication log: tracks sent emails and SMS messages
+CREATE TABLE IF NOT EXISTS communication_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL CHECK (type IN ('email', 'sms')),
+    recipient TEXT NOT NULL,
+    subject TEXT,  -- NULL for SMS
+    body TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'sent' CHECK (status IN ('sent', 'failed')),
+    error_message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Indexes for efficient queries
 CREATE INDEX IF NOT EXISTS idx_conversations_session ON conversations(session_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_unprocessed ON conversations(processed_for_memory) WHERE processed_for_memory = FALSE;
@@ -139,6 +151,8 @@ CREATE INDEX IF NOT EXISTS idx_core_memories_category ON core_memories(category)
 CREATE INDEX IF NOT EXISTS idx_intentions_status ON intentions(status);
 CREATE INDEX IF NOT EXISTS idx_intentions_trigger_at ON intentions(trigger_at) WHERE status = 'pending';
 CREATE INDEX IF NOT EXISTS idx_intentions_type ON intentions(type);
+CREATE INDEX IF NOT EXISTS idx_communication_log_type ON communication_log(type);
+CREATE INDEX IF NOT EXISTS idx_communication_log_created ON communication_log(created_at DESC);
 """
 
 # Migration SQL for v1 -> v2
@@ -404,6 +418,25 @@ CREATE INDEX IF NOT EXISTS idx_intentions_trigger_at ON intentions(trigger_at) W
 CREATE INDEX IF NOT EXISTS idx_intentions_type ON intentions(type);
 """
 
+# Migration SQL for v8 -> v9 (add communication_log table)
+MIGRATION_V9_SQL = """
+-- Communication log table: tracks sent emails and SMS messages
+CREATE TABLE IF NOT EXISTS communication_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL CHECK (type IN ('email', 'sms')),
+    recipient TEXT NOT NULL,
+    subject TEXT,  -- NULL for SMS
+    body TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'sent' CHECK (status IN ('sent', 'failed')),
+    error_message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Indexes for communication log
+CREATE INDEX IF NOT EXISTS idx_communication_log_type ON communication_log(type);
+CREATE INDEX IF NOT EXISTS idx_communication_log_created ON communication_log(created_at DESC);
+"""
+
 
 class Database:
     """SQLite database manager with WAL mode and thread-safe connections."""
@@ -549,6 +582,10 @@ class Database:
             if from_version < 8:
                 log_config("Applying migration", "v7 → v8 (add intentions table)", indent=1)
                 conn.executescript(MIGRATION_V8_SQL)
+
+            if from_version < 9:
+                log_config("Applying migration", "v8 → v9 (add communication_log table)", indent=1)
+                conn.executescript(MIGRATION_V9_SQL)
 
             # Record new version
             conn.execute(
