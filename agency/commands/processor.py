@@ -158,7 +158,11 @@ class CommandProcessor:
 
                 # Format the result data
                 if handler:
-                    formatted = handler.format_result(result)
+                    try:
+                        formatted = handler.format_result(result)
+                    except Exception as e:
+                        log_error(f"Error formatting [[{result.command_name}]] result: {e}")
+                        formatted = f"  Error formatting result: {e}"
                 elif result.error:
                     formatted = f"  Error: {result.error}"
                 elif result.data is None:
