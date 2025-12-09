@@ -706,40 +706,65 @@ class ChatWindow(QMainWindow):
 
             if response.success:
                 from agency.commands import get_command_processor
+                import config
 
-                # Check for pulse timer command in response
+                processor = get_command_processor()
+                max_passes = getattr(config, 'COMMAND_MAX_PASSES', 3)
+
+                # Check initial response for pulse timer command
                 pulse_interval = self._parse_pulse_command(response.text)
                 if pulse_interval is not None:
                     self.signals.pulse_interval_change.emit(pulse_interval)
 
-                # Process response for AI commands
-                processor = get_command_processor()
-                processed = processor.process(response.text)
+                # Multi-pass command processing loop
+                current_text = response.text
+                current_history = history.copy()
+                pass_num = 1
 
-                # Handle continuation if commands need results
-                final_text = processed.display_text
+                while pass_num <= max_passes:
+                    # Process current response for commands
+                    processed = processor.process(current_text)
 
-                if processed.needs_continuation:
-                    self.signals.update_status.emit("Executing command...")
+                    # If no continuation needed, we're done
+                    if not processed.needs_continuation:
+                        final_text = processed.display_text
+                        break
 
-                    # Build continuation
-                    continuation_history = history.copy()
-                    continuation_history.append({"role": "assistant", "content": response.text})
-                    continuation_history.append({"role": "user", "content": processed.continuation_prompt})
+                    # Show status for command execution
+                    if pass_num == 1:
+                        self.signals.update_status.emit("Executing command...")
+                    else:
+                        self.signals.update_status.emit(f"Executing command (pass {pass_num})...")
 
+                    # Build continuation history
+                    current_history.append({"role": "assistant", "content": current_text})
+                    current_history.append({"role": "user", "content": processed.continuation_prompt})
+
+                    # Get next response
                     continuation = self._llm_router.chat(
-                        messages=continuation_history,
+                        messages=current_history,
                         system_prompt=assembled.full_system_prompt,
                         task_type=TaskType.CONVERSATION,
                         temperature=0.7
                     )
 
-                    if continuation.success:
-                        # Check continuation for pulse commands too
-                        pulse_interval = self._parse_pulse_command(continuation.text)
-                        if pulse_interval is not None:
-                            self.signals.pulse_interval_change.emit(pulse_interval)
-                        final_text = continuation.text
+                    if not continuation.success:
+                        # On failure, use last successful response
+                        final_text = processed.display_text
+                        break
+
+                    # Check continuation for pulse commands
+                    pulse_interval = self._parse_pulse_command(continuation.text)
+                    if pulse_interval is not None:
+                        self.signals.pulse_interval_change.emit(pulse_interval)
+
+                    # Prepare for next iteration
+                    current_text = continuation.text
+                    pass_num += 1
+                else:
+                    # Hit max passes - use final response as-is
+                    processed = processor.process(current_text)
+                    final_text = processed.display_text
 
                 # Store response
                 self._conversation_mgr.add_turn(
