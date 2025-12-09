@@ -96,7 +96,8 @@ class CommandProcessor:
         # Find and execute all commands
         for handler in self._handlers.values():
             for match in re.finditer(handler.pattern, response_text):
-                query = match.group(1).strip()
+                # Get query from capture group if it exists, empty string for parameterless commands
+                query = match.group(1).strip() if match.lastindex else ""
                 log_info(f"Executing [[{handler.command_name}: {query}]]", prefix="⚡")
 
                 try:

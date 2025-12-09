@@ -70,8 +70,10 @@ class CommandHandler(ABC):
     def pattern(self) -> str:
         """
         Regex pattern to match the command in AI responses.
-        Must include a capture group for the query.
-        Example: r'\\[\\[SEARCH:\\s*(.+?)\\]\\]'
+        Include a capture group for the query if the command takes parameters.
+        Parameterless commands may omit the capture group.
+        Example with query: r'\\[\\[SEARCH:\\s*(.+?)\\]\\]'
+        Example parameterless: r'\\[\\[LIST_ITEMS\\]\\]'
         """
         pass
 
