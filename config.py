@@ -207,3 +207,43 @@ FILE_ALLOWED_EXTENSIONS = {".txt", ".md", ".json", ".csv"}  # Whitelist of allow
 # Enable via command line: python main.py --dev
 # The AI is notified when dev mode is active.
 DEV_MODE_ENABLED = False  # Set programmatically via --dev flag, not env var
+
+# =============================================================================
+# EMAIL GATEWAY CONFIGURATION
+# =============================================================================
+# Email sending via Gmail SMTP. Used for both direct email and SMS-via-carrier.
+# Requires a Gmail account with an app password (not regular password).
+#
+# To create an app password:
+# 1. Enable 2-Factor Authentication on your Google account
+# 2. Go to https://myaccount.google.com/apppasswords
+# 3. Generate a new app password for "Mail"
+# 4. Use that password as APP_EMAIL_PASS
+EMAIL_GATEWAY_ENABLED = False  # Disabled - only SMS is enabled for now
+EMAIL_ADDRESS = os.getenv("APP_EMAIL_ADDRESS", "")
+EMAIL_PASSWORD = os.getenv("APP_EMAIL_PASS", "")
+EMAIL_DISPLAY_NAME = "Pattern Claude"
+EMAIL_SMTP_HOST = "smtp.gmail.com"
+EMAIL_SMTP_PORT = 587
+
+# Email whitelist - only these addresses can receive emails
+# Empty list means all recipients blocked (since email is disabled)
+EMAIL_WHITELIST = []  # Add addresses here when enabling email
+
+# =============================================================================
+# SMS GATEWAY CONFIGURATION
+# =============================================================================
+# SMS sending via carrier email gateway (Email-to-SMS).
+# Messages are sent as emails to carrier-specific domains
+# (e.g., 1234567890@txt.att.net for AT&T).
+SMS_GATEWAY_ENABLED = True
+SMS_RECIPIENT_PHONE = os.getenv("APP_SMS_RECIPIENT_PHONE", "")
+SMS_CARRIER_GATEWAY = "txt.att.net"  # AT&T gateway (hardcoded for now)
+SMS_MAX_LENGTH = 160  # Standard SMS length limit
+
+# =============================================================================
+# COMMUNICATION RATE LIMITS
+# =============================================================================
+# Prevent abuse by limiting messages per hour
+EMAIL_MAX_PER_HOUR = 20  # Maximum emails per hour (when enabled)
+SMS_MAX_PER_HOUR = 10    # Maximum SMS per hour
