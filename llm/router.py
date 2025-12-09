@@ -36,6 +36,13 @@ class LLMResponse:
     tokens_in: int = 0
     tokens_out: int = 0
     error: Optional[str] = None
+    # Web search fields
+    web_searches_used: int = 0
+    citations: List[Any] = None  # List of WebSearchCitation
+
+    def __post_init__(self):
+        if self.citations is None:
+            self.citations = []
 
 
 class LLMRouter:
@@ -163,14 +170,36 @@ class LLMRouter:
         else:
             provider = self.get_provider_for_task(task_type)
 
+        # Check web search availability for conversation tasks on Anthropic
+        enable_web_search = False
+        web_search_max_uses = None
+        web_search_unavailable_msg = None
+
+        if provider == LLMProvider.ANTHROPIC and task_type == TaskType.CONVERSATION:
+            enable_web_search, web_search_max_uses, web_search_unavailable_msg = (
+                self._check_web_search_availability()
+            )
+
+        # If web search is unavailable due to daily limit, notify Claude in system prompt
+        if web_search_unavailable_msg and system_prompt:
+            system_prompt = f"{system_prompt}\n\n{web_search_unavailable_msg}"
+        elif web_search_unavailable_msg:
+            system_prompt = web_search_unavailable_msg
+
         # Try primary provider
         response = self._send_to_provider(
             provider=provider,
             messages=messages,
             system_prompt=system_prompt,
             max_tokens=max_tokens,
-            temperature=temperature
+            temperature=temperature,
+            enable_web_search=enable_web_search,
+            web_search_max_uses=web_search_max_uses
         )
+
+        # Record web search usage if any were used
+        if response.success and response.web_searches_used > 0:
+            self._record_web_search_usage(response.web_searches_used)
 
         # Handle fallback - but NOT for conversation tasks
         # Falling back to a weaker model for user-facing chat degrades experience
@@ -189,12 +218,51 @@ class LLMRouter:
                 messages=messages,
                 system_prompt=system_prompt,
                 max_tokens=max_tokens,
-                temperature=temperature
+                temperature=temperature,
+                enable_web_search=False,  # No web search on fallback
+                web_search_max_uses=None
             )
         elif not response.success and task_type == TaskType.CONVERSATION:
             log_warning(f"{provider.value} failed for CONVERSATION task - not falling back to preserve quality")
 
         return response
+
+    def _check_web_search_availability(self) -> tuple[bool, Optional[int], Optional[str]]:
+        """
+        Check if web search should be enabled for this request.
+
+        Returns:
+            Tuple of (enable_web_search, max_uses, unavailable_message)
+        """
+        import config
+
+        if not config.WEB_SEARCH_ENABLED:
+            return (False, None, None)
+
+        from agency.web_search_limiter import get_web_search_limiter
+        limiter = get_web_search_limiter()
+
+        if not limiter.is_available():
+            # Daily limit hit - notify Claude
+            used, total = limiter.get_usage()
+            log_warning(f"Web search daily limit reached ({used}/{total})")
+            return (
+                False,
+                None,
+                "<web_search_notice>Web search is unavailable today (daily limit reached). "
+                "Rely on your knowledge or ask the user to try again tomorrow.</web_search_notice>"
+            )
+
+        # Web search is available
+        max_uses = limiter.get_max_for_request()
+        log_info(f"Web search enabled (max {max_uses} uses this request)", prefix="🔍")
+        return (True, max_uses, None)
+
+    def _record_web_search_usage(self, count: int) -> None:
+        """Record web search usage to the limiter."""
+        from agency.web_search_limiter import get_web_search_limiter
+        limiter = get_web_search_limiter()
+        limiter.record_usage(count)
 
     def _send_to_provider(
         self,
@@ -202,7 +270,9 @@ class LLMRouter:
         messages: List[Dict[str, str]],
         system_prompt: Optional[str],
         max_tokens: Optional[int],
-        temperature: float
+        temperature: float,
+        enable_web_search: bool = False,
+        web_search_max_uses: Optional[int] = None
     ) -> LLMResponse:
         """Send request to a specific provider."""
         try:
@@ -212,7 +282,9 @@ class LLMRouter:
                     messages=messages,
                     system_prompt=system_prompt,
                     max_tokens=max_tokens,
-                    temperature=temperature
+                    temperature=temperature,
+                    enable_web_search=enable_web_search,
+                    web_search_max_uses=web_search_max_uses
                 )
 
                 llm_response = LLMResponse(
@@ -221,7 +293,9 @@ class LLMRouter:
                     provider=provider,
                     tokens_in=response.input_tokens,
                     tokens_out=response.output_tokens,
-                    error=response.error
+                    error=response.error,
+                    web_searches_used=response.web_searches_used,
+                    citations=response.citations
                 )
 
                 # Log the API request/response
@@ -230,7 +304,12 @@ class LLMRouter:
                     model=client.model,
                     system_prompt=system_prompt,
                     messages=messages,
-                    settings={"temperature": temperature, "max_tokens": max_tokens},
+                    settings={
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                        "web_search_enabled": enable_web_search,
+                        "web_search_max_uses": web_search_max_uses
+                    },
                     response_text=response.text,
                     tokens_in=response.input_tokens,
                     tokens_out=response.output_tokens,

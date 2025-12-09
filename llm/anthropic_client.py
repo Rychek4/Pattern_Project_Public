@@ -4,9 +4,17 @@ Client for Claude API (frontier reasoning)
 """
 
 from typing import Optional, List, Dict, Any
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from core.logger import log_info, log_error, log_success
+
+
+@dataclass
+class WebSearchCitation:
+    """A citation from web search results."""
+    cited_text: str
+    title: str
+    url: str
 
 
 @dataclass
@@ -18,6 +26,9 @@ class AnthropicResponse:
     success: bool
     error: Optional[str] = None
     stop_reason: Optional[str] = None
+    # Web search fields
+    web_searches_used: int = 0
+    citations: List[WebSearchCitation] = field(default_factory=list)
 
 
 class AnthropicClient:
@@ -80,7 +91,9 @@ class AnthropicClient:
         system_prompt: Optional[str] = None,
         max_tokens: Optional[int] = None,
         temperature: float = 0.7,
-        stop_sequences: Optional[List[str]] = None
+        stop_sequences: Optional[List[str]] = None,
+        enable_web_search: bool = False,
+        web_search_max_uses: Optional[int] = None
     ) -> AnthropicResponse:
         """
         Send a chat completion request.
@@ -91,6 +104,8 @@ class AnthropicClient:
             max_tokens: Maximum tokens to generate (uses default if None)
             temperature: Sampling temperature
             stop_sequences: Optional list of stop sequences
+            enable_web_search: Whether to enable Claude's web search tool
+            web_search_max_uses: Max searches per request (None = no limit)
 
         Returns:
             AnthropicResponse with generated text
@@ -115,21 +130,66 @@ class AnthropicClient:
             if stop_sequences:
                 request_params["stop_sequences"] = stop_sequences
 
+            # Add web search tool if enabled
+            if enable_web_search:
+                web_search_tool = {
+                    "type": "web_search_20250305",
+                    "name": "web_search",
+                }
+                if web_search_max_uses is not None:
+                    web_search_tool["max_uses"] = web_search_max_uses
+                request_params["tools"] = [web_search_tool]
+
             # Make the request
             response = client.messages.create(**request_params)
 
-            # Extract text from response
+            # Parse response content
             text = ""
+            web_searches_used = 0
+            citations: List[WebSearchCitation] = []
+
             for block in response.content:
                 if hasattr(block, "text"):
+                    # Regular text block
                     text += block.text
+                elif hasattr(block, "type"):
+                    if block.type == "tool_use" and getattr(block, "name", None) == "web_search":
+                        # Claude invoked web search
+                        web_searches_used += 1
+                        log_info(f"Web search invoked ({web_searches_used})", prefix="🔍")
+
+            # Extract citations from the response if present
+            # Citations appear in server_tool_use blocks or as part of the response metadata
+            if hasattr(response, "content"):
+                for block in response.content:
+                    if hasattr(block, "type") and block.type == "web_search_tool_result":
+                        # Extract citations from search results
+                        if hasattr(block, "content"):
+                            for result_block in block.content:
+                                if hasattr(result_block, "citations"):
+                                    for citation in result_block.citations:
+                                        citations.append(WebSearchCitation(
+                                            cited_text=getattr(citation, "cited_text", ""),
+                                            title=getattr(citation, "title", ""),
+                                            url=getattr(citation, "url", "")
+                                        ))
+                    # Also check for citations in text blocks
+                    if hasattr(block, "citations"):
+                        for citation in block.citations:
+                            citations.append(WebSearchCitation(
+                                cited_text=getattr(citation, "cited_text", ""),
+                                title=getattr(citation, "title", ""),
+                                url=getattr(citation, "url", "")
+                            ))
 
             return AnthropicResponse(
                 text=text,
                 input_tokens=response.usage.input_tokens,
                 output_tokens=response.usage.output_tokens,
                 success=True,
-                stop_reason=response.stop_reason
+                stop_reason=response.stop_reason,
+                web_searches_used=web_searches_used,
+                citations=citations
             )
 
         except Exception as e:

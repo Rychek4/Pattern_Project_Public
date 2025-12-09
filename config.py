@@ -247,3 +247,18 @@ SMS_MAX_LENGTH = 160  # Standard SMS length limit
 # Prevent abuse by limiting messages per hour
 EMAIL_MAX_PER_HOUR = 20  # Maximum emails per hour (when enabled)
 SMS_MAX_PER_HOUR = 10    # Maximum SMS per hour
+
+# =============================================================================
+# WEB SEARCH CONFIGURATION
+# =============================================================================
+# Claude's native web search tool - searches happen server-side via Anthropic.
+# Requires enabling in Anthropic Console (organization setting).
+#
+# Pricing: $10 per 1,000 searches + standard token costs (results are input tokens)
+# Supported models: Claude 3.5 Sonnet, 3.5 Haiku, 3.7 Sonnet, and newer
+#
+# When enabled, Claude can autonomously search the web for current information.
+# Results include citations (title, URL, cited_text) automatically.
+WEB_SEARCH_ENABLED = False                      # Master toggle for web search
+WEB_SEARCH_MAX_USES_PER_REQUEST = 3             # Max searches Claude can do per API call
+WEB_SEARCH_TOTAL_ALLOWED_PER_DAY = 30           # Daily budget (resets at midnight)

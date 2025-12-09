@@ -6,6 +6,7 @@ Injects available command instructions into the system prompt
 from typing import Optional, Dict, Any
 
 from prompt_builder.sources.base import ContextSource, ContextBlock, SourcePriority
+import config
 
 
 class AICommandsSource(ContextSource):
@@ -14,6 +15,7 @@ class AICommandsSource(ContextSource):
 
     This source provides the AI with knowledge of available commands
     (like [[SEARCH: query]]) and instructions on when/how to use them.
+    Also includes web search capability status.
     """
 
     @property
@@ -23,6 +25,28 @@ class AICommandsSource(ContextSource):
     @property
     def priority(self) -> int:
         return SourcePriority.AI_COMMANDS
+
+    def _get_web_search_status(self) -> Optional[str]:
+        """Get web search availability status for the prompt."""
+        if not config.WEB_SEARCH_ENABLED:
+            return None
+
+        from agency.web_search_limiter import get_web_search_limiter
+        limiter = get_web_search_limiter()
+        used, total = limiter.get_usage()
+        remaining = limiter.get_remaining()
+
+        if remaining <= 0:
+            return None  # Will be handled by router with unavailable message
+
+        return f"""<web_search_capability>
+You have access to real-time web search. When the user asks about current events,
+recent information, or topics that may have changed since your knowledge cutoff,
+you can search the web automatically. Web searches happen seamlessly - you don't
+need special syntax. Just respond naturally and search when needed.
+
+Today's budget: {remaining} searches remaining ({used}/{total} used)
+</web_search_capability>"""
 
     def get_context(
         self,
@@ -42,28 +66,40 @@ class AICommandsSource(ContextSource):
         from agency.commands import get_command_processor
 
         processor = get_command_processor()
+        content_parts = []
 
-        if not processor.has_handlers():
-            return None
-
-        instructions = processor.get_all_instructions()
-
-        if not instructions:
-            return None
-
-        content = f"""<ai_commands>
+        # Add command instructions if any handlers registered
+        if processor.has_handlers():
+            instructions = processor.get_all_instructions()
+            if instructions:
+                content_parts.append(f"""<ai_commands>
 {instructions}
-</ai_commands>"""
+</ai_commands>""")
+
+        # Add web search status if enabled and available
+        web_search_status = self._get_web_search_status()
+        if web_search_status:
+            content_parts.append(web_search_status)
+
+        if not content_parts:
+            return None
+
+        content = "\n\n".join(content_parts)
+
+        # Build metadata
+        metadata = {}
+        if processor.has_handlers():
+            metadata["handler_count"] = len(processor.list_handlers())
+            metadata["handlers"] = processor.list_handlers()
+        if web_search_status:
+            metadata["web_search_enabled"] = True
 
         return ContextBlock(
             source_name=self.source_name,
             content=content,
             priority=self.priority,
             include_always=True,
-            metadata={
-                "handler_count": len(processor.list_handlers()),
-                "handlers": processor.list_handlers()
-            }
+            metadata=metadata
         )
 
 

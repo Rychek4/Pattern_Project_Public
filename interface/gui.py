@@ -757,7 +757,9 @@ class ChatWindow(QMainWindow):
                             tokens_in=getattr(response, 'tokens_in', 0) if pass_num == 1 else 0,
                             tokens_out=getattr(response, 'tokens_out', 0) if pass_num == 1 else 0,
                             duration_ms=current_duration,
-                            commands_detected=commands_detected
+                            commands_detected=commands_detected,
+                            web_searches_used=getattr(response, 'web_searches_used', 0) if pass_num == 1 else 0,
+                            citations=getattr(response, 'citations', []) if pass_num == 1 else []
                         )
 
                         # Emit each command execution
@@ -821,7 +823,9 @@ class ChatWindow(QMainWindow):
                             provider="max_passes_reached",
                             response_text=current_text,
                             duration_ms=current_duration,
-                            commands_detected=[cmd.command_name for cmd in processed.commands_executed]
+                            commands_detected=[cmd.command_name for cmd in processed.commands_executed],
+                            web_searches_used=0,
+                            citations=[]
                         )
 
                 # Store response

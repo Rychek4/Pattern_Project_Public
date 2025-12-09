@@ -56,6 +56,14 @@ class CommandExecutionData:
 
 
 @dataclass
+class WebSearchCitationData:
+    """Citation from a web search result."""
+    title: str = ""
+    url: str = ""
+    cited_text: str = ""
+
+
+@dataclass
 class ResponsePassData:
     """Data about a single response pass."""
     pass_number: int = 0
@@ -66,6 +74,9 @@ class ResponsePassData:
     duration_ms: float = 0
     commands_detected: List[str] = field(default_factory=list)
     timestamp: str = ""
+    # Web search fields
+    web_searches_used: int = 0
+    citations: List[WebSearchCitationData] = field(default_factory=list)
 
 
 @dataclass
@@ -457,6 +468,13 @@ class DevWindow(QMainWindow):
                 f'Commands detected: {cmd_list}</div>'
             )
 
+        # Show web search info if any
+        if data.web_searches_used > 0:
+            lines.append(
+                f'<div style="color: {COLORS["info"]}; margin-bottom: 5px;">'
+                f'🔍 Web searches used: {data.web_searches_used}</div>'
+            )
+
         # Show truncated response
         response_preview = data.response_text[:300].replace("<", "&lt;").replace(">", "&gt;")
         if len(data.response_text) > 300:
@@ -466,6 +484,34 @@ class DevWindow(QMainWindow):
             f'padding-left: 10px; color: {COLORS["text"]}; white-space: pre-wrap;">'
             f'{response_preview}</div>'
         )
+
+        # Show citations if any
+        if data.citations:
+            lines.append(
+                f'<div style="margin-top: 10px; padding: 8px; background-color: {COLORS["surface"]}; '
+                f'border-radius: 4px; border-left: 3px solid {COLORS["info"]};">'
+                f'<div style="color: {COLORS["info"]}; font-weight: bold; margin-bottom: 5px;">'
+                f'📚 Citations ({len(data.citations)})</div>'
+            )
+            for i, citation in enumerate(data.citations[:5], 1):  # Limit to 5
+                title_escaped = citation.title.replace("<", "&lt;").replace(">", "&gt;")
+                cited_text_escaped = citation.cited_text[:100].replace("<", "&lt;").replace(">", "&gt;")
+                if len(citation.cited_text) > 100:
+                    cited_text_escaped += "..."
+                lines.append(
+                    f'<div style="margin: 5px 0; padding: 5px; font-size: 11px;">'
+                    f'<div style="color: {COLORS["text"]}; font-weight: bold;">{i}. {title_escaped}</div>'
+                    f'<div style="color: {COLORS["text_dim"]};">{citation.url}</div>'
+                    f'<div style="color: {COLORS["text_dim"]}; font-style: italic; margin-top: 3px;">'
+                    f'"{cited_text_escaped}"</div>'
+                    f'</div>'
+                )
+            if len(data.citations) > 5:
+                lines.append(
+                    f'<div style="color: {COLORS["text_dim"]}; font-size: 11px;">'
+                    f'...and {len(data.citations) - 5} more</div>'
+                )
+            lines.append('</div>')
 
         lines.append('</div>')
         return ''.join(lines)
@@ -568,10 +614,22 @@ def emit_response_pass(
     tokens_in: int = 0,
     tokens_out: int = 0,
     duration_ms: float = 0,
-    commands_detected: Optional[List[str]] = None
+    commands_detected: Optional[List[str]] = None,
+    web_searches_used: int = 0,
+    citations: Optional[List[Any]] = None
 ):
     """Emit response pass data to dev window if active."""
     if _dev_window and config.DEV_MODE_ENABLED:
+        # Convert citations to WebSearchCitationData
+        citation_data = []
+        if citations:
+            for c in citations:
+                citation_data.append(WebSearchCitationData(
+                    title=getattr(c, "title", "") if hasattr(c, "title") else c.get("title", ""),
+                    url=getattr(c, "url", "") if hasattr(c, "url") else c.get("url", ""),
+                    cited_text=getattr(c, "cited_text", "") if hasattr(c, "cited_text") else c.get("cited_text", "")
+                ))
+
         data = ResponsePassData(
             pass_number=pass_number,
             provider=provider,
@@ -580,7 +638,9 @@ def emit_response_pass(
             tokens_out=tokens_out,
             duration_ms=duration_ms,
             commands_detected=commands_detected or [],
-            timestamp=datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            timestamp=datetime.now().strftime("%H:%M:%S.%f")[:-3],
+            web_searches_used=web_searches_used,
+            citations=citation_data
         )
         _dev_window.signals.response_pass.emit(data)
 
