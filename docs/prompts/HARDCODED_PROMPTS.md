@@ -257,23 +257,23 @@ Output only the JSON object:"""
 
 ### Phase 2: Memory Content
 
-**Location**: `memory/extractor.py:104-117`
+**Location**: `memory/extractor.py:103-117`
 
 ```python
-MEMORY_CONTENT_PROMPT = """Write a 1-2 sentence memory summarizing this conversation topic.
+MEMORY_CONTENT_PROMPT = """Write a 1-2 sentence memory from this conversation.
 
 Instructions:
-1. Write in third person using "User" and "AI"
-2. Focus on the key insight or outcome
-3. Be specific: use names like "the Flask app" or "the Python script"
-4. Capture what's worth remembering long-term
+1. Write in first person as the AI ("I"), referring to the human as "they" or by name if known
+2. Focus on what mattered—the insight, the shift, or the moment of connection
+3. Be specific: use real names, details, and context
+4. If there was friction, surprise, or uncertainty, include it
 
 Topic: {topic}
 
 Conversation:
 {turns}
 
-Write your 1-2 sentence summary:"""
+Write your memory:"""
 ```
 
 **Dynamic elements**: `{topic}`, `{turns}`

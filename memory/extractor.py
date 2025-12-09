@@ -100,21 +100,21 @@ Output only the JSON object:"""
 # - No complex JSON schema to follow
 # - Local LLM calls are free
 
-# Pass 1: Synthesize memory content (natural language)
-MEMORY_CONTENT_PROMPT = """Write a 1-2 sentence memory summarizing this conversation topic.
+# Pass 1: Synthesize memory content (natural language, first-person)
+MEMORY_CONTENT_PROMPT = """Write a 1-2 sentence memory from this conversation.
 
 Instructions:
-1. Write in third person using "User" and "AI"
-2. Focus on the key insight or outcome
-3. Be specific: use names like "the Flask app" or "the Python script"
-4. Capture what's worth remembering long-term
+1. Write in first person as the AI ("I"), referring to the human as "they" or by name if known
+2. Focus on what mattered—the insight, the shift, or the moment of connection
+3. Be specific: use real names, details, and context
+4. If there was friction, surprise, or uncertainty, include it
 
 Topic: {topic}
 
 Conversation:
 {turns}
 
-Write your 1-2 sentence summary:"""
+Write your memory:"""
 
 # Pass 2: Rate importance (single number)
 MEMORY_IMPORTANCE_PROMPT = """Rate the importance of this memory from 0 to 10.
