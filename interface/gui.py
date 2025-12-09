@@ -755,6 +755,10 @@ class ChatWindow(QMainWindow):
                 self.signals.update_status.emit(f"Error: {response.error}")
 
         except Exception as e:
+            error_msg = f"Message processing error: {str(e)}"
+            tb = traceback.format_exc()
+            log_error(f"Exception in _process_message: {error_msg}")
+            log_error(f"Traceback:\n{tb}")
             self.signals.update_status.emit(f"Error: {str(e)}")
 
         finally:
