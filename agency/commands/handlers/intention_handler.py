@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Optional
 
 from agency.commands.handlers.base import CommandHandler, CommandResult
+from agency.commands.errors import ToolError, ToolErrorType
 from agency.intentions import (
     get_intention_manager,
     get_trigger_engine,
@@ -64,7 +65,12 @@ class RemindHandler(CommandHandler):
                 query=query,
                 data=None,
                 needs_continuation=False,
-                error="Format: [[REMIND: when | what]] - missing 'what' part"
+                error=ToolError(
+                    error_type=ToolErrorType.FORMAT_ERROR,
+                    message="Missing 'what' part - reminder needs both when and what",
+                    expected_format="[[REMIND: when | what]]",
+                    example="[[REMIND: in 2 hours | ask about the meeting]]"
+                )
             )
 
         when_str = parts[0]
@@ -81,7 +87,12 @@ class RemindHandler(CommandHandler):
                 query=query,
                 data=None,
                 needs_continuation=False,
-                error=f"Could not parse time: '{when_str}'"
+                error=ToolError(
+                    error_type=ToolErrorType.PARSE_ERROR,
+                    message=f"Could not parse time expression: '{when_str}'",
+                    expected_format="Use relative time like 'in X minutes/hours' or 'tomorrow morning'",
+                    example="[[REMIND: in 30 minutes | check on the build]]"
+                )
             )
 
         # Get current session ID if available
@@ -118,7 +129,12 @@ class RemindHandler(CommandHandler):
                 query=query,
                 data=None,
                 needs_continuation=False,
-                error="Failed to create reminder"
+                error=ToolError(
+                    error_type=ToolErrorType.SYSTEM_ERROR,
+                    message="Failed to create reminder in database",
+                    expected_format=None,
+                    example=None
+                )
             )
 
     def get_instructions(self) -> str:
@@ -190,7 +206,12 @@ class CompleteHandler(CommandHandler):
                 query=query,
                 data=None,
                 needs_continuation=False,
-                error=f"Invalid intention ID: {id_part}"
+                error=ToolError(
+                    error_type=ToolErrorType.VALIDATION,
+                    message=f"Invalid intention ID: '{id_part}' is not a valid number",
+                    expected_format="[[COMPLETE: I-<number> | outcome]]",
+                    example="[[COMPLETE: I-42 | task completed successfully]]"
+                )
             )
 
         # Get the intention to check it exists
@@ -201,7 +222,12 @@ class CompleteHandler(CommandHandler):
                 query=query,
                 data=None,
                 needs_continuation=False,
-                error=f"Intention I-{intention_id} not found"
+                error=ToolError(
+                    error_type=ToolErrorType.NOT_FOUND,
+                    message=f"Intention I-{intention_id} not found - it may have been completed or dismissed already",
+                    expected_format=None,
+                    example=None
+                )
             )
 
         # Complete it
@@ -224,7 +250,12 @@ class CompleteHandler(CommandHandler):
                 query=query,
                 data=None,
                 needs_continuation=False,
-                error=f"Failed to complete intention I-{intention_id}"
+                error=ToolError(
+                    error_type=ToolErrorType.SYSTEM_ERROR,
+                    message=f"Failed to complete intention I-{intention_id} in database",
+                    expected_format=None,
+                    example=None
+                )
             )
 
     def _create_memory_from_intention(self, intention, outcome: Optional[str]) -> None:
@@ -303,7 +334,12 @@ class DismissHandler(CommandHandler):
                 query=query,
                 data=None,
                 needs_continuation=False,
-                error=f"Invalid intention ID: {id_part}"
+                error=ToolError(
+                    error_type=ToolErrorType.VALIDATION,
+                    message=f"Invalid intention ID: '{id_part}' is not a valid number",
+                    expected_format="[[DISMISS: I-<number>]]",
+                    example="[[DISMISS: I-42]]"
+                )
             )
 
         success = manager.dismiss_intention(intention_id)
@@ -322,7 +358,12 @@ class DismissHandler(CommandHandler):
                 query=query,
                 data=None,
                 needs_continuation=False,
-                error=f"Failed to dismiss intention I-{intention_id}"
+                error=ToolError(
+                    error_type=ToolErrorType.NOT_FOUND,
+                    message=f"Intention I-{intention_id} not found or already dismissed",
+                    expected_format=None,
+                    example=None
+                )
             )
 
     def get_instructions(self) -> str:

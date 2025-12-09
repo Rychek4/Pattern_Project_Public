@@ -5,7 +5,9 @@ Abstract interface for AI command handlers
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Optional, Union
+
+from agency.commands.errors import ToolError
 
 
 @dataclass
@@ -19,14 +21,27 @@ class CommandResult:
         data: Retrieved data (None for fire-and-forget commands)
         needs_continuation: Whether AI needs to see results in pass 2
         display_text: Optional user-facing status text
-        error: Error message if execution failed
+        error: Error message or ToolError if execution failed
     """
     command_name: str
     query: str
     data: Any
     needs_continuation: bool
     display_text: Optional[str] = None
-    error: Optional[str] = None
+    error: Optional[Union[str, ToolError]] = None
+
+    def get_error_message(self) -> Optional[str]:
+        """
+        Get formatted error message for AI feedback.
+
+        Returns:
+            Formatted error string, or None if no error
+        """
+        if self.error is None:
+            return None
+        if isinstance(self.error, ToolError):
+            return self.error.format_for_ai()
+        return str(self.error)
 
 
 class CommandHandler(ABC):
@@ -109,7 +124,8 @@ class CommandHandler(ABC):
             Formatted string for inclusion in continuation prompt
         """
         if result.error:
-            return f"  Error: {result.error}"
+            error_msg = result.get_error_message()
+            return f"  {error_msg}"
         if result.data is None:
             return "  No results."
         return str(result.data)
