@@ -209,6 +209,7 @@ def create_default_builder() -> PromptBuilder:
     from prompt_builder.sources.visual import VisualSource
     from prompt_builder.sources.system_pulse import SystemPulseSource
     from prompt_builder.sources.ai_commands import AICommandsSource
+    from prompt_builder.sources.intention_source import IntentionSource
 
     builder = PromptBuilder()
 
@@ -217,6 +218,7 @@ def create_default_builder() -> PromptBuilder:
     # Register sources in priority order (though they're sorted anyway)
     sources = [
         CoreMemorySource(),
+        IntentionSource(),      # AI's forward-looking memory (priority 22)
         SystemPulseSource(),
         AICommandsSource(),
         TemporalSource(),

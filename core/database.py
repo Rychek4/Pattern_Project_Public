@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from core.logger import log_info, log_success, log_error, log_config, log_section
 
 # Schema version for migrations
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 # SQL schema definition
 SCHEMA_SQL = """
@@ -93,6 +93,39 @@ CREATE TABLE IF NOT EXISTS state (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Intentions: AI-created reminders, goals, and plans
+CREATE TABLE IF NOT EXISTS intentions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    -- What type of intention this is
+    type TEXT NOT NULL CHECK (type IN ('reminder', 'goal')),
+
+    -- The content of the intention (what to do/remember)
+    content TEXT NOT NULL,
+
+    -- Why this intention was created (context from conversation)
+    context TEXT,
+
+    -- When this intention should trigger
+    trigger_type TEXT NOT NULL CHECK (trigger_type IN ('time', 'next_session')),
+    trigger_at TIMESTAMP,
+
+    -- Lifecycle
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'triggered', 'completed', 'dismissed')),
+    priority INTEGER DEFAULT 5 CHECK (priority >= 1 AND priority <= 10),
+
+    -- Timestamps
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    triggered_at TIMESTAMP,
+    completed_at TIMESTAMP,
+
+    -- Outcome note (when completed)
+    outcome TEXT,
+
+    -- Source session for context
+    source_session_id INTEGER REFERENCES sessions(id)
+);
+
 -- Indexes for efficient queries
 CREATE INDEX IF NOT EXISTS idx_conversations_session ON conversations(session_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_unprocessed ON conversations(processed_for_memory) WHERE processed_for_memory = FALSE;
@@ -103,6 +136,9 @@ CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type);
 CREATE INDEX IF NOT EXISTS idx_memories_importance ON memories(importance DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(ended_at) WHERE ended_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_core_memories_category ON core_memories(category);
+CREATE INDEX IF NOT EXISTS idx_intentions_status ON intentions(status);
+CREATE INDEX IF NOT EXISTS idx_intentions_trigger_at ON intentions(trigger_at) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_intentions_type ON intentions(type);
 """
 
 # Migration SQL for v1 -> v2
@@ -325,6 +361,49 @@ MIGRATION_V7_SQL = """
 DROP TABLE IF EXISTS relationships;
 """
 
+# Migration SQL for v7 -> v8 (add intentions table for reminder/planning system)
+MIGRATION_V8_SQL = """
+-- Intentions table: AI-created reminders, goals, and plans
+-- Enables the AI to track things it wants to follow up on
+CREATE TABLE IF NOT EXISTS intentions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    -- What type of intention this is
+    type TEXT NOT NULL CHECK (type IN ('reminder', 'goal')),
+
+    -- The content of the intention (what to do/remember)
+    content TEXT NOT NULL,
+
+    -- Why this intention was created (context from conversation)
+    context TEXT,
+
+    -- When this intention should trigger
+    -- For time-based: ISO timestamp or relative descriptor
+    trigger_type TEXT NOT NULL CHECK (trigger_type IN ('time', 'next_session')),
+    trigger_at TIMESTAMP,  -- For time-based triggers
+
+    -- Lifecycle
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'triggered', 'completed', 'dismissed')),
+    priority INTEGER DEFAULT 5 CHECK (priority >= 1 AND priority <= 10),
+
+    -- Timestamps
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    triggered_at TIMESTAMP,
+    completed_at TIMESTAMP,
+
+    -- Outcome note (when completed)
+    outcome TEXT,
+
+    -- Source session for context
+    source_session_id INTEGER REFERENCES sessions(id)
+);
+
+-- Indexes for efficient queries
+CREATE INDEX IF NOT EXISTS idx_intentions_status ON intentions(status);
+CREATE INDEX IF NOT EXISTS idx_intentions_trigger_at ON intentions(trigger_at) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_intentions_type ON intentions(type);
+"""
+
 
 class Database:
     """SQLite database manager with WAL mode and thread-safe connections."""
@@ -466,6 +545,10 @@ class Database:
             if from_version < 7:
                 log_config("Applying migration", "v6 → v7 (remove relationships table)", indent=1)
                 conn.executescript(MIGRATION_V7_SQL)
+
+            if from_version < 8:
+                log_config("Applying migration", "v7 → v8 (add intentions table)", indent=1)
+                conn.executescript(MIGRATION_V8_SQL)
 
             # Record new version
             conn.execute(

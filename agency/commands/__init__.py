@@ -53,9 +53,21 @@ def _register_default_handlers(processor: CommandProcessor) -> None:
     """
     # Import handlers here to avoid circular imports
     from agency.commands.handlers.memory_search import MemorySearchHandler
+    from agency.commands.handlers.intention_handler import (
+        RemindHandler,
+        CompleteHandler,
+        DismissHandler,
+        ListIntentionsHandler,
+    )
 
     # Register memory search handler
     processor.register(MemorySearchHandler())
+
+    # Register intention handlers
+    processor.register(RemindHandler())
+    processor.register(CompleteHandler())
+    processor.register(DismissHandler())
+    processor.register(ListIntentionsHandler())
 
 
 __all__ = [
