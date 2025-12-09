@@ -41,7 +41,6 @@ from memory.extractor import init_memory_extractor
 from interface.cli import init_cli, get_cli
 from interface.http_api import init_http_server, get_http_server
 from agency.proactive import init_proactive_agent, get_proactive_agent
-from agency.relationship_analyzer import init_relationship_analyzer, get_relationship_analyzer
 from agency.visual_capture import init_visual_capture, get_visual_capture
 from agency.system_pulse import init_system_pulse_timer, get_system_pulse_timer
 from subprocess_mgmt.manager import init_subprocess_manager, get_subprocess_manager
@@ -126,9 +125,6 @@ def initialize_system() -> bool:
 
     # Initialize system pulse timer
     init_system_pulse_timer()
-
-    # Initialize relationship analyzer
-    init_relationship_analyzer()
 
     # Initialize visual capture if enabled
     if config.VISUAL_ENABLED:
@@ -247,11 +243,6 @@ def start_background_services() -> None:
         pulse_timer = get_system_pulse_timer()
         pulse_timer.start()
 
-    # Start relationship analyzer
-    relationship_analyzer = get_relationship_analyzer()
-    relationship_analyzer.start()
-    log_subsection("Relationship analyzer started")
-
     # Start visual capture if enabled
     if config.VISUAL_ENABLED:
         visual_capture = get_visual_capture()
@@ -300,14 +291,6 @@ def stop_background_services() -> None:
             log_subsection("System pulse timer stopped")
         except Exception as e:
             log_error(f"Error stopping system pulse timer: {e}")
-
-    # Stop relationship analyzer
-    try:
-        relationship_analyzer = get_relationship_analyzer()
-        relationship_analyzer.stop()
-        log_subsection("Relationship analyzer stopped")
-    except Exception as e:
-        log_error(f"Error stopping relationship analyzer: {e}")
 
     # Stop visual capture if enabled
     if config.VISUAL_ENABLED:

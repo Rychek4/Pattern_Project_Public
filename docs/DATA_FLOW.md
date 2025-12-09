@@ -18,7 +18,7 @@ Traditional Chatbot:                    Pattern Project:
 │ │ Turn 1             │ │             │ │ Core Memories      │ │
 │ │ Turn 2             │ │             │ │ Semantic Recall    │ │
 │ │ Turn 3             │ │             │ │ Last 15 exchanges  │ │
-│ │ ...                │ │             │ │ Relationship state │ │
+│ │ ...                │ │             │ │ Temporal Context   │ │
 │ │ Turn N (truncate?) │ │             │ │ (always ~1-3K tok) │ │
 │ └────────────────────┘ │             │ └────────────────────┘ │
 └────────────────────────┘             └────────────────────────┘
@@ -44,10 +44,9 @@ USER INPUT
     │        │
     │        └─→ [Background] Memory extraction → embeddings
     │
-    ├─→ [Prompt Builder] Assemble fresh context from 6 sources
+    ├─→ [Prompt Builder] Assemble fresh context from sources
     │        │
     │        ├─→ Core Memories (permanent facts)
-    │        ├─→ Relationship State (affinity/trust)
     │        ├─→ Temporal Context (time awareness)
     │        ├─→ Visual Context (screenshots - optional)
     │        ├─→ Semantic Memories (vector search recall)
@@ -78,12 +77,12 @@ Key fields:
 
 ## Phase 2: Context Assembly (The "One-Off")
 
-The Prompt Builder queries **6 independent sources** and assembles a fresh context:
+The Prompt Builder queries **multiple independent sources** and assembles a fresh context:
 
 | Priority | Source | Always? | What It Provides |
 |----------|--------|---------|------------------|
 | 10 | **Core Memory** | YES | Permanent identity/facts from `core_memories` table |
-| 20 | **Relationship** | YES | Current affinity (-1 to 1) and trust (0 to 1) |
+| 25 | **System Pulse** | NO | AI agency timer state |
 | 30 | **Temporal** | YES | Time awareness, session duration, turn count |
 | 40 | **Visual** | NO | Current screenshot/webcam description |
 | 50 | **Semantic Memory** | NO | Top 10 relevant memories via vector search |
@@ -94,13 +93,7 @@ The Prompt Builder queries **6 independent sources** and assembles a fresh conte
 ```xml
 <core_knowledge>
   <identity>Name, role, foundational facts</identity>
-  <relationship>Known relationship dynamics</relationship>
 </core_knowledge>
-
-<relationship_context>
-  Affinity: friendly (+0.35)
-  Trust: moderate (0.65)
-</relationship_context>
 
 <temporal_context>
   Current time: December 7, 2025 at 3:45 PM
@@ -217,26 +210,6 @@ This is how conversations become **searchable memories** without bloating the co
 
 ---
 
-## Phase 6: Relationship Dynamics
-
-Another daemon analyzes conversation every 120 seconds:
-
-```
-Recent turns + top memories → Local LLM analysis
-    │
-    └─ Output: {
-         "affinity_delta": ±0.02,
-         "trust_delta": ±0.01,
-         "reasoning": "User was warm and engaged"
-       }
-    │
-    └─ Update `relationships` table (clamped to valid ranges)
-```
-
-This creates **emergent relationship dynamics** that influence future responses.
-
----
-
 ## Database Schema Summary
 
 ```
@@ -244,7 +217,6 @@ sessions        → Session metadata (start, end, duration)
 conversations   → All turns with temporal data
 memories        → Extracted memories + 384-dim embeddings
 core_memories   → Permanent foundational knowledge
-relationships   → Single row: affinity, trust, counts
 state           → Key-value runtime state
 ```
 
@@ -255,7 +227,7 @@ state           → Key-value runtime state
 ```
 Main Thread        → CLI/GUI input loop
 Memory Extractor   → Every 60s, extracts & embeds
-Relationship       → Every 120s, analyzes affinity/trust
+System Pulse       → Configurable interval, AI-initiated speaking
 Proactive Agent    → Every 300s, checks for AI-initiated triggers
 Visual Capture     → Every 30s, screenshots to Gemini (optional)
 HTTP Server        → Flask REST API (optional)
@@ -271,7 +243,7 @@ All daemon threads - stop automatically on main exit.
 2. **Consistent performance** - Context size bounded regardless of conversation length
 3. **Emergent recall** - Old memories resurface when semantically relevant
 4. **Graceful degradation** - Freshness decay naturally ages out stale info
-5. **Relationship continuity** - Affinity/trust persist across sessions
+5. **Emergent relationships** - Relationship context emerges from memories naturally
 6. **Separation of concerns** - Storage, recall, and context are independent systems
 
 The context window is a **query result**, not a **state container**.
@@ -290,7 +262,7 @@ The context window is a **query result**, not a **state container**.
 | `core/embeddings.py` | Sentence-transformers wrapper |
 | `core/database.py` | SQLite with WAL mode |
 | `llm/router.py` | Provider routing + fallback |
-| `agency/relationship_analyzer.py` | Affinity/trust updates |
+| `agency/system_pulse.py` | AI-initiated speaking timer |
 
 ---
 

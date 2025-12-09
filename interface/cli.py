@@ -26,7 +26,6 @@ from llm.router import get_llm_router, TaskType
 from concurrency.locks import get_lock_manager
 from prompt_builder import get_prompt_builder
 from prompt_builder.sources.core_memory import get_core_memory_source
-from prompt_builder.sources.relationship import get_relationship_source
 
 
 class ChatCLI:
@@ -65,7 +64,6 @@ class ChatCLI:
             "/resume": self._cmd_resume,
             "/core": self._cmd_core_memories,
             "/addcore": self._cmd_add_core,
-            "/relationship": self._cmd_relationship,
             "/pulse": self._cmd_pulse,
         }
 
@@ -309,7 +307,6 @@ class ChatCLI:
         table.add_row("/extract", "Force memory extraction")
         table.add_row("/core", "Show core memories")
         table.add_row("/addcore <category> <content>", "Add core memory (identity/relationship/preference/fact)")
-        table.add_row("/relationship", "Show relationship status")
         table.add_row("/pulse", "Show system pulse timer status")
         table.add_row("/pause", "Pause background processes")
         table.add_row("/resume", "Resume background processes")
@@ -536,46 +533,6 @@ class ChatCLI:
             self.console.print(f"[green]Added core memory [{category}]: {content}[/green]")
         else:
             self.console.print("[red]Failed to add core memory[/red]")
-
-    def _cmd_relationship(self, args: str) -> None:
-        """Show relationship status."""
-        relationship_source = get_relationship_source()
-        state = relationship_source.get_state()
-
-        if state is None:
-            self.console.print("[dim]No relationship data yet[/dim]")
-            return
-
-        # Create visual representation (0-100 scale)
-        affinity_bar = self._create_bar(state.affinity, 0, 100, 20)
-        trust_bar = self._create_bar(state.trust, 0, 100, 20)
-
-        table = Table(title="Relationship Status", show_header=False)
-        table.add_column("Metric", style="cyan")
-        table.add_column("Value")
-        table.add_column("Visual")
-
-        table.add_row(
-            "Affinity",
-            f"{state.affinity}/100",
-            affinity_bar
-        )
-        table.add_row(
-            "Trust",
-            f"{state.trust}/100",
-            trust_bar
-        )
-        table.add_row(
-            "Interactions",
-            str(state.interaction_count),
-            ""
-        )
-
-        if state.first_interaction:
-            days = (state.updated_at - state.first_interaction).days
-            table.add_row("Known for", f"{days} days", "")
-
-        self.console.print(table)
 
     def _cmd_pulse(self, args: str) -> None:
         """Show system pulse timer status."""

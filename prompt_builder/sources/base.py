@@ -15,7 +15,6 @@ class SourcePriority(IntEnum):
     Lower numbers = higher priority (included first in prompt).
     """
     CORE_MEMORY = 10       # Foundational, always included
-    RELATIONSHIP = 20      # Who the user is, how we relate
     SYSTEM_PULSE = 25      # Pulse timer control (AI agency)
     TEMPORAL = 30          # Time awareness
     VISUAL = 40            # Current visual context

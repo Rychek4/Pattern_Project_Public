@@ -7,7 +7,6 @@ from prompt_builder.sources.base import ContextSource, ContextBlock
 from prompt_builder.sources.core_memory import CoreMemorySource
 from prompt_builder.sources.semantic_memory import SemanticMemorySource
 from prompt_builder.sources.conversation import ConversationSource
-from prompt_builder.sources.relationship import RelationshipSource
 from prompt_builder.sources.temporal import TemporalSource
 from prompt_builder.sources.visual import VisualSource
 
@@ -17,7 +16,6 @@ __all__ = [
     "CoreMemorySource",
     "SemanticMemorySource",
     "ConversationSource",
-    "RelationshipSource",
     "TemporalSource",
     "VisualSource",
 ]

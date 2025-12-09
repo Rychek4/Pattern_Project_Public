@@ -27,7 +27,6 @@ TABLES = [
     ("conversations", "Chat message history", "created_at", "session_id"),
     ("memories", "Extracted memories with embeddings", "created_at", "source_session_id"),
     ("core_memories", "Permanent foundational memories", "created_at", None),
-    ("relationships", "User-AI relationship tracking", "updated_at", None),
     ("state", "Runtime state persistence", "updated_at", None),
     ("schema_version", "Database schema version tracking", "applied_at", None),
 ]
@@ -268,25 +267,6 @@ def print_stats(conn: sqlite3.Connection):
             print(f"  {mem_type}: {row[1]} (avg importance: {row[2]:.2f})")
     else:
         print("  (no memories)")
-
-    # Relationship state
-    print("\nRelationship state:")
-    cursor.execute("""
-        SELECT affinity, trust, interaction_count, first_interaction, last_interaction
-        FROM relationships
-        WHERE id = 1
-    """)
-    row = cursor.fetchone()
-    if row:
-        print(f"  Affinity: {row[0]:+.2f}")
-        print(f"  Trust: {row[1]:.2f}")
-        print(f"  Interactions: {row[2]}")
-        if row[3]:
-            print(f"  First interaction: {format_timestamp(row[3])}")
-        if row[4]:
-            print(f"  Last interaction: {format_timestamp(row[4])}")
-    else:
-        print("  (no relationship data)")
 
     # Schema version
     cursor.execute("SELECT MAX(version) FROM schema_version")
