@@ -144,35 +144,62 @@ class ChatCLI:
 
                 if response.success:
                     from agency.commands import get_command_processor
+                    import config
 
-                    # Process response for AI commands
                     processor = get_command_processor()
-                    processed = processor.process(response.text)
+                    max_passes = getattr(config, 'COMMAND_MAX_PASSES', 3)
 
-                    # Handle continuation if commands need results
-                    final_text = processed.display_text
-                    final_provider = response.provider.value
+                    # Multi-pass command processing loop
+                    current_text = response.text
+                    current_provider = response.provider.value
+                    current_history = history.copy()
+                    pass_num = 1
 
-                    if processed.needs_continuation:
-                        self.console.print("[dim]  ↳ Executing command...[/dim]")
+                    while pass_num <= max_passes:
+                        # Process current response for commands
+                        processed = processor.process(current_text)
 
-                        # Build continuation: add original response + results as context
-                        continuation_history = history.copy()
-                        continuation_history.append({"role": "assistant", "content": response.text})
-                        continuation_history.append({"role": "user", "content": processed.continuation_prompt})
+                        # If no continuation needed, we're done
+                        if not processed.needs_continuation:
+                            final_text = processed.display_text
+                            final_provider = current_provider
+                            break
 
-                        # Pass 2
+                        # Show status for command execution
+                        if pass_num == 1:
+                            self.console.print("[dim]  ↳ Executing command...[/dim]")
+                        else:
+                            self.console.print(f"[dim]  ↳ Executing command (pass {pass_num})...[/dim]")
+
+                        # Build continuation history
+                        current_history.append({"role": "assistant", "content": current_text})
+                        current_history.append({"role": "user", "content": processed.continuation_prompt})
+
+                        # Get next response
                         with self.console.status("[bold blue]Continuing...[/bold blue]", spinner="dots"):
                             continuation = router.chat(
-                                messages=continuation_history,
+                                messages=current_history,
                                 system_prompt=assembled.full_system_prompt,
                                 task_type=TaskType.CONVERSATION,
                                 temperature=0.7
                             )
 
-                        if continuation.success:
-                            final_text = continuation.text
-                            final_provider = continuation.provider.value
+                        if not continuation.success:
+                            # On failure, use last successful response
+                            final_text = processed.display_text
+                            final_provider = current_provider
+                            break
+
+                        # Prepare for next iteration
+                        current_text = continuation.text
+                        current_provider = continuation.provider.value
+                        pass_num += 1
+                    else:
+                        # Hit max passes - use final response as-is
+                        # Process one more time to get display_text but don't continue
+                        processed = processor.process(current_text)
+                        final_text = processed.display_text
+                        final_provider = current_provider
 
                     # Store final response
                     conversation_mgr.add_turn(
