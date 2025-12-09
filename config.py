@@ -175,3 +175,12 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 COMMAND_MAX_PASSES = 2          # Maximum LLM calls per user message (1 = no continuation)
 COMMAND_SEARCH_LIMIT = 10       # Default memory search result count
 COMMAND_SEARCH_MIN_SCORE = 0.3  # Minimum relevance score for search results
+
+# =============================================================================
+# INTENTION SYSTEM CONFIGURATION
+# =============================================================================
+# Intentions give the AI forward-looking agency: reminders, goals, plans
+# that surface at the right time. Intentions are private to the AI.
+INTENTION_ENABLED = True                    # Enable the intention system
+INTENTION_MAX_PENDING_DISPLAY = 3           # Max pending intentions to show in context
+INTENTION_COMPLETED_TO_MEMORY = True        # Create memories from completed intentions
