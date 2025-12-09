@@ -143,6 +143,7 @@ class ChatWindow(QMainWindow):
         self._prompt_builder = None
         self._temporal_tracker = None
         self._system_pulse_timer = None
+        self._reminder_scheduler = None
 
         self._setup_ui()
         self._setup_timers()
@@ -336,7 +337,8 @@ class ChatWindow(QMainWindow):
         llm_router,
         prompt_builder,
         temporal_tracker,
-        system_pulse_timer=None
+        system_pulse_timer=None,
+        reminder_scheduler=None
     ):
         """Set backend references for communication."""
         self._conversation_mgr = conversation_mgr
@@ -344,10 +346,15 @@ class ChatWindow(QMainWindow):
         self._prompt_builder = prompt_builder
         self._temporal_tracker = temporal_tracker
         self._system_pulse_timer = system_pulse_timer
+        self._reminder_scheduler = reminder_scheduler
 
         # Set up pulse callback if timer is provided
         if self._system_pulse_timer:
             self._system_pulse_timer.set_callback(self._on_pulse_fired)
+
+        # Set up reminder scheduler callback if provided
+        if self._reminder_scheduler:
+            self._reminder_scheduler.set_callback(self._on_reminder_fired)
 
         # Start session if not active
         if not temporal_tracker.is_session_active:
@@ -1036,6 +1043,150 @@ class ChatWindow(QMainWindow):
             log_info("=== PULSE DEBUG: _process_pulse() completing ===", prefix="🔍")
             self.signals.response_complete.emit()
 
+    def _on_reminder_fired(self, triggered_intentions):
+        """Called when the reminder scheduler detects due intentions."""
+        from agency.intentions import Intention
+        log_info(f"REMINDER DEBUG: _on_reminder_fired() callback triggered with {len(triggered_intentions)} intention(s)", prefix="⏰")
+
+        # Don't fire if already processing a message
+        if self._is_processing:
+            log_warning("REMINDER DEBUG: Skipping reminder pulse - already processing")
+            return
+
+        log_info("REMINDER DEBUG: Starting reminder processing thread...", prefix="⏰")
+
+        # Process the reminder pulse in a background thread
+        thread = threading.Thread(
+            target=self._process_reminder_pulse,
+            args=(triggered_intentions,),
+            daemon=True
+        )
+        thread.start()
+
+    def _process_reminder_pulse(self, triggered_intentions):
+        """Process a reminder pulse in background thread."""
+        from agency.intentions import get_reminder_pulse_prompt
+        from agency.system_pulse import PULSE_STORED_MESSAGE
+
+        # Generate reminder-specific pulse prompt
+        reminder_prompt = get_reminder_pulse_prompt(triggered_intentions)
+
+        # Format stored message to indicate it's a reminder pulse
+        stored_message = "[Reminder Pulse]"
+
+        log_info("=== REMINDER DEBUG: Starting _process_reminder_pulse() ===", prefix="⏰")
+
+        try:
+            self._is_processing = True
+
+            # Pause idle timer during processing (so we don't double-fire)
+            if self._system_pulse_timer:
+                self._system_pulse_timer.pause()
+
+            # Update UI status
+            self.signals.update_status.emit("Reminder triggered...")
+
+            # Show system message in chat
+            timestamp = self._get_timestamp()
+            self.signals.new_message.emit("system", stored_message, timestamp)
+
+            # Store abbreviated message in conversation history
+            if self._conversation_mgr:
+                self._conversation_mgr.add_turn(
+                    role="system",
+                    content=stored_message,
+                    input_type="system"
+                )
+
+            # Build prompt with reminder message
+            assembled = self._prompt_builder.build(
+                user_input=reminder_prompt,
+                system_prompt=""
+            )
+
+            # Get conversation history
+            history = self._conversation_mgr.get_recent_history(limit=30)
+
+            # Add the reminder prompt as the message to respond to
+            history.append({"role": "user", "content": reminder_prompt})
+
+            # Get LLM response
+            from llm.router import TaskType
+
+            response = self._llm_router.chat(
+                messages=history,
+                system_prompt=assembled.full_system_prompt,
+                task_type=TaskType.CONVERSATION,
+                temperature=0.7
+            )
+
+            if response.success:
+                from agency.commands import get_command_processor
+
+                # Check for pulse timer command in response
+                pulse_interval = self._parse_pulse_command(response.text)
+                if pulse_interval is not None:
+                    self.signals.pulse_interval_change.emit(pulse_interval)
+
+                # Process response for AI commands
+                processor = get_command_processor()
+                processed = processor.process(response.text)
+
+                # Handle continuation if commands need results
+                final_text = processed.display_text
+
+                if processed.needs_continuation:
+                    self.signals.update_status.emit("Executing command...")
+
+                    continuation_history = history.copy()
+                    continuation_history.append({"role": "assistant", "content": response.text})
+                    continuation_history.append({"role": "user", "content": processed.continuation_prompt})
+
+                    continuation = self._llm_router.chat(
+                        messages=continuation_history,
+                        system_prompt=assembled.full_system_prompt,
+                        task_type=TaskType.CONVERSATION,
+                        temperature=0.7
+                    )
+
+                    if continuation.success:
+                        pulse_interval = self._parse_pulse_command(continuation.text)
+                        if pulse_interval is not None:
+                            self.signals.pulse_interval_change.emit(pulse_interval)
+                        final_text = continuation.text
+
+                # Store response
+                self._conversation_mgr.add_turn(
+                    role="assistant",
+                    content=final_text,
+                    input_type="text"
+                )
+
+                # Emit to GUI
+                timestamp = self._get_timestamp()
+                self.signals.new_message.emit("assistant", final_text, timestamp)
+                log_info("REMINDER DEBUG: Emitted assistant response to chat", prefix="⏰")
+            else:
+                error_msg = f"Reminder pulse API error: {response.error}"
+                log_error(f"REMINDER DEBUG: API call failed - {error_msg}")
+                timestamp = self._get_timestamp()
+                self.signals.new_message.emit("system", f"[Reminder Pulse Error: {response.error}]", timestamp)
+                self.signals.update_status.emit(error_msg)
+
+        except Exception as e:
+            error_msg = f"Reminder pulse exception: {str(e)}"
+            tb = traceback.format_exc()
+            log_error(f"REMINDER DEBUG: Exception caught!")
+            log_error(f"REMINDER DEBUG: {error_msg}")
+            log_error(f"REMINDER DEBUG: Traceback:\n{tb}")
+            timestamp = self._get_timestamp()
+            self.signals.new_message.emit("system", f"[Reminder Pulse Exception: {str(e)}]", timestamp)
+            self.signals.update_status.emit(error_msg)
+
+        finally:
+            log_info("=== REMINDER DEBUG: _process_reminder_pulse() completing ===", prefix="⏰")
+            self.signals.response_complete.emit()
+
     def _update_status(self, status: str):
         """Update status bar."""
         self.status_label.setText(status)
@@ -1158,6 +1309,7 @@ def run_gui():
     from llm.router import init_llm_router, get_llm_router
     from prompt_builder import init_prompt_builder, get_prompt_builder
     from agency.system_pulse import init_system_pulse_timer, get_system_pulse_timer
+    from agency.intentions import init_reminder_scheduler, get_reminder_scheduler
 
     # Initialize remaining components
     print("Initializing components...")
@@ -1179,6 +1331,11 @@ def run_gui():
         pulse_timer = get_system_pulse_timer()
         pulse_timer.start()
 
+    # Initialize and start reminder scheduler
+    init_reminder_scheduler(enabled=True)
+    reminder_scheduler = get_reminder_scheduler()
+    reminder_scheduler.start()
+
     # Create and configure window
     window = init_gui()
     window.set_backend(
@@ -1186,7 +1343,8 @@ def run_gui():
         llm_router=get_llm_router(),
         prompt_builder=get_prompt_builder(),
         temporal_tracker=get_temporal_tracker(),
-        system_pulse_timer=pulse_timer
+        system_pulse_timer=pulse_timer,
+        reminder_scheduler=reminder_scheduler
     )
 
     window.show()
@@ -1211,6 +1369,9 @@ def run_gui():
     print("Shutting down...")
     if config.SYSTEM_PULSE_ENABLED:
         get_system_pulse_timer().stop()
+
+    # Stop reminder scheduler
+    get_reminder_scheduler().stop()
 
     return exit_code
 

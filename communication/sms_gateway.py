@@ -169,14 +169,15 @@ def get_sms_gateway() -> SMSGateway:
     """
     Get the global SMS gateway instance.
 
+    Lazily initializes the gateway if not already initialized.
+
     Returns:
         The global SMSGateway instance
-
-    Raises:
-        RuntimeError: If gateway not initialized
     """
+    global _gateway
     if _gateway is None:
-        raise RuntimeError("SMS gateway not initialized. Call init_sms_gateway() first.")
+        # Lazy initialization - same pattern as other gateway getters
+        _gateway = init_sms_gateway()
     return _gateway
 
 

@@ -34,6 +34,13 @@ from agency.intentions.time_parser import (
     format_relative_past,
 )
 
+from agency.intentions.scheduler import (
+    ReminderScheduler,
+    get_reminder_scheduler,
+    init_reminder_scheduler,
+    get_reminder_pulse_prompt,
+)
+
 
 __all__ = [
     # Manager
@@ -54,4 +61,10 @@ __all__ = [
     'parse_time_expression',
     'format_trigger_time',
     'format_relative_past',
+
+    # Scheduler
+    'ReminderScheduler',
+    'get_reminder_scheduler',
+    'init_reminder_scheduler',
+    'get_reminder_pulse_prompt',
 ]

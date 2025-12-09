@@ -108,6 +108,9 @@ You can create intentions using these commands in your response:
 
 When you notice something worth following up on, create a reminder.
 This gives you continuity of care across conversations.
+
+Note: Time-based reminders automatically trigger a pulse prompt when due,
+even if the user hasn't messaged. You will receive an automated reminder pulse.
 </your_intentions>"""
 
     def _build_context(self, summary: dict, now: datetime) -> str:
@@ -138,6 +141,9 @@ This gives you continuity of care across conversations.
             "",
             "When addressing a due intention, mark it complete or dismiss it.",
             "Create reminders when you notice things worth following up on.",
+            "",
+            "Note: Time-based reminders automatically trigger a pulse prompt when due,",
+            "even if the user hasn't messaged. You will receive an automated reminder pulse.",
             "</your_intentions>",
         ])
 
