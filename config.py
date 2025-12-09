@@ -193,3 +193,17 @@ INTENTION_COMPLETED_TO_MEMORY = True        # Create memories from completed int
 FILE_STORAGE_DIR = DATA_DIR / "files"       # Sandboxed directory for AI file operations
 FILE_MAX_SIZE_BYTES = 102400                # 100KB max file size
 FILE_ALLOWED_EXTENSIONS = {".txt", ".md", ".json", ".csv"}  # Whitelist of allowed extensions
+
+# =============================================================================
+# DEV MODE CONFIGURATION
+# =============================================================================
+# Dev mode provides a debug window showing internal operations:
+# - Prompt assembly and context blocks
+# - Command/tool execution and results
+# - Multi-pass response processing
+# - Memory recall scores
+# - Token counts and timing
+#
+# Enable via command line: python main.py --dev
+# The AI is notified when dev mode is active.
+DEV_MODE_ENABLED = False  # Set programmatically via --dev flag, not env var

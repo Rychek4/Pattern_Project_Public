@@ -677,6 +677,8 @@ class ChatWindow(QMainWindow):
 
     def _process_message(self, user_input: str):
         """Process a message in background thread."""
+        import time
+
         try:
             # Store user message
             if self._conversation_mgr:
@@ -692,21 +694,37 @@ class ChatWindow(QMainWindow):
                 system_prompt=""
             )
 
+            # Emit prompt assembly to dev window
+            if config.DEV_MODE_ENABLED:
+                from interface.dev_window import emit_prompt_assembly
+                blocks_data = [
+                    {
+                        "source_name": block.source_name,
+                        "priority": block.priority,
+                        "content": block.content,
+                        "metadata": block.metadata
+                    }
+                    for block in assembled.context_blocks
+                ]
+                total_tokens = len(assembled.full_system_prompt) // 4  # Rough estimate
+                emit_prompt_assembly(blocks_data, total_tokens)
+
             # Get conversation history
             history = self._conversation_mgr.get_recent_history(limit=30)
 
             # Get LLM response
             from llm.router import TaskType
+            start_time = time.time()
             response = self._llm_router.chat(
                 messages=history,
                 system_prompt=assembled.full_system_prompt,
                 task_type=TaskType.CONVERSATION,
                 temperature=0.7
             )
+            pass1_duration = (time.time() - start_time) * 1000
 
             if response.success:
                 from agency.commands import get_command_processor
-                import config
 
                 processor = get_command_processor()
                 max_passes = getattr(config, 'COMMAND_MAX_PASSES', 3)
@@ -720,10 +738,37 @@ class ChatWindow(QMainWindow):
                 current_text = response.text
                 current_history = history.copy()
                 pass_num = 1
+                current_duration = pass1_duration
 
                 while pass_num <= max_passes:
                     # Process current response for commands
                     processed = processor.process(current_text)
+
+                    # Extract detected command names for dev window
+                    commands_detected = [cmd.command_name for cmd in processed.commands_executed]
+
+                    # Emit response pass to dev window
+                    if config.DEV_MODE_ENABLED:
+                        from interface.dev_window import emit_response_pass, emit_command_executed
+                        emit_response_pass(
+                            pass_number=pass_num,
+                            provider=response.provider.value if pass_num == 1 else "continuation",
+                            response_text=current_text,
+                            tokens_in=getattr(response, 'tokens_in', 0) if pass_num == 1 else 0,
+                            tokens_out=getattr(response, 'tokens_out', 0) if pass_num == 1 else 0,
+                            duration_ms=current_duration,
+                            commands_detected=commands_detected
+                        )
+
+                        # Emit each command execution
+                        for cmd_result in processed.commands_executed:
+                            emit_command_executed(
+                                command_name=cmd_result.command_name,
+                                query=cmd_result.query,
+                                result_data=cmd_result.data,
+                                error=str(cmd_result.error) if cmd_result.error else None,
+                                needs_continuation=cmd_result.needs_continuation
+                            )
 
                     # If no continuation needed, we're done
                     if not processed.needs_continuation:
@@ -741,12 +786,14 @@ class ChatWindow(QMainWindow):
                     current_history.append({"role": "user", "content": processed.continuation_prompt})
 
                     # Get next response
+                    cont_start = time.time()
                     continuation = self._llm_router.chat(
                         messages=current_history,
                         system_prompt=assembled.full_system_prompt,
                         task_type=TaskType.CONVERSATION,
                         temperature=0.7
                     )
+                    current_duration = (time.time() - cont_start) * 1000
 
                     if not continuation.success:
                         # On failure, use last successful response
@@ -765,6 +812,17 @@ class ChatWindow(QMainWindow):
                     # Hit max passes - use final response as-is
                     processed = processor.process(current_text)
                     final_text = processed.display_text
+
+                    # Emit final pass to dev window
+                    if config.DEV_MODE_ENABLED:
+                        from interface.dev_window import emit_response_pass
+                        emit_response_pass(
+                            pass_number=pass_num,
+                            provider="max_passes_reached",
+                            response_text=current_text,
+                            duration_ms=current_duration,
+                            commands_detected=[cmd.command_name for cmd in processed.commands_executed]
+                        )
 
                 # Store response
                 self._conversation_mgr.add_turn(
@@ -1128,6 +1186,18 @@ def run_gui():
     )
 
     window.show()
+
+    # Create dev window if dev mode is enabled
+    dev_window = None
+    if config.DEV_MODE_ENABLED:
+        from interface.dev_window import init_dev_window
+        dev_window = init_dev_window()
+        dev_window.show()
+        # Position dev window to the right of main window
+        main_geo = window.geometry()
+        dev_window.move(main_geo.x() + main_geo.width() + 20, main_geo.y())
+        print("Dev mode: Debug window opened")
+
     print("GUI ready!")
 
     # Run event loop
