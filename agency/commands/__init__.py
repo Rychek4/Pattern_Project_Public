@@ -59,6 +59,12 @@ def _register_default_handlers(processor: CommandProcessor) -> None:
         DismissHandler,
         ListIntentionsHandler,
     )
+    from agency.commands.handlers.file_handler import (
+        ReadFileHandler,
+        WriteFileHandler,
+        AppendFileHandler,
+        ListFilesHandler,
+    )
 
     # Register memory search handler
     processor.register(MemorySearchHandler())
@@ -68,6 +74,12 @@ def _register_default_handlers(processor: CommandProcessor) -> None:
     processor.register(CompleteHandler())
     processor.register(DismissHandler())
     processor.register(ListIntentionsHandler())
+
+    # Register file handlers
+    processor.register(ReadFileHandler())
+    processor.register(WriteFileHandler())
+    processor.register(AppendFileHandler())
+    processor.register(ListFilesHandler())
 
 
 __all__ = [

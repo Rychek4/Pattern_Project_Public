@@ -184,3 +184,12 @@ COMMAND_SEARCH_MIN_SCORE = 0.3  # Minimum relevance score for search results
 INTENTION_ENABLED = True                    # Enable the intention system
 INTENTION_MAX_PENDING_DISPLAY = 3           # Max pending intentions to show in context
 INTENTION_COMPLETED_TO_MEMORY = True        # Create memories from completed intentions
+
+# =============================================================================
+# FILE TOOL CONFIGURATION
+# =============================================================================
+# Simple file read/write tools for AI to store and retrieve text files.
+# Files are sandboxed to a specific directory for security.
+FILE_STORAGE_DIR = DATA_DIR / "files"       # Sandboxed directory for AI file operations
+FILE_MAX_SIZE_BYTES = 102400                # 100KB max file size
+FILE_ALLOWED_EXTENSIONS = {".txt", ".md", ".json", ".csv"}  # Whitelist of allowed extensions
