@@ -46,6 +46,7 @@ from interface.http_api import init_http_server, get_http_server
 from agency.proactive import init_proactive_agent, get_proactive_agent
 from agency.visual_capture import init_visual_capture, get_visual_capture
 from agency.system_pulse import init_system_pulse_timer, get_system_pulse_timer
+from agency.intentions import init_reminder_scheduler, get_reminder_scheduler
 from subprocess_mgmt.manager import init_subprocess_manager, get_subprocess_manager
 from subprocess_mgmt.audio_player import register_audio_player
 from subprocess_mgmt.chat_overlay import register_chat_overlay
@@ -147,6 +148,9 @@ def initialize_system() -> bool:
 
     # Initialize system pulse timer
     init_system_pulse_timer()
+
+    # Initialize reminder scheduler
+    init_reminder_scheduler(enabled=True)
 
     # Initialize visual capture if enabled
     if config.VISUAL_ENABLED:
@@ -278,6 +282,11 @@ def start_background_services() -> None:
         pulse_timer = get_system_pulse_timer()
         pulse_timer.start()
 
+    # Start reminder scheduler
+    reminder_scheduler = get_reminder_scheduler()
+    reminder_scheduler.start()
+    log_subsection("Reminder scheduler started")
+
     # Start visual capture if enabled
     if config.VISUAL_ENABLED:
         visual_capture = get_visual_capture()
@@ -326,6 +335,14 @@ def stop_background_services() -> None:
             log_subsection("System pulse timer stopped")
         except Exception as e:
             log_error(f"Error stopping system pulse timer: {e}")
+
+    # Stop reminder scheduler
+    try:
+        reminder_scheduler = get_reminder_scheduler()
+        reminder_scheduler.stop()
+        log_subsection("Reminder scheduler stopped")
+    except Exception as e:
+        log_error(f"Error stopping reminder scheduler: {e}")
 
     # Stop visual capture if enabled
     if config.VISUAL_ENABLED:

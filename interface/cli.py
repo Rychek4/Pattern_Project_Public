@@ -45,7 +45,9 @@ class ChatCLI:
         self._lock_manager = get_lock_manager()
         self._commands: Dict[str, Callable] = {}
         self._pulse_queue: queue.Queue = queue.Queue()
+        self._reminder_queue: queue.Queue = queue.Queue()
         self._system_pulse_timer = None
+        self._reminder_scheduler = None
         self._setup_commands()
 
     def _setup_commands(self) -> None:
@@ -81,6 +83,11 @@ class ChatCLI:
             self._system_pulse_timer = get_system_pulse_timer()
             self._system_pulse_timer.set_callback(self._on_pulse_fired)
 
+        # Set up reminder scheduler
+        from agency.intentions import get_reminder_scheduler
+        self._reminder_scheduler = get_reminder_scheduler()
+        self._reminder_scheduler.set_callback(self._on_reminder_fired)
+
         # Start a session if not already active
         if not tracker.is_session_active:
             tracker.start_session()
@@ -101,8 +108,9 @@ class ChatCLI:
 
         while self._running:
             try:
-                # Check for pending pulse before getting input
+                # Check for pending pulse/reminder before getting input
                 self._check_pulse_queue()
+                self._check_reminder_queue()
 
                 # Get user input
                 user_input = Prompt.ask("[bold green]You[/bold green]")
@@ -453,6 +461,126 @@ class ChatCLI:
         except Exception as e:
             log_error(f"Pulse processing error: {e}")
             self.console.print(f"[bold red]Pulse error:[/bold red] {e}")
+
+        finally:
+            # Resume timer
+            if self._system_pulse_timer:
+                self._system_pulse_timer.resume()
+
+    def _on_reminder_fired(self, triggered_intentions) -> None:
+        """Called when the reminder scheduler detects due intentions (from background thread)."""
+        # Queue the reminder for processing in the main loop
+        self._reminder_queue.put(triggered_intentions)
+
+    def _check_reminder_queue(self) -> None:
+        """Check if there's a pending reminder to process."""
+        try:
+            # Non-blocking check
+            triggered_intentions = self._reminder_queue.get_nowait()
+            # Reminder is pending, process it
+            self._process_reminder(triggered_intentions)
+        except queue.Empty:
+            pass
+
+    def _process_reminder(self, triggered_intentions) -> None:
+        """Process a reminder pulse."""
+        from agency.intentions import get_reminder_pulse_prompt
+
+        conversation_mgr = get_conversation_manager()
+        router = get_llm_router()
+        prompt_builder = get_prompt_builder()
+
+        # Generate reminder-specific pulse prompt
+        reminder_prompt = get_reminder_pulse_prompt(triggered_intentions)
+        stored_message = "[Reminder Pulse]"
+
+        try:
+            # Pause idle timer during processing
+            if self._system_pulse_timer:
+                self._system_pulse_timer.pause()
+
+            # Show reminder indicator
+            self.console.print()
+            self.console.print(f"[bold yellow]⏰ Reminder Triggered ({len(triggered_intentions)} intention(s))[/bold yellow]")
+
+            # Store abbreviated message
+            conversation_mgr.add_turn(
+                role="user",
+                content=stored_message,
+                input_type="reminder_pulse"
+            )
+
+            # Build prompt with reminder message
+            assembled = prompt_builder.build(
+                user_input=reminder_prompt,
+                system_prompt=""
+            )
+
+            # Get conversation history
+            history = conversation_mgr.get_recent_history(limit=30)
+            history.append({"role": "user", "content": reminder_prompt})
+
+            # Show thinking indicator
+            with self.console.status("[bold yellow]Reminder thinking...[/bold yellow]", spinner="dots"):
+                response = router.chat(
+                    messages=history,
+                    system_prompt=assembled.full_system_prompt,
+                    task_type=TaskType.CONVERSATION,
+                    temperature=0.7
+                )
+
+            if response.success:
+                from agency.commands import get_command_processor
+
+                # Process response for AI commands
+                processor = get_command_processor()
+                processed = processor.process(response.text)
+
+                final_text = processed.display_text
+                final_provider = response.provider.value
+
+                if processed.needs_continuation:
+                    self.console.print("[dim]  ↳ Executing command...[/dim]")
+
+                    continuation_history = history.copy()
+                    continuation_history.append({"role": "assistant", "content": response.text})
+                    continuation_history.append({"role": "user", "content": processed.continuation_prompt})
+
+                    with self.console.status("[bold yellow]Continuing...[/bold yellow]", spinner="dots"):
+                        continuation = router.chat(
+                            messages=continuation_history,
+                            system_prompt=assembled.full_system_prompt,
+                            task_type=TaskType.CONVERSATION,
+                            temperature=0.7
+                        )
+
+                    if continuation.success:
+                        final_text = continuation.text
+                        final_provider = continuation.provider.value
+
+                # Store response
+                conversation_mgr.add_turn(
+                    role="assistant",
+                    content=final_text,
+                    input_type="text"
+                )
+
+                # Display with special styling
+                panel = Panel(
+                    Markdown(final_text),
+                    title=f"[bold yellow]AI (reminder)[/bold yellow] [dim]({final_provider})[/dim]",
+                    title_align="left",
+                    border_style="yellow",
+                    padding=(0, 1)
+                )
+                self.console.print(panel)
+                self.console.print()
+            else:
+                self.console.print(f"[bold red]Reminder error:[/bold red] {response.error}")
+
+        except Exception as e:
+            log_error(f"Reminder processing error: {e}")
+            self.console.print(f"[bold red]Reminder error:[/bold red] {e}")
 
         finally:
             # Resume timer
