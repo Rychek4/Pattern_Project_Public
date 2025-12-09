@@ -93,6 +93,10 @@ class ChatCLI:
             self.console.print(
                 f"[dim]System pulse active: AI will speak every {config.SYSTEM_PULSE_INTERVAL // 60} minutes if idle[/dim]"
             )
+        if config.DEV_MODE_ENABLED:
+            self.console.print(
+                "[bold magenta]🔧 Dev mode active: Showing internal operations[/bold magenta]"
+            )
         self.console.print()
 
         while self._running:
@@ -129,10 +133,15 @@ class ChatCLI:
                     system_prompt=""
                 )
 
+                # Display dev mode prompt assembly info
+                self._display_dev_prompt_assembly(assembled)
+
                 # Get conversation history for LLM
                 history = conversation_mgr.get_recent_history(limit=30)
 
                 # Show thinking indicator
+                import time
+                start_time = time.time()
                 with self.console.status("[bold blue]Thinking...[/bold blue]", spinner="dots"):
                     # Get response from LLM with full context
                     response = router.chat(
@@ -141,10 +150,10 @@ class ChatCLI:
                         task_type=TaskType.CONVERSATION,
                         temperature=0.7
                     )
+                pass1_duration = (time.time() - start_time) * 1000
 
                 if response.success:
                     from agency.commands import get_command_processor
-                    import config
 
                     processor = get_command_processor()
                     max_passes = getattr(config, 'COMMAND_MAX_PASSES', 3)
@@ -154,10 +163,29 @@ class ChatCLI:
                     current_provider = response.provider.value
                     current_history = history.copy()
                     pass_num = 1
+                    current_duration = pass1_duration
 
                     while pass_num <= max_passes:
                         # Process current response for commands
                         processed = processor.process(current_text)
+
+                        # Extract command names for dev display
+                        commands_detected = [cmd.command_name for cmd in processed.commands_executed]
+
+                        # Display dev mode response pass info
+                        self._display_dev_response_pass(
+                            pass_num, current_provider, current_text,
+                            commands_detected, current_duration
+                        )
+
+                        # Display dev mode command execution info
+                        for cmd_result in processed.commands_executed:
+                            self._display_dev_command_execution(
+                                cmd_result.command_name,
+                                cmd_result.query,
+                                cmd_result.data,
+                                str(cmd_result.error) if cmd_result.error else None
+                            )
 
                         # If no continuation needed, we're done
                         if not processed.needs_continuation:
@@ -176,6 +204,7 @@ class ChatCLI:
                         current_history.append({"role": "user", "content": processed.continuation_prompt})
 
                         # Get next response
+                        cont_start = time.time()
                         with self.console.status("[bold blue]Continuing...[/bold blue]", spinner="dots"):
                             continuation = router.chat(
                                 messages=current_history,
@@ -183,6 +212,7 @@ class ChatCLI:
                                 task_type=TaskType.CONVERSATION,
                                 temperature=0.7
                             )
+                        current_duration = (time.time() - cont_start) * 1000
 
                         if not continuation.success:
                             # On failure, use last successful response
@@ -200,6 +230,13 @@ class ChatCLI:
                         processed = processor.process(current_text)
                         final_text = processed.display_text
                         final_provider = current_provider
+
+                        # Display final pass in dev mode
+                        self._display_dev_response_pass(
+                            pass_num, "max_passes_reached", current_text,
+                            [cmd.command_name for cmd in processed.commands_executed],
+                            current_duration
+                        )
 
                     # Store final response
                     conversation_mgr.add_turn(
@@ -245,6 +282,61 @@ class ChatCLI:
         )
         self.console.print(panel)
         self.console.print()
+
+    def _display_dev_prompt_assembly(self, assembled) -> None:
+        """Display prompt assembly info in dev mode."""
+        if not config.DEV_MODE_ENABLED:
+            return
+
+        self.console.print()
+        self.console.print("[bold magenta]═══ DEV: Prompt Assembly ═══[/bold magenta]")
+
+        total_tokens = len(assembled.full_system_prompt) // 4  # Rough estimate
+        self.console.print(f"[dim]Estimated tokens: ~{total_tokens}[/dim]")
+
+        for block in sorted(assembled.context_blocks, key=lambda b: b.priority):
+            block_tokens = len(block.content) // 4
+            self.console.print(
+                f"  [cyan]{block.source_name}[/cyan] "
+                f"[dim](priority {block.priority}, ~{block_tokens} tokens)[/dim]"
+            )
+
+        self.console.print()
+
+    def _display_dev_response_pass(self, pass_num: int, provider: str,
+                                    response_text: str, commands: list,
+                                    duration_ms: float = 0) -> None:
+        """Display response pass info in dev mode."""
+        if not config.DEV_MODE_ENABLED:
+            return
+
+        self.console.print(
+            f"[bold magenta]═══ DEV: Pass {pass_num} ({provider}) ═══[/bold magenta]"
+        )
+        if duration_ms > 0:
+            self.console.print(f"[dim]Duration: {duration_ms:.0f}ms[/dim]")
+
+        if commands:
+            cmd_list = ", ".join([f"[[{c}]]" for c in commands])
+            self.console.print(f"[yellow]Commands detected: {cmd_list}[/yellow]")
+
+        # Show truncated response preview
+        preview = response_text[:200]
+        if len(response_text) > 200:
+            preview += "..."
+        self.console.print(f"[dim]Response: {preview}[/dim]")
+        self.console.print()
+
+    def _display_dev_command_execution(self, cmd_name: str, query: str,
+                                        result_data, error: str = None) -> None:
+        """Display command execution info in dev mode."""
+        if not config.DEV_MODE_ENABLED:
+            return
+
+        status = "[green]Success[/green]" if not error else f"[red]Error: {error}[/red]"
+        self.console.print(
+            f"  [yellow][[{cmd_name}: {query[:50]}{'...' if len(query) > 50 else ''}]][/yellow] → {status}"
+        )
 
     def _on_pulse_fired(self) -> None:
         """Called when the system pulse timer fires (from background thread)."""

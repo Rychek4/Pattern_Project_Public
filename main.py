@@ -7,6 +7,9 @@ Usage:
     python main.py           # Run in GUI mode (PyQt5 window) - default
     python main.py --cli     # Run in CLI mode (console)
     python main.py -c        # Short form for CLI mode
+    python main.py --dev     # Enable dev mode (debug window)
+    python main.py -d        # Short form for dev mode
+    python main.py --dev -c  # Dev mode in CLI
 """
 
 import sys
@@ -155,6 +158,8 @@ def print_configuration() -> None:
     log_section("Configuration", "📡")
     log_subsection(f"Database: {config.DATABASE_PATH}")
     log_subsection(f"Diagnostic Log: {config.DIAGNOSTIC_LOG_PATH}")
+    if config.DEV_MODE_ENABLED:
+        log_subsection("Dev Mode: ENABLED (debug window active)")
 
     # Embedding model info
     model_info = get_model_info()
@@ -335,7 +340,16 @@ def main() -> int:
         action="store_true",
         help="Launch CLI mode instead of GUI (console interface)"
     )
+    parser.add_argument(
+        "--dev", "-d",
+        action="store_true",
+        help="Enable dev mode (debug window showing internal operations)"
+    )
     args = parser.parse_args()
+
+    # Set dev mode in config if requested
+    if args.dev:
+        config.DEV_MODE_ENABLED = True
 
     # CLI mode - only if explicitly requested
     if args.cli:

@@ -55,6 +55,7 @@ class SemanticMemorySource(ContextSource):
         session_context: Dict[str, Any]
     ) -> Optional[ContextBlock]:
         """Search for relevant memories based on user input."""
+        import config
         vector_store = get_vector_store()
 
         # Search for relevant memories
@@ -63,6 +64,22 @@ class SemanticMemorySource(ContextSource):
             limit=self.max_memories,
             min_score=self.min_score
         )
+
+        # Emit memory recall to dev window
+        if config.DEV_MODE_ENABLED and results:
+            from interface.dev_window import emit_memory_recall
+            recall_data = [
+                {
+                    "content": r.memory.content,
+                    "score": r.combined_score,
+                    "semantic_score": r.semantic_score,
+                    "freshness_score": r.freshness_score,
+                    "memory_type": r.memory.memory_type,
+                    "importance": r.memory.importance
+                }
+                for r in results
+            ]
+            emit_memory_recall(user_input, recall_data)
 
         if not results:
             return None
