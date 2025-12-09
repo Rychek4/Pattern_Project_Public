@@ -103,7 +103,9 @@ class CommandProcessor:
                     result = handler.execute(query, context)
                     commands_executed.append(result)
 
-                    if result.needs_continuation:
+                    # Trigger continuation if handler requires it OR if there's an error
+                    # This ensures the AI always learns about failures
+                    if result.needs_continuation or result.error:
                         needs_continuation = True
 
                     if result.error:
@@ -114,15 +116,15 @@ class CommandProcessor:
                 except Exception as e:
                     log_error(f"Command [[{handler.command_name}]] exception: {e}")
                     # Create error result so AI is informed
+                    # Always trigger continuation on exceptions so AI can recover
                     commands_executed.append(CommandResult(
                         command_name=handler.command_name,
                         query=query,
                         data=None,
-                        needs_continuation=handler.needs_continuation,
+                        needs_continuation=True,  # Force continuation on exception
                         error=str(e)
                     ))
-                    if handler.needs_continuation:
-                        needs_continuation = True
+                    needs_continuation = True
 
         # Build continuation prompt if needed
         continuation_prompt = None
@@ -144,6 +146,9 @@ class CommandProcessor:
         """
         Build the continuation prompt with command results.
 
+        Includes both successful commands that need continuation AND
+        any commands that encountered errors (so AI can recover).
+
         Args:
             results: List of CommandResult from executed commands
 
@@ -153,7 +158,8 @@ class CommandProcessor:
         lines = ["[Command Results]", ""]
 
         for result in results:
-            if result.needs_continuation:
+            # Include commands that need continuation OR had errors
+            if result.needs_continuation or result.error:
                 handler = self._handlers.get(result.command_name)
 
                 # Format the result data
@@ -164,7 +170,9 @@ class CommandProcessor:
                         log_error(f"Error formatting [[{result.command_name}]] result: {e}")
                         formatted = f"  Error formatting result: {e}"
                 elif result.error:
-                    formatted = f"  Error: {result.error}"
+                    # Fallback for errors without a handler
+                    error_msg = result.get_error_message() if hasattr(result, 'get_error_message') else str(result.error)
+                    formatted = f"  {error_msg}"
                 elif result.data is None:
                     formatted = "  No results."
                 else:

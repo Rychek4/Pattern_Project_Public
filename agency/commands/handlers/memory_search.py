@@ -4,6 +4,7 @@ Handles [[SEARCH: query]] commands for memory retrieval
 """
 
 from agency.commands.handlers.base import CommandHandler, CommandResult
+from agency.commands.errors import ToolError, ToolErrorType
 
 
 class MemorySearchHandler(CommandHandler):
@@ -80,7 +81,12 @@ class MemorySearchHandler(CommandHandler):
                 query=query,
                 data=None,
                 needs_continuation=True,
-                error=str(e)
+                error=ToolError(
+                    error_type=ToolErrorType.SYSTEM_ERROR,
+                    message=f"Memory search failed: {str(e)}",
+                    expected_format=None,
+                    example=None
+                )
             )
 
     def get_instructions(self) -> str:
@@ -106,7 +112,8 @@ The search executes and results are provided for you to continue your response."
             Formatted string showing search results
         """
         if result.error:
-            return f"  Search failed: {result.error}"
+            error_msg = result.get_error_message()
+            return f"  {error_msg}"
 
         if not result.data:
             return "  No matching memories found."
