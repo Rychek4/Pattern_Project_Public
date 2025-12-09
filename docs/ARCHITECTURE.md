@@ -20,11 +20,11 @@ Pattern is an AI companion system that doesn't just respond—it understands, re
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                      PROMPT BUILDER                             │
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐  │
-│  │Memories │ │   Web   │ │ Visuals │ │Relation-│ │  Core   │  │
-│  │         │ │ Sources │ │         │ │  ships  │ │Memories │  │
-│  └────┬────┘ └────┬────┘ └────┬────┘ └────┬────┘ └────┬────┘  │
-│       │           │           │           │           │        │
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐            │
+│  │Memories │ │   Web   │ │ Visuals │ │  Core   │            │
+│  │         │ │ Sources │ │         │ │Memories │            │
+│  └────┬────┘ └────┬────┘ └────┬────┘ └────┬────┘            │
+│       │           │           │           │                  │
 │  ┌────┴───────────┴───────────┴───────────┴───────────┴────┐  │
 │  │              CONTEXT ASSEMBLY ENGINE                     │  │
 │  │    • Token budgeting   • Source prioritization          │  │
@@ -98,8 +98,8 @@ User Input
 │  └────┬────┘ └────┬────┘ └────┬────┘            │
 │       │           │           │                  │
 │  ┌────┴────┐ ┌────┴────┐ ┌────┴────┐            │
-│  │Relation-│ │  Core   │ │Temporal │            │
-│  │  ships  │ │Memories │ │ Context │            │
+│  │  Core   │ │Temporal │ │ Semantic│            │
+│  │Memories │ │ Context │ │ Recall  │            │
 │  └────┬────┘ └────┬────┘ └────┬────┘            │
 │       └───────────┼───────────┘                  │
 │                   ▼                              │
@@ -178,7 +178,6 @@ Defaults:
 | Source | Status | Description |
 |--------|--------|-------------|
 | Core Memories | ✅ Built | Permanent, foundational knowledge (always included) |
-| Relationship Data | ✅ Built | Emergent affinity/trust tracking |
 | Temporal Context | ✅ Built | Time awareness, session duration |
 | Visual Input | ✅ Built | Screenshots/webcam via Gemini 2.5 Flash |
 | Semantic Memories | ✅ Built | Relevant memories via vector search |
@@ -187,7 +186,7 @@ Defaults:
 
 ### Assembly Process (Priority Order)
 1. **Core Memories** (priority 10) - Always included, foundational facts
-2. **Relationship Context** (priority 20) - Affinity, trust, history
+2. **System Pulse** (priority 25) - AI agency timer control
 3. **Temporal Context** (priority 30) - Time of day, session duration
 4. **Visual Context** (priority 40) - Screenshot/webcam descriptions
 5. **Semantic Memories** (priority 50) - Relevance-scored memories
@@ -237,7 +236,7 @@ Main Process
 ├── [Main Thread] CLI input loop
 ├── [Daemon] MemoryExtractor - every 60s
 ├── [Daemon] ProactiveAgent - every 300s
-├── [Daemon] RelationshipAnalyzer - every 120s
+├── [Daemon] SystemPulseTimer - configurable interval
 ├── [Daemon] VisualCapture - every 30s (if enabled)
 ├── [Daemon] HTTPServer - Flask
 └── [Daemon] SubprocessManager - health checks
@@ -247,40 +246,16 @@ All daemon threads stop automatically when main exits.
 
 ---
 
-## Database Schema (v2)
+## Database Schema (v7)
 
 ```sql
 sessions        -- Session metadata
 conversations   -- All turns with temporal data
 memories        -- Extracted memories with embeddings
 core_memories   -- Permanent foundational knowledge
-relationships   -- Affinity and trust tracking
 state           -- Key-value runtime state
 schema_version  -- Migration tracking
 ```
-
----
-
-## Relationship System
-
-### Affinity & Trust
-- **Affinity** (-1.0 to 1.0): Emotional closeness
-- **Trust** (0.0 to 1.0): Mutual reliability
-
-### Emergent Updates
-The RelationshipAnalyzer uses local LLM to interpret conversations:
-1. Analyzes recent conversation history
-2. Identifies positive/negative signals
-3. Outputs affinity_delta and trust_delta
-4. Values are clamped (max ±0.1 per analysis)
-
-### Signals
-| Positive | Negative |
-|----------|----------|
-| Sharing personal info | Curt responses |
-| Humor, warmth | Frustration |
-| Returning to chat | Long absences |
-| Vulnerability | Evasion |
 
 ---
 
@@ -315,7 +290,7 @@ GOOGLE_API_KEY=your_key
 | `/extract` | Force memory extraction |
 | `/core` | Show core memories |
 | `/addcore <cat> <content>` | Add core memory |
-| `/relationship` | Show affinity/trust status |
+| `/pulse` | Show system pulse timer status |
 | `/pause` | Pause background processes |
 | `/resume` | Resume background processes |
 

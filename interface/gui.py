@@ -2,8 +2,8 @@
 Pattern Project - PyQt5 Chat GUI
 Version: 0.1.0
 
-A visual chat interface with timestamps, relationship indicators,
-session tracking, and system pulse countdown.
+A visual chat interface with timestamps, session tracking,
+and system pulse countdown.
 """
 
 import sys
@@ -38,8 +38,6 @@ COLORS = {
     "user": "#4ade80",      # Green for user messages
     "assistant": "#60a5fa", # Blue for AI messages
     "system": "#f59e0b",    # Amber for system messages
-    "affinity": "#ef4444",  # Red heart
-    "trust": "#22c55e",     # Green shield
     "timestamp": "#6b7280", # Gray for timestamps
     "pulse": "#a855f7",     # Purple for pulse countdown
     "action": "#c4a7e7",    # Soft purple for AI action text (*action*)
@@ -48,7 +46,7 @@ COLORS = {
 
 class MessageSignals(QObject):
     """Signals for thread-safe message passing to GUI."""
-    new_message = pyqtSignal(str, str, str, int, int)  # role, content, timestamp, affinity, trust
+    new_message = pyqtSignal(str, str, str)  # role, content, timestamp
     update_status = pyqtSignal(str)
     update_timer = pyqtSignal(str, str)  # session_time, total_time
     response_complete = pyqtSignal()
@@ -72,8 +70,6 @@ class ChatWindow(QMainWindow):
         self._session_start: Optional[datetime] = None
         self._first_session_start: Optional[datetime] = None
         self._is_processing = False
-        self._current_affinity = 0.0
-        self._current_trust = 0.5
         self._message_queue = queue.Queue()
 
         # Backend references (set during initialization)
@@ -81,7 +77,6 @@ class ChatWindow(QMainWindow):
         self._llm_router = None
         self._prompt_builder = None
         self._temporal_tracker = None
-        self._relationship_source = None
         self._system_pulse_timer = None
 
         self._setup_ui()
@@ -162,19 +157,6 @@ class ChatWindow(QMainWindow):
 
         layout.addStretch()
 
-        # Relationship indicators
-        self.affinity_label = QLabel("--")
-        self.affinity_label.setFont(QFont("Consolas", 12, QFont.Bold))
-        self.affinity_label.setToolTip("Affinity (0 to 100)")
-        layout.addWidget(self.affinity_label)
-
-        self.trust_label = QLabel("--")
-        self.trust_label.setFont(QFont("Consolas", 12, QFont.Bold))
-        self.trust_label.setToolTip("Trust (0 to 100)")
-        layout.addWidget(self.trust_label)
-
-        layout.addSpacing(20)
-
         self.settings_btn = QPushButton("Settings")
         self.settings_btn.clicked.connect(self._show_settings)
         layout.addWidget(self.settings_btn)
@@ -207,11 +189,6 @@ class ChatWindow(QMainWindow):
         self.timer_update = QTimer(self)
         self.timer_update.timeout.connect(self._update_timer)
         self.timer_update.start(1000)
-
-        # Relationship state update (every 5 seconds)
-        self.relationship_update = QTimer(self)
-        self.relationship_update.timeout.connect(self._update_relationship)
-        self.relationship_update.start(5000)
 
     def _apply_style(self):
         """Apply dark theme styling."""
@@ -278,16 +255,12 @@ class ChatWindow(QMainWindow):
             }}
         """)
 
-        # Update relationship labels with colors
-        self._update_relationship_display()
-
     def set_backend(
         self,
         conversation_mgr,
         llm_router,
         prompt_builder,
         temporal_tracker,
-        relationship_source,
         system_pulse_timer=None
     ):
         """Set backend references for communication."""
@@ -295,7 +268,6 @@ class ChatWindow(QMainWindow):
         self._llm_router = llm_router
         self._prompt_builder = prompt_builder
         self._temporal_tracker = temporal_tracker
-        self._relationship_source = relationship_source
         self._system_pulse_timer = system_pulse_timer
 
         # Set up pulse callback if timer is provided
@@ -308,9 +280,6 @@ class ChatWindow(QMainWindow):
 
         self._session_start = datetime.now()
         self._first_session_start = datetime.now()
-
-        # Initial relationship update
-        self._update_relationship()
 
     def _format_duration(self, td: timedelta) -> str:
         """Format a timedelta as human-readable string."""
@@ -412,32 +381,6 @@ class ChatWindow(QMainWindow):
                 new_label = get_interval_label(seconds)
                 log_info(f"AI adjusted pulse timer: {old_label} -> {new_label}", prefix="⏱️")
 
-    def _update_relationship(self):
-        """Update relationship indicators from backend."""
-        if self._relationship_source is None:
-            return
-
-        try:
-            state = self._relationship_source.get_state()
-            if state:
-                self._current_affinity = state.affinity
-                self._current_trust = state.trust
-                self._update_relationship_display()
-        except Exception:
-            pass
-
-    def _update_relationship_display(self):
-        """Update the visual relationship indicators."""
-        # Affinity: red heart with value (already 0-100 scale)
-        affinity_val = int(self._current_affinity)
-        self.affinity_label.setText(f"<span style='color:{COLORS['affinity']};'>&#10084;</span> {affinity_val}")
-        self.affinity_label.setStyleSheet(f"color: {COLORS['text']};")
-
-        # Trust: green shield with value (already 0-100 scale)
-        trust_val = int(self._current_trust)
-        self.trust_label.setText(f"<span style='color:{COLORS['trust']};'>&#128994;</span> {trust_val}")
-        self.trust_label.setStyleSheet(f"color: {COLORS['text']};")
-
     def _get_timestamp(self) -> str:
         """Get current timestamp string."""
         return datetime.now().strftime("%H:%M:%S")
@@ -511,7 +454,7 @@ class ChatWindow(QMainWindow):
 
         return re.sub(pattern, replace_pulse, content)
 
-    def _append_message(self, role: str, content: str, timestamp: str, affinity: int, trust: int):
+    def _append_message(self, role: str, content: str, timestamp: str):
         """Append a message to the chat display."""
         # Color based on role
         if role == "user":
@@ -562,9 +505,7 @@ class ChatWindow(QMainWindow):
 
         # Add user message to display immediately
         timestamp = self._get_timestamp()
-        self.signals.new_message.emit(
-            "user", text, timestamp, self._current_affinity, self._current_trust
-        )
+        self.signals.new_message.emit("user", text, timestamp)
 
         # Process in background thread
         thread = threading.Thread(
@@ -618,13 +559,7 @@ class ChatWindow(QMainWindow):
 
                 # Emit to GUI
                 timestamp = self._get_timestamp()
-                self.signals.new_message.emit(
-                    "assistant",
-                    response.text,
-                    timestamp,
-                    self._current_affinity,
-                    self._current_trust
-                )
+                self.signals.new_message.emit("assistant", response.text, timestamp)
             else:
                 self.signals.update_status.emit(f"Error: {response.error}")
 
@@ -689,10 +624,7 @@ class ChatWindow(QMainWindow):
 
             # Show system message in chat
             timestamp = self._get_timestamp()
-            self.signals.new_message.emit(
-                "system", PULSE_STORED_MESSAGE, timestamp,
-                self._current_affinity, self._current_trust
-            )
+            self.signals.new_message.emit("system", PULSE_STORED_MESSAGE, timestamp)
             log_info("PULSE DEBUG: Emitted [System Pulse] to chat", prefix="🔍")
 
             # Store abbreviated pulse message in conversation history
@@ -764,13 +696,7 @@ class ChatWindow(QMainWindow):
 
                 # Emit to GUI
                 timestamp = self._get_timestamp()
-                self.signals.new_message.emit(
-                    "assistant",
-                    response.text,
-                    timestamp,
-                    self._current_affinity,
-                    self._current_trust
-                )
+                self.signals.new_message.emit("assistant", response.text, timestamp)
                 log_info("PULSE DEBUG: Emitted assistant response to chat", prefix="🔍")
             else:
                 error_msg = f"Pulse API error: {response.error}"
@@ -778,10 +704,7 @@ class ChatWindow(QMainWindow):
 
                 # Show error in CHAT (not just status bar) so it's visible
                 timestamp = self._get_timestamp()
-                self.signals.new_message.emit(
-                    "system", f"[Pulse Error: {response.error}]", timestamp,
-                    self._current_affinity, self._current_trust
-                )
+                self.signals.new_message.emit("system", f"[Pulse Error: {response.error}]", timestamp)
                 self.signals.update_status.emit(error_msg)
 
         except Exception as e:
@@ -793,10 +716,7 @@ class ChatWindow(QMainWindow):
 
             # Show error in CHAT (not just status bar) so it's visible
             timestamp = self._get_timestamp()
-            self.signals.new_message.emit(
-                "system", f"[Pulse Exception: {str(e)}]", timestamp,
-                self._current_affinity, self._current_trust
-            )
+            self.signals.new_message.emit("system", f"[Pulse Exception: {str(e)}]", timestamp)
             self.signals.update_status.emit(error_msg)
 
         finally:
@@ -924,8 +844,6 @@ def run_gui():
     from memory.extractor import init_memory_extractor, get_memory_extractor
     from llm.router import init_llm_router, get_llm_router
     from prompt_builder import init_prompt_builder, get_prompt_builder
-    from prompt_builder.sources.relationship import get_relationship_source
-    from agency.relationship_analyzer import init_relationship_analyzer, get_relationship_analyzer
     from agency.system_pulse import init_system_pulse_timer, get_system_pulse_timer
 
     # Initialize remaining components
@@ -940,12 +858,7 @@ def run_gui():
     )
     init_memory_extractor()
     init_prompt_builder()
-    init_relationship_analyzer()
     init_system_pulse_timer()
-
-    # Start background services
-    # Note: Memory extractor is threshold-triggered (no background thread to start)
-    get_relationship_analyzer().start()
 
     # Start system pulse timer if enabled
     pulse_timer = None
@@ -960,7 +873,6 @@ def run_gui():
         llm_router=get_llm_router(),
         prompt_builder=get_prompt_builder(),
         temporal_tracker=get_temporal_tracker(),
-        relationship_source=get_relationship_source(),
         system_pulse_timer=pulse_timer
     )
 
@@ -972,7 +884,6 @@ def run_gui():
 
     # Cleanup
     print("Shutting down...")
-    get_relationship_analyzer().stop()
     if config.SYSTEM_PULSE_ENABLED:
         get_system_pulse_timer().stop()
 

@@ -205,7 +205,6 @@ def create_default_builder() -> PromptBuilder:
     from prompt_builder.sources.core_memory import CoreMemorySource
     from prompt_builder.sources.semantic_memory import SemanticMemorySource
     from prompt_builder.sources.conversation import ConversationSource
-    from prompt_builder.sources.relationship import RelationshipSource
     from prompt_builder.sources.temporal import TemporalSource
     from prompt_builder.sources.visual import VisualSource
     from prompt_builder.sources.system_pulse import SystemPulseSource
@@ -217,7 +216,6 @@ def create_default_builder() -> PromptBuilder:
     # Register sources in priority order (though they're sorted anyway)
     sources = [
         CoreMemorySource(),
-        RelationshipSource(),
         SystemPulseSource(),
         TemporalSource(),
         VisualSource(),

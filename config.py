@@ -161,13 +161,6 @@ CONVERSATION_EXCHANGE_LIMIT = 15  # Last N exchanges (user + reply pairs)
 MEMORY_PROMOTION_THRESHOLD = 0.85  # Score threshold for core memory promotion
 
 # =============================================================================
-# RELATIONSHIP CONFIGURATION
-# =============================================================================
-RELATIONSHIP_ANALYSIS_INTERVAL = 120  # Seconds between relationship analysis
-RELATIONSHIP_MIN_TURNS = 4  # Minimum turns before analysis
-RELATIONSHIP_MAX_DELTA = 2  # Maximum change per analysis (on 0-100 scale)
-
-# =============================================================================
 # VISUAL CAPTURE CONFIGURATION
 # =============================================================================
 VISUAL_ENABLED = os.getenv("VISUAL_ENABLED", "false").lower() == "true"

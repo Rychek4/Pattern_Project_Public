@@ -3,13 +3,11 @@
 Pattern Project - Database Reset Utility
 
 Provides commands to reset specific database tables:
-- relationships: Reset relationship state to defaults (affinity=50, trust=50)
 - memories: Delete episodic memories only (core memories are preserved)
 - conversations: Delete all conversation history
 - reprocess: Reset processing flags only (allows re-extraction without deleting memories)
 
 Usage:
-    python scripts/reset_db.py relationships
     python scripts/reset_db.py memories
     python scripts/reset_db.py conversations
     python scripts/reset_db.py reprocess
@@ -36,48 +34,6 @@ def confirm_action(action: str) -> bool:
     print(f"{'='*60}")
     response = input("\nType 'yes' to confirm: ").strip().lower()
     return response == "yes"
-
-
-def reset_relationships(db: Database) -> None:
-    """Reset relationships table to default values.
-
-    Drops and recreates the table to ensure correct schema (0-100 integer scale).
-    This handles cases where the old schema (-1.0 to 1.0) is still in place.
-    """
-    print("\n[Relationships] Resetting to defaults...")
-
-    with db.get_connection() as conn:
-        # Drop existing table (removes old schema with outdated CHECK constraints)
-        conn.execute("DROP TABLE IF EXISTS relationships")
-
-        # Create table with correct schema (0-100 integer scale)
-        conn.execute("""
-            CREATE TABLE relationships (
-                id INTEGER PRIMARY KEY DEFAULT 1,
-                affinity INTEGER DEFAULT 50 CHECK (affinity >= 0 AND affinity <= 100),
-                trust INTEGER DEFAULT 50 CHECK (trust >= 0 AND trust <= 100),
-                interaction_count INTEGER DEFAULT 0,
-                first_interaction TIMESTAMP,
-                last_interaction TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-
-        # Insert fresh relationship with new defaults
-        now = datetime.now().isoformat()
-        conn.execute(
-            """
-            INSERT INTO relationships (id, affinity, trust, interaction_count,
-                                       first_interaction, last_interaction, updated_at)
-            VALUES (1, 50, 50, 0, ?, ?, ?)
-            """,
-            (now, now, now)
-        )
-
-    print("[Relationships] Reset complete:")
-    print("  - Affinity: 50 (neutral)")
-    print("  - Trust: 50 (neutral)")
-    print("  - Interaction count: 0")
 
 
 def clear_memories(db: Database) -> None:
@@ -166,7 +122,6 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python scripts/reset_db.py relationships   Reset relationship state
   python scripts/reset_db.py memories        Delete episodic memories (preserves core memories)
   python scripts/reset_db.py conversations   Delete all conversations
   python scripts/reset_db.py reprocess       Reset processing flags only (for re-extraction)
@@ -177,14 +132,14 @@ Examples:
     parser.add_argument(
         "table",
         nargs="?",
-        choices=["relationships", "memories", "conversations", "reprocess"],
+        choices=["memories", "conversations", "reprocess"],
         help="The table to reset (or 'reprocess' to reset processing flags only)"
     )
 
     parser.add_argument(
         "--all",
         action="store_true",
-        help="Reset all tables (relationships, memories, conversations)"
+        help="Reset all tables (memories, conversations)"
     )
 
     parser.add_argument(
@@ -212,8 +167,8 @@ Examples:
     # Determine what to reset
     tables_to_reset = []
     if args.all:
-        tables_to_reset = ["relationships", "memories", "conversations"]
-        action_desc = "RESET ALL TABLES (relationships, memories, conversations)"
+        tables_to_reset = ["memories", "conversations"]
+        action_desc = "RESET ALL TABLES (memories, conversations)"
     else:
         tables_to_reset = [args.table]
         action_desc = f"reset the '{args.table}' table"
@@ -228,9 +183,7 @@ Examples:
 
     # Execute resets
     for table in tables_to_reset:
-        if table == "relationships":
-            reset_relationships(db)
-        elif table == "memories":
+        if table == "memories":
             clear_memories(db)
         elif table == "conversations":
             clear_conversations(db)

@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from core.logger import log_info, log_success, log_error, log_config, log_section
 
 # Schema version for migrations
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 # SQL schema definition
 SCHEMA_SQL = """
@@ -84,17 +84,6 @@ CREATE TABLE IF NOT EXISTS core_memories (
     category TEXT NOT NULL CHECK (category IN ('identity', 'relationship', 'preference', 'fact', 'narrative')),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     promoted_from_memory_id INTEGER REFERENCES memories(id)
-);
-
--- Relationship tracking: emergent affinity and trust (0-100 scale)
-CREATE TABLE IF NOT EXISTS relationships (
-    id INTEGER PRIMARY KEY DEFAULT 1,
-    affinity INTEGER DEFAULT 50 CHECK (affinity >= 0 AND affinity <= 100),
-    trust INTEGER DEFAULT 50 CHECK (trust >= 0 AND trust <= 100),
-    interaction_count INTEGER DEFAULT 0,
-    first_interaction TIMESTAMP,
-    last_interaction TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Runtime state persistence
@@ -330,6 +319,12 @@ CREATE INDEX IF NOT EXISTS idx_memories_importance ON memories(importance DESC);
 PRAGMA foreign_keys=ON;
 """
 
+# Migration SQL for v6 -> v7 (remove relationships table - feature removed)
+MIGRATION_V7_SQL = """
+-- Remove relationships table (affinity/trust feature removed in favor of emergent relationships)
+DROP TABLE IF EXISTS relationships;
+"""
+
 
 class Database:
     """SQLite database manager with WAL mode and thread-safe connections."""
@@ -468,6 +463,10 @@ class Database:
                 log_config("Applying migration", "v5 → v6 (rename temporal_relevance to decay_category)", indent=1)
                 conn.executescript(MIGRATION_V6_SQL)
 
+            if from_version < 7:
+                log_config("Applying migration", "v6 → v7 (remove relationships table)", indent=1)
+                conn.executescript(MIGRATION_V7_SQL)
+
             # Record new version
             conn.execute(
                 "INSERT INTO schema_version (version) VALUES (?)",
@@ -588,18 +587,6 @@ class Database:
                 "SELECT COUNT(*) FROM conversations WHERE processed_for_memory = FALSE"
             )
             stats["unprocessed_conversations"] = cursor.fetchone()[0]
-
-            # Relationship state
-            cursor = conn.execute(
-                "SELECT affinity, trust, interaction_count FROM relationships WHERE id = 1"
-            )
-            row = cursor.fetchone()
-            if row:
-                stats["relationship"] = {
-                    "affinity": row[0],
-                    "trust": row[1],
-                    "interactions": row[2]
-                }
 
         return stats
 
