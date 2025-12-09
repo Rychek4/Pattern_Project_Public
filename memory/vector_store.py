@@ -416,10 +416,10 @@ class VectorStore:
         if row["source_conversation_ids"]:
             source_conversation_ids = json.loads(row["source_conversation_ids"])
 
-        # Handle decay_category with backward compatibility for old column name
+        # Handle decay_category with backward compatibility
         # The migration renames temporal_relevance -> decay_category and maps values:
         #   'recent' -> 'standard', 'dated' -> 'ephemeral', 'permanent' -> 'permanent'
-        decay_category = row.get("decay_category") or row.get("temporal_relevance", "standard")
+        decay_category = row["decay_category"] if row["decay_category"] else "standard"
 
         # Map legacy values to new categories (in case migration hasn't run yet)
         legacy_mapping = {
