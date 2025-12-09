@@ -19,7 +19,7 @@ import config
 from core.logger import log_info, log_error, log_warning
 
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QTextBrowser, QVBoxLayout, QHBoxLayout,
+    QApplication, QMainWindow, QTextBrowser, QTextEdit, QVBoxLayout, QHBoxLayout,
     QWidget, QPushButton, QLineEdit, QLabel, QDialog, QSlider, QCheckBox,
     QSpinBox, QMessageBox, QFrame, QSizePolicy, QComboBox
 )
@@ -51,6 +51,71 @@ class MessageSignals(QObject):
     update_timer = pyqtSignal(str, str)  # session_time, total_time
     response_complete = pyqtSignal()
     pulse_interval_change = pyqtSignal(int)  # new interval in seconds
+
+
+class ChatInputWidget(QTextEdit):
+    """Multi-line chat input with Enter to send, Shift+Enter for newline.
+
+    Features:
+    - Auto-expands up to 5x single line height
+    - Enter key sends message (emits send_requested signal)
+    - Shift+Enter inserts a newline
+    - Plain text only (no rich text)
+    """
+
+    send_requested = pyqtSignal()
+
+    def __init__(self):
+        super().__init__()
+        self.setAcceptRichText(False)
+        self.setPlaceholderText("Type a message...")
+
+        # Calculate single line height for auto-expand limits
+        font_metrics = self.fontMetrics()
+        self._single_line_height = font_metrics.lineSpacing() + 16  # Add padding
+        self._max_height = self._single_line_height * 5
+
+        # Set initial size
+        self.setMinimumHeight(self._single_line_height)
+        self.setMaximumHeight(self._single_line_height)
+
+        # Connect text changes to auto-resize
+        self.textChanged.connect(self._auto_resize)
+
+    def setFont(self, font: QFont):
+        """Override to recalculate line height when font changes."""
+        super().setFont(font)
+        font_metrics = self.fontMetrics()
+        self._single_line_height = font_metrics.lineSpacing() + 16
+        self._max_height = self._single_line_height * 5
+        self.setMinimumHeight(self._single_line_height)
+        self._auto_resize()
+
+    def _auto_resize(self):
+        """Auto-resize based on content, up to max height."""
+        doc = self.document()
+        doc_height = doc.size().height() + 16  # Add padding
+
+        # Clamp between single line and max
+        new_height = max(self._single_line_height, min(int(doc_height), self._max_height))
+        self.setMaximumHeight(new_height)
+
+    def keyPressEvent(self, event):
+        """Handle Enter vs Shift+Enter."""
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            if event.modifiers() & Qt.ShiftModifier:
+                # Shift+Enter: insert newline
+                super().keyPressEvent(event)
+            else:
+                # Enter alone: send message
+                self.send_requested.emit()
+        else:
+            super().keyPressEvent(event)
+
+    def clear(self):
+        """Clear and reset to single line height."""
+        super().clear()
+        self.setMaximumHeight(self._single_line_height)
 
 
 class ChatWindow(QMainWindow):
@@ -169,10 +234,10 @@ class ChatWindow(QMainWindow):
         layout = QHBoxLayout(frame)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        self.input_field = QLineEdit()
-        self.input_field.setPlaceholderText("Type a message...")
+        # Multi-line input with Enter to send, Shift+Enter for newline
+        self.input_field = ChatInputWidget()
         self.input_field.setFont(QFont("Consolas", 12))
-        self.input_field.returnPressed.connect(self._send_message)
+        self.input_field.send_requested.connect(self._send_message)
         layout.addWidget(self.input_field, stretch=1)
 
         self.send_btn = QPushButton("Send")
@@ -216,6 +281,16 @@ class ChatWindow(QMainWindow):
                 padding: 8px;
             }}
             QLineEdit:focus {{
+                border: 1px solid {COLORS['accent']};
+            }}
+            QTextEdit {{
+                background-color: {COLORS['surface']};
+                color: {COLORS['text']};
+                border: 1px solid {COLORS['primary']};
+                border-radius: 5px;
+                padding: 8px;
+            }}
+            QTextEdit:focus {{
                 border: 1px solid {COLORS['accent']};
             }}
             QPushButton {{
@@ -385,6 +460,62 @@ class ChatWindow(QMainWindow):
         """Get current timestamp string."""
         return datetime.now().strftime("%H:%M:%S")
 
+    def _format_bold(self, content: str) -> str:
+        """Format **bold** text.
+
+        Args:
+            content: HTML-escaped content
+
+        Returns:
+            Content with **text** converted to <b>text</b>
+        """
+        pattern = r'\*\*([^*]+)\*\*'
+        return re.sub(pattern, r'<b>\1</b>', content)
+
+    def _format_italic(self, content: str) -> str:
+        """Format _italic_ text using underscores.
+
+        Args:
+            content: HTML-escaped content
+
+        Returns:
+            Content with _text_ converted to <i>text</i>
+        """
+        # Match _text_ with word boundary awareness to avoid matching mid-word underscores
+        pattern = r'(?<!\w)_([^_]+)_(?!\w)'
+        return re.sub(pattern, r'<i>\1</i>', content)
+
+    def _format_strikethrough(self, content: str) -> str:
+        """Format ~~strikethrough~~ text.
+
+        Args:
+            content: HTML-escaped content
+
+        Returns:
+            Content with ~~text~~ converted to <s>text</s>
+        """
+        pattern = r'~~([^~]+)~~'
+        return re.sub(pattern, r'<s>\1</s>', content)
+
+    def _format_code_inline(self, content: str) -> str:
+        """Format `code` text with monospace font and subtle background.
+
+        Args:
+            content: HTML-escaped content
+
+        Returns:
+            Content with `code` converted to styled spans
+        """
+        pattern = r'`([^`]+)`'
+        code_bg = "#2d2d44"  # Subtle dark background
+        code_style = (
+            f"background-color:{code_bg}; "
+            "padding: 2px 4px; "
+            "border-radius: 3px; "
+            "font-family: monospace;"
+        )
+        return re.sub(pattern, rf'<span style="{code_style}">\1</span>', content)
+
     def _format_action_text(self, content: str) -> str:
         """Format asterisk-wrapped action text with a different color.
 
@@ -392,14 +523,11 @@ class ChatWindow(QMainWindow):
         Ignores **bold** syntax (double asterisks).
 
         Args:
-            content: The message content to format
+            content: HTML-escaped content (bold already processed)
 
         Returns:
-            HTML-formatted string with action text colored
+            Content with *action* converted to colored spans
         """
-        # First escape HTML to prevent issues with special characters
-        escaped = html.escape(content)
-
         # Match *text* but not **text** (negative lookbehind/lookahead for asterisks)
         # Pattern: single * not preceded/followed by *, then non-* content, then closing *
         pattern = r'(?<!\*)\*(?!\*)([^*]+)\*(?!\*)'
@@ -410,7 +538,43 @@ class ChatWindow(QMainWindow):
             action_text = match.group(1)
             return f"<span style='color:{action_color};'>{action_text}</span>"
 
-        return re.sub(pattern, replace_action, escaped)
+        return re.sub(pattern, replace_action, content)
+
+    def _format_message_text(self, content: str, role: str) -> str:
+        """Apply all text formatting to message content.
+
+        Formatting is only applied to assistant messages.
+        Order matters to prevent conflicts between patterns.
+
+        Args:
+            content: Raw message content
+            role: Message role (user, assistant, system)
+
+        Returns:
+            HTML-formatted string ready for display
+        """
+        # HTML escape first to prevent injection
+        text = html.escape(content)
+
+        if role == "assistant":
+            # Order matters:
+            # 1. Code inline first - protects content in backticks from other formatting
+            # 2. Bold before action text - ** matched before single *
+            # 3. Italic (underscores) - no conflict with asterisks
+            # 4. Strikethrough - unique ~~ delimiter
+            # 5. Action text last - single * catches remaining
+            # 6. Pulse commands - special [[PULSE:Xm]] syntax
+            text = self._format_code_inline(text)
+            text = self._format_bold(text)
+            text = self._format_italic(text)
+            text = self._format_strikethrough(text)
+            text = self._format_action_text(text)
+            text = self._format_pulse_command(text)
+
+        # Convert newlines to HTML breaks for multi-line display
+        text = text.replace('\n', '<br/>')
+
+        return text
 
     def _parse_pulse_command(self, text: str) -> Optional[int]:
         """Parse [[PULSE:Xm]] command from response text.
@@ -467,12 +631,8 @@ class ChatWindow(QMainWindow):
             color = COLORS['system']
             prefix = "System"
 
-        # Format content - apply action text and pulse command styling for AI messages
-        if role == "assistant":
-            formatted_content = self._format_action_text(content)
-            formatted_content = self._format_pulse_command(formatted_content)
-        else:
-            formatted_content = html.escape(content)
+        # Format content with all text formatting (bold, italic, code, etc.)
+        formatted_content = self._format_message_text(content, role)
 
         # Build HTML (using msg_html to avoid shadowing html module)
         msg_html = f"""
@@ -489,7 +649,7 @@ class ChatWindow(QMainWindow):
 
     def _send_message(self):
         """Handle sending a message."""
-        text = self.input_field.text().strip()
+        text = self.input_field.toPlainText().strip()
         if not text or self._is_processing:
             return
 
