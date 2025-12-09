@@ -143,15 +143,46 @@ class ChatCLI:
                     )
 
                 if response.success:
-                    # Store assistant response
+                    from agency.commands import get_command_processor
+
+                    # Process response for AI commands
+                    processor = get_command_processor()
+                    processed = processor.process(response.text)
+
+                    # Handle continuation if commands need results
+                    final_text = processed.display_text
+                    final_provider = response.provider.value
+
+                    if processed.needs_continuation:
+                        self.console.print("[dim]  ↳ Executing command...[/dim]")
+
+                        # Build continuation: add original response + results as context
+                        continuation_history = history.copy()
+                        continuation_history.append({"role": "assistant", "content": response.text})
+                        continuation_history.append({"role": "user", "content": processed.continuation_prompt})
+
+                        # Pass 2
+                        with self.console.status("[bold blue]Continuing...[/bold blue]", spinner="dots"):
+                            continuation = router.chat(
+                                messages=continuation_history,
+                                system_prompt=assembled.full_system_prompt,
+                                task_type=TaskType.CONVERSATION,
+                                temperature=0.7
+                            )
+
+                        if continuation.success:
+                            final_text = continuation.text
+                            final_provider = continuation.provider.value
+
+                    # Store final response
                     conversation_mgr.add_turn(
                         role="assistant",
-                        content=response.text,
+                        content=final_text,
                         input_type="text"
                     )
 
                     # Display response
-                    self._display_response(response.text, response.provider.value)
+                    self._display_response(final_text, final_provider)
                 else:
                     self.console.print(
                         f"[bold red]Error:[/bold red] {response.error}"
@@ -250,17 +281,47 @@ class ChatCLI:
                 )
 
             if response.success:
+                from agency.commands import get_command_processor
+
+                # Process response for AI commands
+                processor = get_command_processor()
+                processed = processor.process(response.text)
+
+                # Handle continuation if commands need results
+                final_text = processed.display_text
+                final_provider = response.provider.value
+
+                if processed.needs_continuation:
+                    self.console.print("[dim]  ↳ Executing command...[/dim]")
+
+                    # Build continuation
+                    continuation_history = history.copy()
+                    continuation_history.append({"role": "assistant", "content": response.text})
+                    continuation_history.append({"role": "user", "content": processed.continuation_prompt})
+
+                    with self.console.status("[bold magenta]Continuing...[/bold magenta]", spinner="dots"):
+                        continuation = router.chat(
+                            messages=continuation_history,
+                            system_prompt=assembled.full_system_prompt,
+                            task_type=TaskType.CONVERSATION,
+                            temperature=0.7
+                        )
+
+                    if continuation.success:
+                        final_text = continuation.text
+                        final_provider = continuation.provider.value
+
                 # Store response
                 conversation_mgr.add_turn(
                     role="assistant",
-                    content=response.text,
+                    content=final_text,
                     input_type="text"
                 )
 
                 # Display with special styling
                 panel = Panel(
-                    Markdown(response.text),
-                    title=f"[bold magenta]AI (pulse)[/bold magenta] [dim]({response.provider.value})[/dim]",
+                    Markdown(final_text),
+                    title=f"[bold magenta]AI (pulse)[/bold magenta] [dim]({final_provider})[/dim]",
                     title_align="left",
                     border_style="magenta",
                     padding=(0, 1)

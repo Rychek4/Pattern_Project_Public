@@ -208,6 +208,7 @@ def create_default_builder() -> PromptBuilder:
     from prompt_builder.sources.temporal import TemporalSource
     from prompt_builder.sources.visual import VisualSource
     from prompt_builder.sources.system_pulse import SystemPulseSource
+    from prompt_builder.sources.ai_commands import AICommandsSource
 
     builder = PromptBuilder()
 
@@ -217,6 +218,7 @@ def create_default_builder() -> PromptBuilder:
     sources = [
         CoreMemorySource(),
         SystemPulseSource(),
+        AICommandsSource(),
         TemporalSource(),
         VisualSource(),
         SemanticMemorySource(),

@@ -16,6 +16,7 @@ class SourcePriority(IntEnum):
     """
     CORE_MEMORY = 10       # Foundational, always included
     SYSTEM_PULSE = 25      # Pulse timer control (AI agency)
+    AI_COMMANDS = 26       # Memory search, future AI-initiated commands
     TEMPORAL = 30          # Time awareness
     VISUAL = 40            # Current visual context
     SEMANTIC_MEMORY = 50   # Retrieved memories

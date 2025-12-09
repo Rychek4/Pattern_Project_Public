@@ -545,21 +545,52 @@ class ChatWindow(QMainWindow):
             )
 
             if response.success:
+                from agency.commands import get_command_processor
+
                 # Check for pulse timer command in response
                 pulse_interval = self._parse_pulse_command(response.text)
                 if pulse_interval is not None:
                     self.signals.pulse_interval_change.emit(pulse_interval)
 
+                # Process response for AI commands
+                processor = get_command_processor()
+                processed = processor.process(response.text)
+
+                # Handle continuation if commands need results
+                final_text = processed.display_text
+
+                if processed.needs_continuation:
+                    self.signals.update_status.emit("Executing command...")
+
+                    # Build continuation
+                    continuation_history = history.copy()
+                    continuation_history.append({"role": "assistant", "content": response.text})
+                    continuation_history.append({"role": "user", "content": processed.continuation_prompt})
+
+                    continuation = self._llm_router.chat(
+                        messages=continuation_history,
+                        system_prompt=assembled.full_system_prompt,
+                        task_type=TaskType.CONVERSATION,
+                        temperature=0.7
+                    )
+
+                    if continuation.success:
+                        # Check continuation for pulse commands too
+                        pulse_interval = self._parse_pulse_command(continuation.text)
+                        if pulse_interval is not None:
+                            self.signals.pulse_interval_change.emit(pulse_interval)
+                        final_text = continuation.text
+
                 # Store response
                 self._conversation_mgr.add_turn(
                     role="assistant",
-                    content=response.text,
+                    content=final_text,
                     input_type="text"
                 )
 
                 # Emit to GUI
                 timestamp = self._get_timestamp()
-                self.signals.new_message.emit("assistant", response.text, timestamp)
+                self.signals.new_message.emit("assistant", final_text, timestamp)
             else:
                 self.signals.update_status.emit(f"Error: {response.error}")
 
@@ -680,6 +711,8 @@ class ChatWindow(QMainWindow):
             log_info(f"PULSE DEBUG: Router returned! success={response.success}, provider={response.provider}", prefix="🔍")
 
             if response.success:
+                from agency.commands import get_command_processor
+
                 log_info(f"PULSE DEBUG: Response successful, text length: {len(response.text)}", prefix="🔍")
 
                 # Check for pulse timer command in response
@@ -687,16 +720,45 @@ class ChatWindow(QMainWindow):
                 if pulse_interval is not None:
                     self.signals.pulse_interval_change.emit(pulse_interval)
 
+                # Process response for AI commands
+                processor = get_command_processor()
+                processed = processor.process(response.text)
+
+                # Handle continuation if commands need results
+                final_text = processed.display_text
+
+                if processed.needs_continuation:
+                    self.signals.update_status.emit("Executing command...")
+
+                    # Build continuation
+                    continuation_history = history.copy()
+                    continuation_history.append({"role": "assistant", "content": response.text})
+                    continuation_history.append({"role": "user", "content": processed.continuation_prompt})
+
+                    continuation = self._llm_router.chat(
+                        messages=continuation_history,
+                        system_prompt=assembled.full_system_prompt,
+                        task_type=TaskType.CONVERSATION,
+                        temperature=0.7
+                    )
+
+                    if continuation.success:
+                        # Check continuation for pulse commands too
+                        pulse_interval = self._parse_pulse_command(continuation.text)
+                        if pulse_interval is not None:
+                            self.signals.pulse_interval_change.emit(pulse_interval)
+                        final_text = continuation.text
+
                 # Store response
                 self._conversation_mgr.add_turn(
                     role="assistant",
-                    content=response.text,
+                    content=final_text,
                     input_type="text"
                 )
 
                 # Emit to GUI
                 timestamp = self._get_timestamp()
-                self.signals.new_message.emit("assistant", response.text, timestamp)
+                self.signals.new_message.emit("assistant", final_text, timestamp)
                 log_info("PULSE DEBUG: Emitted assistant response to chat", prefix="🔍")
             else:
                 error_msg = f"Pulse API error: {response.error}"
