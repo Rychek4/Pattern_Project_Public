@@ -67,18 +67,19 @@ Conversation:
 """
 
 # Pass 2: Classify each turn into a topic (Linear method - one decision at a time)
+# Uses letter-based turn labels (A, B, C...) to prevent LLM from hallucinating extra turns
+# The distinct symbol space (letters for turns, numbers for topics) reduces confusion
 TURN_ASSIGNMENT_PROMPT = """Classify each turn into one of the topics below.
 
 Topics:
 {topics}
 
-Instructions:
-1. For each turn, decide which single topic it belongs to
-2. Output a JSON object where the key is the Turn Number (string) and the value is the Topic Number (integer)
-3. Topic numbers must be between 1 and {num_topics}
+The conversation has exactly {num_turns} turns labeled {turn_labels}.
+Output a JSON object mapping each turn letter to its topic number (1-{num_topics}).
+Include exactly {num_turns} entries matching the turns shown.
 
-Example output:
-{{"1": 1, "2": 1, "3": 2, "4": 3}}
+Example for this {num_turns}-turn conversation:
+{example}
 
 Conversation:
 {conversation}
@@ -530,7 +531,7 @@ class MemoryExtractor:
         Phase 1: Identify distinct topic clusters using a multi-pass approach.
 
         Pass 1: Ask LLM to list topics (natural language, no JSON)
-        Pass 2: Ask LLM to assign turn numbers to topics (simple JSON)
+        Pass 2: Ask LLM to assign turn labels to topics (simple JSON with letters)
         Significance: Calculated from turn count (no LLM call needed)
 
         This multi-pass approach is more reliable than single-pass because:
@@ -538,6 +539,9 @@ class MemoryExtractor:
         - Less chance of schema errors
         - Local LLM calls are free, so multiple calls cost nothing
         - Easier to debug which step failed
+
+        Uses letter-based turn labels (A, B, C...) instead of numbers to prevent
+        the LLM from hallucinating extra turns by pattern-matching on examples.
 
         Args:
             turns: List of conversation turns to analyze
@@ -547,10 +551,11 @@ class MemoryExtractor:
         """
         router = get_llm_router()
 
-        # Format with sequential indices (1, 2, 3...) to match few-shot examples
-        # The index_to_id mapping lets us translate back to real DB IDs
-        conversation_text, index_to_id = self._format_conversation_indexed(turns)
-        valid_indices = set(index_to_id.keys())  # {1, 2, 3, ...}
+        # Format with letter-based labels (A, B, C...) to prevent hallucination
+        # The label_to_id mapping lets us translate back to real DB IDs
+        conversation_text, label_to_id = self._format_conversation_indexed(turns)
+        valid_labels = set(label_to_id.keys())  # {"A", "B", "C", ...}
+        num_turns = len(turns)
 
         # =====================================================================
         # PASS 1: Identify topics (natural language output)
@@ -578,7 +583,7 @@ class MemoryExtractor:
         log_info(f"Identified {len(topic_descriptions)} topics", prefix="✅")
 
         # =====================================================================
-        # PASS 2: Assign turns to topics (simple JSON)
+        # PASS 2: Assign turns to topics (simple JSON with letter labels)
         # =====================================================================
         log_info("Pass 2: Assigning turns to topics...", prefix="🔗")
 
@@ -587,9 +592,17 @@ class MemoryExtractor:
             f"{i+1}. {desc}" for i, desc in enumerate(topic_descriptions)
         )
 
+        # Generate dynamic example matching actual turn count
+        num_topics = len(topic_descriptions)
+        turn_labels = self._generate_turn_labels(num_turns)
+        example = self._generate_assignment_example(num_turns, num_topics)
+
         assignment_prompt = TURN_ASSIGNMENT_PROMPT.format(
             topics=topics_formatted,
-            num_topics=len(topic_descriptions),
+            num_topics=num_topics,
+            num_turns=num_turns,
+            turn_labels=turn_labels,
+            example=example,
             conversation=conversation_text
         )
 
@@ -604,11 +617,11 @@ class MemoryExtractor:
             log_error(f"Turn assignment failed: {assignment_response.error}")
             return []
 
-        # Parse the turn assignments (validates turn indices and topic numbers)
+        # Parse the turn assignments (validates turn labels and topic numbers)
         turn_assignments = self._parse_turn_assignments(
             assignment_response.text,
-            valid_indices,
-            num_topics=len(topic_descriptions)
+            valid_labels,
+            num_topics=num_topics
         )
 
         if not turn_assignments:
@@ -619,24 +632,24 @@ class MemoryExtractor:
 
         # =====================================================================
         # BUILD TopicCluster OBJECTS
-        # Translate sequential indices back to real database IDs
+        # Translate letter labels back to real database IDs
         # =====================================================================
         topics = []
-        for topic_num, turn_indices in turn_assignments.items():
+        for topic_num, turn_labels_list in turn_assignments.items():
             topic_idx = int(topic_num) - 1  # Convert 1-based to 0-based
 
             if topic_idx < 0 or topic_idx >= len(topic_descriptions):
                 log_warning(f"Invalid topic number: {topic_num}")
                 continue
 
-            if not turn_indices:
+            if not turn_labels_list:
                 continue
 
-            # Translate indices back to real database IDs
-            turn_ids = [index_to_id[idx] for idx in turn_indices if idx in index_to_id]
+            # Translate labels back to real database IDs
+            turn_ids = [label_to_id[label] for label in turn_labels_list if label in label_to_id]
 
             if not turn_ids:
-                log_warning(f"No valid turn IDs for topic {topic_num} after index translation")
+                log_warning(f"No valid turn IDs for topic {topic_num} after label translation")
                 continue
 
             # Significance calculated from turn count (no LLM needed!)
@@ -683,26 +696,26 @@ class MemoryExtractor:
     def _parse_turn_assignments(
         self,
         response_text: str,
-        valid_indices: set,
+        valid_labels: set,
         num_topics: int
-    ) -> Dict[str, List[int]]:
+    ) -> Dict[str, List[str]]:
         """
         Parse turn assignments from Linear method JSON response.
 
-        Expected format: {"1": 2, "2": 2, "3": 1, "4": 3}
-        (turn_number -> topic_number)
+        Expected format: {"A": 2, "B": 2, "C": 1, "D": 3}
+        (turn_label -> topic_number)
 
-        This function flips the mapping to: {"1": [3], "2": [1, 2], "3": [4]}
-        (topic_number -> [turn_numbers])
+        This function flips the mapping to: {"1": ["C"], "2": ["A", "B"], "3": ["D"]}
+        (topic_number -> [turn_labels])
 
         Args:
             response_text: Raw LLM response containing JSON
-            valid_indices: Set of valid sequential turn indices (1, 2, 3, ...)
-                          that the LLM was shown in the conversation
+            valid_labels: Set of valid turn labels (e.g., {"A", "B", "C"})
+                         that the LLM was shown in the conversation
             num_topics: Number of valid topics (1 to num_topics are valid)
 
         Returns:
-            Dict mapping topic number (as string) to list of valid turn indices
+            Dict mapping topic number (as string) to list of valid turn labels
         """
         try:
             text = response_text.strip()
@@ -724,26 +737,27 @@ class MemoryExtractor:
             json_str = text[start:end]
             data = json.loads(json_str)
 
-            # Flip from {turn: topic} to {topic: [turns]}
-            # While validating both turn indices and topic numbers
-            result: Dict[str, List[int]] = {}
+            # Flip from {turn_label: topic} to {topic: [turn_labels]}
+            # While validating both turn labels and topic numbers
+            result: Dict[str, List[str]] = {}
 
-            for turn_str, topic_num in data.items():
-                # Validate turn number
-                try:
-                    turn_idx = int(turn_str)
-                except (ValueError, TypeError):
-                    log_warning(f"Invalid turn number: {turn_str}")
-                    continue
+            for turn_label, topic_num in data.items():
+                # Normalize turn label (uppercase, stripped)
+                turn_label = str(turn_label).strip().upper()
 
-                if turn_idx not in valid_indices:
-                    log_warning(f"Turn index out of range: {turn_idx}")
+                # Validate turn label
+                if turn_label not in valid_labels:
+                    log_warning(f"Turn label not in conversation: {turn_label}")
                     continue
 
                 # Validate topic number
                 if not isinstance(topic_num, int):
-                    log_warning(f"Invalid topic type for turn {turn_idx}: {topic_num}")
-                    continue
+                    # Try to convert string to int
+                    try:
+                        topic_num = int(topic_num)
+                    except (ValueError, TypeError):
+                        log_warning(f"Invalid topic type for turn {turn_label}: {topic_num}")
+                        continue
 
                 if topic_num < 1 or topic_num > num_topics:
                     log_warning(f"Invalid topic number: {topic_num} (valid: 1-{num_topics})")
@@ -753,7 +767,7 @@ class MemoryExtractor:
                 topic_str = str(topic_num)
                 if topic_str not in result:
                     result[topic_str] = []
-                result[topic_str].append(turn_idx)
+                result[topic_str].append(turn_label)
 
             return result
 
@@ -944,31 +958,72 @@ class MemoryExtractor:
     def _format_conversation_indexed(
         self,
         turns: List[ConversationTurn]
-    ) -> Tuple[str, Dict[int, int]]:
+    ) -> Tuple[str, Dict[str, int]]:
         """
-        Format conversation turns with sequential 1..N indices for LLM consumption.
+        Format conversation turns with letter-based labels (A, B, C...) for LLM consumption.
 
-        This approach avoids confusion when database IDs are large numbers (e.g., 505, 506)
-        that don't match the few-shot examples which use small integers (1, 2, 3).
-        The LLM sees sequential indices; we translate back to real IDs in Python.
+        Uses letters instead of numbers to create distinct symbol spaces:
+        - Turn labels: A, B, C... (letters)
+        - Topic numbers: 1, 2, 3... (integers)
+
+        This prevents the LLM from pattern-matching on numeric examples and
+        hallucinating extra turn indices. Letters are more obviously "labels"
+        that must correspond to actual conversation turns shown.
 
         Args:
             turns: List of conversation turns
 
         Returns:
-            Tuple of (formatted_text, index_to_id_mapping)
-            - formatted_text: String with [1] Role: content, [2] Role: content, etc.
-            - index_to_id_mapping: Dict mapping sequential index to actual database ID
+            Tuple of (formatted_text, label_to_id_mapping)
+            - formatted_text: String with [A] Role: content, [B] Role: content, etc.
+            - label_to_id_mapping: Dict mapping letter label to actual database ID
         """
         lines = []
-        index_to_id = {}
+        label_to_id = {}
 
-        for i, turn in enumerate(turns, 1):  # 1-based indexing to match examples
+        for i, turn in enumerate(turns):
+            # Convert index to letter: 0->A, 1->B, 2->C, etc.
+            # For >26 turns, use AA, AB, etc. (though unlikely in practice)
+            label = self._index_to_letter(i)
             role = "User" if turn.role == "user" else "AI"
-            lines.append(f"[{i}] {role}: {turn.content}")
-            index_to_id[i] = turn.id
+            lines.append(f"[{label}] {role}: {turn.content}")
+            label_to_id[label] = turn.id
 
-        return "\n".join(lines), index_to_id
+        return "\n".join(lines), label_to_id
+
+    def _index_to_letter(self, index: int) -> str:
+        """
+        Convert a 0-based index to a letter label.
+
+        0 -> A, 1 -> B, ..., 25 -> Z, 26 -> AA, 27 -> AB, etc.
+        """
+        if index < 26:
+            return chr(ord('A') + index)
+        else:
+            # For indices >= 26, use AA, AB, etc.
+            first = chr(ord('A') + (index // 26) - 1)
+            second = chr(ord('A') + (index % 26))
+            return first + second
+
+    def _generate_turn_labels(self, num_turns: int) -> str:
+        """Generate comma-separated list of turn labels for the prompt."""
+        labels = [self._index_to_letter(i) for i in range(num_turns)]
+        return ", ".join(labels)
+
+    def _generate_assignment_example(self, num_turns: int, num_topics: int) -> str:
+        """
+        Generate a dynamic example JSON matching the actual turn count.
+
+        This prevents the LLM from pattern-matching on a fixed-size example
+        and hallucinating extra turns.
+        """
+        example = {}
+        for i in range(num_turns):
+            label = self._index_to_letter(i)
+            # Distribute across topics in a round-robin fashion for realistic example
+            topic = (i % num_topics) + 1
+            example[label] = topic
+        return json.dumps(example)
 
     def _format_turns_for_synthesis(self, turns: List[ConversationTurn]) -> str:
         """

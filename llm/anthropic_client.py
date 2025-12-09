@@ -144,14 +144,20 @@ class AnthropicClient:
             response = client.messages.create(**request_params)
 
             # Parse response content
+            # Note: All iterations use defensive (x or []) pattern to handle None values
+            # The hasattr() check alone is insufficient - an attribute can exist but be None
             text = ""
             web_searches_used = 0
             citations: List[WebSearchCitation] = []
 
-            for block in response.content:
+            # Safely iterate over response content blocks
+            content_blocks = getattr(response, "content", None) or []
+            for block in content_blocks:
                 if hasattr(block, "text"):
-                    # Regular text block
-                    text += block.text
+                    # Regular text block - safely get text (could be None or empty)
+                    block_text = getattr(block, "text", None)
+                    if block_text:
+                        text += block_text
                 elif hasattr(block, "type"):
                     if block.type == "tool_use" and getattr(block, "name", None) == "web_search":
                         # Claude invoked web search
@@ -160,27 +166,29 @@ class AnthropicClient:
 
             # Extract citations from the response if present
             # Citations appear in server_tool_use blocks or as part of the response metadata
-            if hasattr(response, "content"):
-                for block in response.content:
-                    if hasattr(block, "type") and block.type == "web_search_tool_result":
-                        # Extract citations from search results
-                        if hasattr(block, "content"):
-                            for result_block in block.content:
-                                if hasattr(result_block, "citations"):
-                                    for citation in result_block.citations:
-                                        citations.append(WebSearchCitation(
-                                            cited_text=getattr(citation, "cited_text", ""),
-                                            title=getattr(citation, "title", ""),
-                                            url=getattr(citation, "url", "")
-                                        ))
-                    # Also check for citations in text blocks
-                    if hasattr(block, "citations"):
-                        for citation in block.citations:
+            for block in content_blocks:
+                if hasattr(block, "type") and block.type == "web_search_tool_result":
+                    # Extract citations from search results
+                    # Safely get block.content - could be None even if attribute exists
+                    block_content = getattr(block, "content", None) or []
+                    for result_block in block_content:
+                        # Safely get citations - could be None even if attribute exists
+                        result_citations = getattr(result_block, "citations", None) or []
+                        for citation in result_citations:
                             citations.append(WebSearchCitation(
                                 cited_text=getattr(citation, "cited_text", ""),
                                 title=getattr(citation, "title", ""),
                                 url=getattr(citation, "url", "")
                             ))
+                # Also check for citations in text blocks
+                # Safely get block.citations - could be None even if attribute exists
+                block_citations = getattr(block, "citations", None) or []
+                for citation in block_citations:
+                    citations.append(WebSearchCitation(
+                        cited_text=getattr(citation, "cited_text", ""),
+                        title=getattr(citation, "title", ""),
+                        url=getattr(citation, "url", "")
+                    ))
 
             return AnthropicResponse(
                 text=text,
