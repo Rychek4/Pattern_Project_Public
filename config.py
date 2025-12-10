@@ -66,7 +66,7 @@ MEMORY_FRESHNESS_HALF_LIFE_DAYS = 14  # Decay rate for freshness scoring (more r
 
 # Topic-Based Extraction Settings
 # These control how conversations are clustered into topics before memory creation
-MEMORY_MIN_TURNS_PER_TOPIC = 2  # Minimum turns needed for a topic to warrant a memory
+MEMORY_MIN_TURNS_PER_TOPIC = 1  # Allow single-turn topics (importance isn't determined by length)
 MEMORY_MAX_PER_EXTRACTION = 5  # Hard cap on memories created per extraction run
 MEMORY_SKIP_MINOR_TOPICS = True  # Skip topics marked as "minor" significance
 MEMORY_LARGE_TOPIC_THRESHOLD = 15  # Topics with more turns may get 2 memories
