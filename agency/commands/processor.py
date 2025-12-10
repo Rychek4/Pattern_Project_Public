@@ -94,8 +94,9 @@ class CommandProcessor:
         needs_continuation = False
 
         # Find and execute all commands
+        # re.DOTALL allows . to match newlines, enabling multi-line command content
         for handler in self._handlers.values():
-            for match in re.finditer(handler.pattern, response_text):
+            for match in re.finditer(handler.pattern, response_text, re.DOTALL):
                 # Get query from capture group if it exists, empty string for parameterless commands
                 query = match.group(1).strip() if match.lastindex else ""
                 log_info(f"Executing [[{handler.command_name}: {query}]]", prefix="⚡")
