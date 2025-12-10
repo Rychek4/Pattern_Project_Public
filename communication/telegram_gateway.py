@@ -93,13 +93,19 @@ class TelegramGateway:
         self.chat_id = str(chat_id)
         log_info(f"Telegram chat ID set to: {self.chat_id}")
 
-    async def _send_async(self, message: str, parse_mode: Optional[str] = None) -> TelegramResult:
+    async def _send_async(
+        self,
+        message: str,
+        parse_mode: Optional[str] = None,
+        bot: Optional[Bot] = None
+    ) -> TelegramResult:
         """
         Send a message asynchronously.
 
         Args:
             message: Text message content
             parse_mode: Optional parse mode ('Markdown' or 'HTML')
+            bot: Optional Bot instance to use (if None, uses self._get_bot())
 
         Returns:
             TelegramResult with send status
@@ -125,8 +131,9 @@ class TelegramGateway:
             )
 
         try:
-            bot = self._get_bot()
-            result = await bot.send_message(
+            # Use provided bot or get/create our own
+            send_bot = bot if bot is not None else self._get_bot()
+            result = await send_bot.send_message(
                 chat_id=self.chat_id,
                 text=message,
                 parse_mode=parse_mode
@@ -194,20 +201,51 @@ class TelegramGateway:
             TelegramResult with send status
         """
         # Try to use the listener's shared event loop and Bot
+        future = None
+        listener_loop = None
+        shared_bot = None
+
         try:
             from communication.telegram_listener import get_telegram_listener
             listener = get_telegram_listener()
 
             if listener.is_running():
-                # Share the Bot instance with the listener
-                self._bot = listener.get_bot()
-                # Run in the listener's event loop (thread-safe)
-                return listener.run_coroutine(self._send_async(message, parse_mode))
+                # Get the listener's bot and loop - don't store in self._bot yet
+                # to avoid event loop mismatch if we need to fall back
+                shared_bot = listener.get_bot()
+                listener_loop = listener.get_event_loop()
+
+                if listener_loop and not listener_loop.is_closed():
+                    # Schedule the coroutine on the listener's event loop
+                    # Pass the bot directly to avoid storing it in self._bot
+                    future = asyncio.run_coroutine_threadsafe(
+                        self._send_async(message, parse_mode, bot=shared_bot),
+                        listener_loop
+                    )
+
+                    # Wait for result with timeout
+                    return future.result(timeout=30.0)
+
         except Exception as e:
+            # If we scheduled a coroutine but waiting for result failed,
+            # cancel it to prevent duplicate sends when we fall back
+            if future is not None:
+                future.cancel()
+                # Give it a moment to cancel
+                try:
+                    future.result(timeout=0.5)
+                except Exception:
+                    pass  # Expected - either cancelled or already done
             log_warning(f"Could not use shared Telegram listener: {e}")
 
         # Fallback: create a temporary event loop with proper cleanup
         # This handles the case where the listener isn't running yet
+
+        # CRITICAL: Clear any existing bot to ensure we create a fresh one
+        # for this event loop. Using a bot from a different loop causes
+        # "Event loop is closed" errors.
+        self._bot = None
+
         loop = asyncio.new_event_loop()
         try:
             asyncio.set_event_loop(loop)
