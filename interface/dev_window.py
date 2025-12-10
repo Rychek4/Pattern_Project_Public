@@ -532,6 +532,7 @@ class DevWindow(QMainWindow):
         for i, result in enumerate(data.results, 1):
             score = result.get("score", 0)
             semantic = result.get("semantic_score", 0)
+            importance = result.get("importance_score", 0)
             freshness = result.get("freshness_score", 0)
             content = result.get("content", "")[:150]
             content = content.replace("<", "&lt;").replace(">", "&gt;")
@@ -545,7 +546,7 @@ class DevWindow(QMainWindow):
                 f'<div style="margin: 8px 0; padding: 8px; border-left: 3px solid {score_color};">'
                 f'<div style="color: {score_color}; font-weight: bold;">#{i} Score: {score:.3f}</div>'
                 f'<div style="color: {COLORS["text_dim"]}; font-size: 11px;">'
-                f'semantic: {semantic:.2f} | freshness: {freshness:.2f}</div>'
+                f'semantic: {semantic:.2f} | importance: {importance:.2f} | freshness: {freshness:.2f}</div>'
                 f'<div style="color: {COLORS["text"]}; margin-top: 5px; white-space: pre-wrap;">'
                 f'{content}{"..." if len(result.get("content", "")) > 150 else ""}</div>'
                 f'</div>'

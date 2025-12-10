@@ -66,6 +66,7 @@ class MemorySearchResult:
     """A memory with its relevance score."""
     memory: Memory
     semantic_score: float
+    importance_score: float
     freshness_score: float
     access_score: float
     combined_score: float
@@ -83,9 +84,10 @@ class VectorStore:
         self,
         embedding_dimensions: int = 384,
         freshness_half_life_days: float = 30.0,
-        semantic_weight: float = 0.6,
-        freshness_weight: float = 0.3,
-        access_weight: float = 0.1
+        semantic_weight: float = 0.55,
+        importance_weight: float = 0.25,
+        freshness_weight: float = 0.12,
+        access_weight: float = 0.08
     ):
         """
         Initialize the vector store.
@@ -93,13 +95,15 @@ class VectorStore:
         Args:
             embedding_dimensions: Dimension of embedding vectors
             freshness_half_life_days: Days for freshness decay
-            semantic_weight: Weight for semantic similarity
-            freshness_weight: Weight for freshness score
-            access_weight: Weight for access recency score
+            semantic_weight: Weight for semantic similarity (primary signal)
+            importance_weight: Weight for memory importance score
+            freshness_weight: Weight for freshness score (tie-breaker)
+            access_weight: Weight for access recency score (minimal bias)
         """
         self.embedding_dimensions = embedding_dimensions
         self.freshness_half_life_days = freshness_half_life_days
         self.semantic_weight = semantic_weight
+        self.importance_weight = importance_weight
         self.freshness_weight = freshness_weight
         self.access_weight = access_weight
         self._lock_manager = get_lock_manager()
@@ -247,15 +251,19 @@ class VectorStore:
             for i, memory in enumerate(memories):
                 semantic_score = float(semantic_scores[i])
 
+                # Importance score (already normalized 0.0-1.0)
+                importance_score = memory.importance
+
                 # Freshness score
                 freshness_score = self._compute_freshness(memory, now)
 
                 # Access recency score
                 access_score = self._compute_access_score(memory, now)
 
-                # Combined score
+                # Combined score: semantic + importance + freshness + access
                 combined_score = (
                     self.semantic_weight * semantic_score +
+                    self.importance_weight * importance_score +
                     self.freshness_weight * freshness_score +
                     self.access_weight * access_score
                 )
@@ -264,6 +272,7 @@ class VectorStore:
                     results.append(MemorySearchResult(
                         memory=memory,
                         semantic_score=semantic_score,
+                        importance_score=importance_score,
                         freshness_score=freshness_score,
                         access_score=access_score,
                         combined_score=combined_score
@@ -456,6 +465,7 @@ def get_vector_store() -> VectorStore:
             EMBEDDING_DIMENSIONS,
             MEMORY_FRESHNESS_HALF_LIFE_DAYS,
             MEMORY_SEMANTIC_WEIGHT,
+            MEMORY_IMPORTANCE_WEIGHT,
             MEMORY_FRESHNESS_WEIGHT,
             MEMORY_ACCESS_WEIGHT
         )
@@ -463,6 +473,7 @@ def get_vector_store() -> VectorStore:
             embedding_dimensions=EMBEDDING_DIMENSIONS,
             freshness_half_life_days=MEMORY_FRESHNESS_HALF_LIFE_DAYS,
             semantic_weight=MEMORY_SEMANTIC_WEIGHT,
+            importance_weight=MEMORY_IMPORTANCE_WEIGHT,
             freshness_weight=MEMORY_FRESHNESS_WEIGHT,
             access_weight=MEMORY_ACCESS_WEIGHT
         )
@@ -476,6 +487,7 @@ def init_vector_store() -> VectorStore:
         EMBEDDING_DIMENSIONS,
         MEMORY_FRESHNESS_HALF_LIFE_DAYS,
         MEMORY_SEMANTIC_WEIGHT,
+        MEMORY_IMPORTANCE_WEIGHT,
         MEMORY_FRESHNESS_WEIGHT,
         MEMORY_ACCESS_WEIGHT
     )
@@ -483,6 +495,7 @@ def init_vector_store() -> VectorStore:
         embedding_dimensions=EMBEDDING_DIMENSIONS,
         freshness_half_life_days=MEMORY_FRESHNESS_HALF_LIFE_DAYS,
         semantic_weight=MEMORY_SEMANTIC_WEIGHT,
+        importance_weight=MEMORY_IMPORTANCE_WEIGHT,
         freshness_weight=MEMORY_FRESHNESS_WEIGHT,
         access_weight=MEMORY_ACCESS_WEIGHT
     )

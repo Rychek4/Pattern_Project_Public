@@ -751,6 +751,7 @@ class ChatCLI:
         table.add_column("Type", style="cyan")
         table.add_column("Content")
         table.add_column("Semantic", style="green")
+        table.add_column("Import", style="magenta")
         table.add_column("Fresh", style="yellow")
         table.add_column("Total", style="bold green")
 
@@ -760,6 +761,7 @@ class ChatCLI:
                 mem.memory_type or "?",
                 mem.content[:50] + "..." if len(mem.content) > 50 else mem.content,
                 f"{result.semantic_score:.2f}",
+                f"{result.importance_score:.2f}",
                 f"{result.freshness_score:.2f}",
                 f"{result.combined_score:.2f}"
             )
