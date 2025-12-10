@@ -183,6 +183,9 @@ class TelegramGateway:
         """
         Send a message to the configured chat.
 
+        Uses the TelegramListener's shared event loop and Bot instance
+        when available to avoid connection pool exhaustion.
+
         Args:
             message: Text message content
             parse_mode: Optional parse mode ('Markdown' or 'HTML')
@@ -190,13 +193,21 @@ class TelegramGateway:
         Returns:
             TelegramResult with send status
         """
-        # Run the async send in a new event loop
+        # Try to use the listener's shared event loop and Bot
         try:
-            return asyncio.run(self._send_async(message, parse_mode))
-        except RuntimeError:
-            # If there's already an event loop running, use it
-            loop = asyncio.get_event_loop()
-            return loop.run_until_complete(self._send_async(message, parse_mode))
+            from communication.telegram_listener import get_telegram_listener
+            listener = get_telegram_listener()
+
+            if listener.is_running():
+                # Share the Bot instance with the listener
+                self._bot = listener.get_bot()
+                # Run in the listener's event loop (thread-safe)
+                return listener.run_coroutine(self._send_async(message, parse_mode))
+        except Exception as e:
+            log_warning(f"Could not use shared Telegram listener: {e}")
+
+        # Fallback: create a temporary event loop (listener not running)
+        return asyncio.run(self._send_async(message, parse_mode))
 
     def _log_to_database(
         self,
