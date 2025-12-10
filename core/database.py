@@ -706,7 +706,13 @@ class Database:
             fetch=True
         )
         if result:
-            return json.loads(result[0]["value"])
+            value = result[0]["value"]
+            # Handle SQLite JSON columns returning native Python types
+            # (SQLite 3.38+ may return int/float/bool directly from JSON columns)
+            if isinstance(value, str):
+                return json.loads(value)
+            # Value is already a Python type (int, float, bool, None, list, dict)
+            return value
         return default
 
     def set_state(self, key: str, value: Any) -> None:

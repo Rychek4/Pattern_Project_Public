@@ -239,24 +239,29 @@ class LLMRouter:
         if not config.WEB_SEARCH_ENABLED:
             return (False, None, None)
 
-        from agency.web_search_limiter import get_web_search_limiter
-        limiter = get_web_search_limiter()
+        try:
+            from agency.web_search_limiter import get_web_search_limiter
+            limiter = get_web_search_limiter()
 
-        if not limiter.is_available():
-            # Daily limit hit - notify Claude
-            used, total = limiter.get_usage()
-            log_warning(f"Web search daily limit reached ({used}/{total})")
-            return (
-                False,
-                None,
-                "<web_search_notice>Web search is unavailable today (daily limit reached). "
-                "Rely on your knowledge or ask the user to try again tomorrow.</web_search_notice>"
-            )
+            if not limiter.is_available():
+                # Daily limit hit - notify Claude
+                used, total = limiter.get_usage()
+                log_warning(f"Web search daily limit reached ({used}/{total})")
+                return (
+                    False,
+                    None,
+                    "<web_search_notice>Web search is unavailable today (daily limit reached). "
+                    "Rely on your knowledge or ask the user to try again tomorrow.</web_search_notice>"
+                )
 
-        # Web search is available
-        max_uses = limiter.get_max_for_request()
-        log_info(f"Web search enabled (max {max_uses} uses this request)", prefix="🔍")
-        return (True, max_uses, None)
+            # Web search is available
+            max_uses = limiter.get_max_for_request()
+            log_info(f"Web search enabled (max {max_uses} uses this request)", prefix="🔍")
+            return (True, max_uses, None)
+
+        except Exception as e:
+            log_error(f"Web search limiter error, disabling web search: {e}")
+            return (False, None, None)  # Gracefully disable web search
 
     def _record_web_search_usage(self, count: int) -> None:
         """Record web search usage to the limiter."""

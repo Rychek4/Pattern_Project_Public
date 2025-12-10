@@ -6,6 +6,7 @@ Injects available command instructions into the system prompt
 from typing import Optional, Dict, Any
 
 from prompt_builder.sources.base import ContextSource, ContextBlock, SourcePriority
+from core.logger import log_error
 import config
 
 
@@ -31,15 +32,16 @@ class AICommandsSource(ContextSource):
         if not config.WEB_SEARCH_ENABLED:
             return None
 
-        from agency.web_search_limiter import get_web_search_limiter
-        limiter = get_web_search_limiter()
-        used, total = limiter.get_usage()
-        remaining = limiter.get_remaining()
+        try:
+            from agency.web_search_limiter import get_web_search_limiter
+            limiter = get_web_search_limiter()
+            used, total = limiter.get_usage()
+            remaining = limiter.get_remaining()
 
-        if remaining <= 0:
-            return None  # Will be handled by router with unavailable message
+            if remaining <= 0:
+                return None  # Will be handled by router with unavailable message
 
-        return f"""<web_search_capability>
+            return f"""<web_search_capability>
 You have access to real-time web search. When the user asks about current events,
 recent information, or topics that may have changed since your knowledge cutoff,
 you can search the web automatically. Web searches happen seamlessly - you don't
@@ -47,6 +49,10 @@ need special syntax. Just respond naturally and search when needed.
 
 Today's budget: {remaining} searches remaining ({used}/{total} used)
 </web_search_capability>"""
+
+        except Exception as e:
+            log_error(f"Failed to get web search status: {e}")
+            return None  # Silently omit web search status from prompt
 
     def get_context(
         self,

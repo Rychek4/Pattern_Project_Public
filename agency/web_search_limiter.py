@@ -7,7 +7,7 @@ from datetime import datetime, date
 from typing import Tuple
 
 from core.database import get_database
-from core.logger import log_info, log_warning
+from core.logger import log_info, log_warning, log_error
 import config
 
 
@@ -50,36 +50,54 @@ class WebSearchLimiter:
         Get remaining searches for today.
 
         Returns:
-            Number of searches remaining in daily budget
+            Number of searches remaining in daily budget (0 on error)
         """
-        self._check_reset()
-        db = self._get_db()
-        used = db.get_state(STATE_KEY_DAILY_COUNT, 0)
-        remaining = max(0, config.WEB_SEARCH_TOTAL_ALLOWED_PER_DAY - used)
-        return remaining
+        try:
+            self._check_reset()
+            db = self._get_db()
+            used = db.get_state(STATE_KEY_DAILY_COUNT, 0)
+            # Ensure used is an int (defensive against type issues)
+            if not isinstance(used, int):
+                used = int(used) if used is not None else 0
+            remaining = max(0, config.WEB_SEARCH_TOTAL_ALLOWED_PER_DAY - used)
+            return remaining
+        except Exception as e:
+            log_error(f"Error getting web search remaining count: {e}")
+            return 0  # Fail safe: report no searches available
 
     def get_usage(self) -> Tuple[int, int]:
         """
         Get current usage stats.
 
         Returns:
-            Tuple of (used_today, daily_limit)
+            Tuple of (used_today, daily_limit), or (0, limit) on error
         """
-        self._check_reset()
-        db = self._get_db()
-        used = db.get_state(STATE_KEY_DAILY_COUNT, 0)
-        return (used, config.WEB_SEARCH_TOTAL_ALLOWED_PER_DAY)
+        try:
+            self._check_reset()
+            db = self._get_db()
+            used = db.get_state(STATE_KEY_DAILY_COUNT, 0)
+            # Ensure used is an int (defensive against type issues)
+            if not isinstance(used, int):
+                used = int(used) if used is not None else 0
+            return (used, config.WEB_SEARCH_TOTAL_ALLOWED_PER_DAY)
+        except Exception as e:
+            log_error(f"Error getting web search usage: {e}")
+            return (0, config.WEB_SEARCH_TOTAL_ALLOWED_PER_DAY)
 
     def is_available(self) -> bool:
         """
         Check if web search is available (enabled and within budget).
 
         Returns:
-            True if web search can be used
+            True if web search can be used, False on error
         """
-        if not config.WEB_SEARCH_ENABLED:
-            return False
-        return self.get_remaining() > 0
+        try:
+            if not config.WEB_SEARCH_ENABLED:
+                return False
+            return self.get_remaining() > 0
+        except Exception as e:
+            log_error(f"Error checking web search availability: {e}")
+            return False  # Fail safe: report unavailable
 
     def record_usage(self, count: int = 1) -> int:
         """
@@ -89,26 +107,33 @@ class WebSearchLimiter:
             count: Number of searches to record
 
         Returns:
-            New total used today
+            New total used today, or 0 on error
         """
-        self._check_reset()
-        db = self._get_db()
-        current = db.get_state(STATE_KEY_DAILY_COUNT, 0)
-        new_total = current + count
-        db.set_state(STATE_KEY_DAILY_COUNT, new_total)
+        try:
+            self._check_reset()
+            db = self._get_db()
+            current = db.get_state(STATE_KEY_DAILY_COUNT, 0)
+            # Ensure current is an int (defensive against type issues)
+            if not isinstance(current, int):
+                current = int(current) if current is not None else 0
+            new_total = current + count
+            db.set_state(STATE_KEY_DAILY_COUNT, new_total)
 
-        remaining = config.WEB_SEARCH_TOTAL_ALLOWED_PER_DAY - new_total
-        log_info(
-            f"Web search used: {count} (today: {new_total}/{config.WEB_SEARCH_TOTAL_ALLOWED_PER_DAY}, remaining: {remaining})",
-            prefix="🔍"
-        )
+            remaining = config.WEB_SEARCH_TOTAL_ALLOWED_PER_DAY - new_total
+            log_info(
+                f"Web search used: {count} (today: {new_total}/{config.WEB_SEARCH_TOTAL_ALLOWED_PER_DAY}, remaining: {remaining})",
+                prefix="🔍"
+            )
 
-        if remaining <= 5 and remaining > 0:
-            log_warning(f"Web search daily limit nearly exhausted: {remaining} remaining")
-        elif remaining <= 0:
-            log_warning("Web search daily limit exhausted")
+            if remaining <= 5 and remaining > 0:
+                log_warning(f"Web search daily limit nearly exhausted: {remaining} remaining")
+            elif remaining <= 0:
+                log_warning("Web search daily limit exhausted")
 
-        return new_total
+            return new_total
+        except Exception as e:
+            log_error(f"Error recording web search usage: {e}")
+            return 0
 
     def get_max_for_request(self) -> int:
         """
@@ -117,11 +142,15 @@ class WebSearchLimiter:
         Considers both the per-request limit and remaining daily budget.
 
         Returns:
-            Maximum searches Claude should use in this request
+            Maximum searches Claude should use in this request, or 0 on error
         """
-        remaining = self.get_remaining()
-        per_request = config.WEB_SEARCH_MAX_USES_PER_REQUEST
-        return min(remaining, per_request)
+        try:
+            remaining = self.get_remaining()
+            per_request = config.WEB_SEARCH_MAX_USES_PER_REQUEST
+            return min(remaining, per_request)
+        except Exception as e:
+            log_error(f"Error getting max searches for request: {e}")
+            return 0
 
 
 # Global instance
