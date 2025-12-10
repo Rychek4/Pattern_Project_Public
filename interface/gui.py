@@ -950,6 +950,12 @@ class ChatWindow(QMainWindow):
                 processed = processor.process(response.text)
                 final_text = processed.display_text
 
+                # Track if SEND_TELEGRAM was already executed (to avoid duplicate sends)
+                telegram_sent = any(
+                    cmd.command_name == "SEND_TELEGRAM" and cmd.error is None
+                    for cmd in processed.commands_executed
+                )
+
                 # Handle continuation if needed (simplified - single pass)
                 if processed.needs_continuation:
                     continuation_history = history.copy()
@@ -967,6 +973,13 @@ class ChatWindow(QMainWindow):
                         processed = processor.process(continuation.text)
                         final_text = processed.display_text
 
+                        # Check if continuation also executed SEND_TELEGRAM
+                        if any(
+                            cmd.command_name == "SEND_TELEGRAM" and cmd.error is None
+                            for cmd in processed.commands_executed
+                        ):
+                            telegram_sent = True
+
                 # Store response
                 self._conversation_mgr.add_turn(
                     role="assistant",
@@ -978,8 +991,8 @@ class ChatWindow(QMainWindow):
                 timestamp = self._get_timestamp()
                 self.signals.new_message.emit("assistant", f"📱 {final_text}", timestamp)
 
-                # Send response back to Telegram
-                if config.TELEGRAM_ENABLED:
+                # Send response back to Telegram (only if not already sent via command)
+                if config.TELEGRAM_ENABLED and not telegram_sent:
                     try:
                         from communication.telegram_gateway import get_telegram_gateway
                         gateway = get_telegram_gateway()
