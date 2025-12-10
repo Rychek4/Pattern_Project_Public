@@ -267,7 +267,7 @@ def init_telegram_gateway(
 
     Args:
         bot_token: Bot API token (defaults to config)
-        chat_id: Target chat ID (defaults to config)
+        chat_id: Target chat ID (defaults to config or database)
 
     Returns:
         The initialized TelegramGateway instance
@@ -276,9 +276,22 @@ def init_telegram_gateway(
 
     from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
+    # Try to load chat_id from database if not in config
+    effective_chat_id = chat_id or TELEGRAM_CHAT_ID
+    if not effective_chat_id:
+        try:
+            from core.database import get_database
+            db = get_database()
+            saved_id = db.get_state("telegram_chat_id")
+            if saved_id:
+                effective_chat_id = saved_id
+                log_info(f"Loaded Telegram chat ID from database: {effective_chat_id}")
+        except Exception:
+            pass  # Database might not be initialized yet
+
     _gateway = TelegramGateway(
         bot_token=bot_token or TELEGRAM_BOT_TOKEN,
-        chat_id=chat_id or TELEGRAM_CHAT_ID,
+        chat_id=effective_chat_id,
     )
 
     if _gateway.is_available():
