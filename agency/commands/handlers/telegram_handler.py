@@ -1,32 +1,31 @@
 """
-Pattern Project - SMS Command Handler
-Handles [[SEND_SMS: message]] commands for AI-initiated text messaging.
+Pattern Project - Telegram Command Handler
+Handles [[SEND_TELEGRAM: message]] commands for AI-initiated messaging.
 
-SMS messages are sent to the whitelisted recipient via carrier email gateway.
+Messages are sent to the configured Telegram chat via the Bot API.
 """
 
 from agency.commands.handlers.base import CommandHandler, CommandResult
 from agency.commands.errors import ToolError, ToolErrorType
 
 
-class SendSMSHandler(CommandHandler):
+class SendTelegramHandler(CommandHandler):
     """
-    Handles [[SEND_SMS: message]] commands for sending text messages.
+    Handles [[SEND_TELEGRAM: message]] commands for sending Telegram messages.
 
-    Messages are sent to the configured recipient phone number via
-    the carrier's email-to-SMS gateway.
+    Messages are sent to the configured chat ID via the Telegram Bot API.
 
     Example AI usage:
-        "I'll text you a reminder... [[SEND_SMS: Don't forget your appointment at 3pm!]]"
+        "I'll message you... [[SEND_TELEGRAM: Don't forget your appointment at 3pm!]]"
     """
 
     @property
     def command_name(self) -> str:
-        return "SEND_SMS"
+        return "SEND_TELEGRAM"
 
     @property
     def pattern(self) -> str:
-        return r'\[\[SEND_SMS:\s*(.+?)\]\]'
+        return r'\[\[SEND_TELEGRAM:\s*(.+?)\]\]'
 
     @property
     def needs_continuation(self) -> bool:
@@ -34,7 +33,7 @@ class SendSMSHandler(CommandHandler):
 
     def execute(self, query: str, context: dict) -> CommandResult:
         """
-        Send an SMS message to the whitelisted recipient.
+        Send a Telegram message to the configured chat.
 
         Args:
             query: The message content to send
@@ -43,21 +42,21 @@ class SendSMSHandler(CommandHandler):
         Returns:
             CommandResult with send status
         """
-        from config import SMS_GATEWAY_ENABLED, SMS_MAX_LENGTH
+        from config import TELEGRAM_ENABLED
 
         message = query.strip()
 
-        # Check if SMS is enabled
-        if not SMS_GATEWAY_ENABLED:
+        # Check if Telegram is enabled
+        if not TELEGRAM_ENABLED:
             return CommandResult(
                 command_name=self.command_name,
                 query=message,
                 data=None,
                 needs_continuation=True,
-                display_text="SMS feature disabled",
+                display_text="Telegram feature disabled",
                 error=ToolError(
                     error_type=ToolErrorType.SYSTEM_ERROR,
-                    message="SMS gateway is disabled in configuration",
+                    message="Telegram is disabled in configuration",
                     expected_format=None,
                     example=None
                 )
@@ -70,12 +69,12 @@ class SendSMSHandler(CommandHandler):
                 query=message,
                 data=None,
                 needs_continuation=True,
-                display_text="Empty SMS message",
+                display_text="Empty Telegram message",
                 error=ToolError(
                     error_type=ToolErrorType.FORMAT_ERROR,
-                    message="SMS message cannot be empty",
-                    expected_format="[[SEND_SMS: Your message here]]",
-                    example="[[SEND_SMS: Don't forget your 3pm appointment!]]"
+                    message="Telegram message cannot be empty",
+                    expected_format="[[SEND_TELEGRAM: Your message here]]",
+                    example="[[SEND_TELEGRAM: Don't forget your 3pm appointment!]]"
                 )
             )
 
@@ -83,9 +82,9 @@ class SendSMSHandler(CommandHandler):
         from communication.rate_limiter import get_rate_limiter
 
         rate_limiter = get_rate_limiter()
-        if not rate_limiter.check_sms():
+        if not rate_limiter.check_telegram():
             remaining_info = ""
-            reset_time = rate_limiter.get_sms_reset_time()
+            reset_time = rate_limiter.get_telegram_reset_time()
             if reset_time:
                 remaining_info = f" Limit resets at {reset_time.strftime('%H:%M:%S')}."
 
@@ -94,20 +93,20 @@ class SendSMSHandler(CommandHandler):
                 query=message,
                 data=None,
                 needs_continuation=True,
-                display_text="SMS rate limit exceeded",
+                display_text="Telegram rate limit exceeded",
                 error=ToolError(
                     error_type=ToolErrorType.RATE_LIMITED,
-                    message=f"SMS rate limit exceeded ({rate_limiter.sms_max}/hour).{remaining_info}",
+                    message=f"Telegram rate limit exceeded ({rate_limiter.telegram_max}/hour).{remaining_info}",
                     expected_format=None,
                     example=None
                 )
             )
 
-        # Send the SMS
+        # Send the message
         try:
-            from communication.sms_gateway import get_sms_gateway
+            from communication.telegram_gateway import get_telegram_gateway
 
-            gateway = get_sms_gateway()
+            gateway = get_telegram_gateway()
 
             if not gateway.is_available():
                 return CommandResult(
@@ -115,10 +114,10 @@ class SendSMSHandler(CommandHandler):
                     query=message,
                     data=None,
                     needs_continuation=True,
-                    display_text="SMS gateway not configured",
+                    display_text="Telegram gateway not configured",
                     error=ToolError(
                         error_type=ToolErrorType.SYSTEM_ERROR,
-                        message="SMS gateway not properly configured. Check environment variables.",
+                        message="Telegram gateway not properly configured. Check bot token and chat ID.",
                         expected_format=None,
                         example=None
                     )
@@ -127,25 +126,20 @@ class SendSMSHandler(CommandHandler):
             result = gateway.send(message)
 
             # Record the send in rate limiter (even if it failed, to prevent rapid retries)
-            rate_limiter.record_sms()
+            rate_limiter.record_telegram()
 
             if result.success:
-                # Note if message was truncated
-                truncated_note = ""
-                if len(query.strip()) > SMS_MAX_LENGTH:
-                    truncated_note = f" (truncated to {SMS_MAX_LENGTH} chars)"
-
                 return CommandResult(
                     command_name=self.command_name,
                     query=message,
                     data={
-                        "recipient": result.recipient,
+                        "chat_id": result.chat_id,
+                        "message_id": result.message_id,
                         "message_length": len(message),
-                        "truncated": len(query.strip()) > SMS_MAX_LENGTH,
                         "timestamp": result.timestamp.isoformat()
                     },
                     needs_continuation=True,
-                    display_text=f"SMS sent{truncated_note}"
+                    display_text="Telegram message sent"
                 )
             else:
                 return CommandResult(
@@ -153,10 +147,10 @@ class SendSMSHandler(CommandHandler):
                     query=message,
                     data=None,
                     needs_continuation=True,
-                    display_text="SMS send failed",
+                    display_text="Telegram send failed",
                     error=ToolError(
                         error_type=ToolErrorType.SYSTEM_ERROR,
-                        message=f"Failed to send SMS: {result.message}",
+                        message=f"Failed to send Telegram message: {result.message}",
                         expected_format=None,
                         example=None
                     )
@@ -169,10 +163,10 @@ class SendSMSHandler(CommandHandler):
                 query=message,
                 data=None,
                 needs_continuation=True,
-                display_text="SMS gateway error",
+                display_text="Telegram gateway error",
                 error=ToolError(
                     error_type=ToolErrorType.SYSTEM_ERROR,
-                    message=f"SMS gateway not initialized: {str(e)}",
+                    message=f"Telegram gateway not initialized: {str(e)}",
                     expected_format=None,
                     example=None
                 )
@@ -183,42 +177,39 @@ class SendSMSHandler(CommandHandler):
                 query=message,
                 data=None,
                 needs_continuation=True,
-                display_text="SMS error",
+                display_text="Telegram error",
                 error=ToolError(
                     error_type=ToolErrorType.SYSTEM_ERROR,
-                    message=f"Unexpected error sending SMS: {str(e)}",
+                    message=f"Unexpected error sending Telegram message: {str(e)}",
                     expected_format=None,
                     example=None
                 )
             )
 
     def get_instructions(self) -> str:
-        return """You can send an SMS text message to the user by including this command in your response:
-  [[SEND_SMS: Your message here]]
+        return """You can send a Telegram message to the user by including this command in your response:
+  [[SEND_TELEGRAM: Your message here]]
 
 Use this when:
-- The user asks you to text them a reminder
+- The user asks you to message them a reminder
 - You need to alert the user about something important
 - Time-sensitive information needs to be communicated
+- The user is away and you need to reach them
 
 Guidelines:
-- Keep messages under 160 characters to avoid truncation
+- Messages can be any length (no SMS-style limits)
 - Use for genuinely useful notifications, not casual chat
-- Be concise and clear - SMS is for brief, important messages"""
+- Be concise and clear for better mobile readability
+- The user can reply directly in Telegram and you'll receive their response"""
 
     def format_result(self, result: CommandResult) -> str:
         if result.error:
             return f"  {result.get_error_message()}"
 
         if not result.data:
-            return "  SMS operation completed."
+            return "  Telegram operation completed."
 
         data = result.data
         length = data.get("message_length", 0)
-        truncated = data.get("truncated", False)
 
-        status = "SMS sent successfully"
-        if truncated:
-            status += " (message was truncated)"
-
-        return f"  {status} ({length} characters)"
+        return f"  Telegram message sent ({length} characters)"

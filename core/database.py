@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from core.logger import log_info, log_success, log_error, log_config, log_section
 
 # Schema version for migrations
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 # SQL schema definition
 SCHEMA_SQL = """
@@ -126,12 +126,12 @@ CREATE TABLE IF NOT EXISTS intentions (
     source_session_id INTEGER REFERENCES sessions(id)
 );
 
--- Communication log: tracks sent emails and SMS messages
+-- Communication log: tracks sent emails and Telegram messages
 CREATE TABLE IF NOT EXISTS communication_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    type TEXT NOT NULL CHECK (type IN ('email', 'sms')),
+    type TEXT NOT NULL CHECK (type IN ('email', 'telegram')),
     recipient TEXT NOT NULL,
-    subject TEXT,  -- NULL for SMS
+    subject TEXT,  -- NULL for Telegram
     body TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'sent' CHECK (status IN ('sent', 'failed')),
     error_message TEXT,
@@ -437,6 +437,47 @@ CREATE INDEX IF NOT EXISTS idx_communication_log_type ON communication_log(type)
 CREATE INDEX IF NOT EXISTS idx_communication_log_created ON communication_log(created_at DESC);
 """
 
+# Migration SQL for v9 -> v10 (replace SMS with Telegram in communication_log)
+MIGRATION_V10_SQL = """
+-- Replace SMS with Telegram in communication_log type constraint
+-- SQLite requires table recreation to modify CHECK constraints
+
+-- Disable foreign keys during migration
+PRAGMA foreign_keys=OFF;
+
+-- Create new table with telegram type
+CREATE TABLE communication_log_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL CHECK (type IN ('email', 'telegram')),
+    recipient TEXT NOT NULL,
+    subject TEXT,
+    body TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'sent' CHECK (status IN ('sent', 'failed')),
+    error_message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Copy existing data, converting 'sms' to 'telegram'
+INSERT INTO communication_log_new (id, type, recipient, subject, body, status, error_message, created_at)
+SELECT id,
+       CASE type WHEN 'sms' THEN 'telegram' ELSE type END,
+       recipient, subject, body, status, error_message, created_at
+FROM communication_log;
+
+-- Drop old table
+DROP TABLE communication_log;
+
+-- Rename new table
+ALTER TABLE communication_log_new RENAME TO communication_log;
+
+-- Recreate indexes
+CREATE INDEX IF NOT EXISTS idx_communication_log_type ON communication_log(type);
+CREATE INDEX IF NOT EXISTS idx_communication_log_created ON communication_log(created_at DESC);
+
+-- Re-enable foreign keys
+PRAGMA foreign_keys=ON;
+"""
+
 
 class Database:
     """SQLite database manager with WAL mode and thread-safe connections."""
@@ -586,6 +627,10 @@ class Database:
             if from_version < 9:
                 log_config("Applying migration", "v8 → v9 (add communication_log table)", indent=1)
                 conn.executescript(MIGRATION_V9_SQL)
+
+            if from_version < 10:
+                log_config("Applying migration", "v9 → v10 (replace SMS with Telegram)", indent=1)
+                conn.executescript(MIGRATION_V10_SQL)
 
             # Record new version
             conn.execute(

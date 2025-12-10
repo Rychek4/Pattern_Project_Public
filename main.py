@@ -125,23 +125,26 @@ def initialize_system() -> bool:
     init_prompt_builder()
 
     # Initialize communication gateways if enabled
-    if config.EMAIL_GATEWAY_ENABLED or config.SMS_GATEWAY_ENABLED:
-        from communication.email_gateway import init_email_gateway
-        from communication.sms_gateway import init_sms_gateway
+    if config.EMAIL_GATEWAY_ENABLED or config.TELEGRAM_ENABLED:
         from communication.rate_limiter import init_rate_limiter
 
         # Initialize rate limiter
         init_rate_limiter(
             email_max_per_hour=config.EMAIL_MAX_PER_HOUR,
-            sms_max_per_hour=config.SMS_MAX_PER_HOUR
+            telegram_max_per_hour=config.TELEGRAM_MAX_PER_HOUR
         )
 
-        # Initialize email gateway (used by both email and SMS)
-        init_email_gateway()
+        # Initialize email gateway if enabled
+        if config.EMAIL_GATEWAY_ENABLED:
+            from communication.email_gateway import init_email_gateway
+            init_email_gateway()
 
-        # Initialize SMS gateway if enabled
-        if config.SMS_GATEWAY_ENABLED:
-            init_sms_gateway()
+        # Initialize Telegram gateway and listener if enabled
+        if config.TELEGRAM_ENABLED:
+            from communication.telegram_gateway import init_telegram_gateway
+            from communication.telegram_listener import init_telegram_listener
+            init_telegram_gateway()
+            init_telegram_listener()
 
     # Initialize agency (legacy - disabled)
     init_proactive_agent()
@@ -223,15 +226,15 @@ def print_configuration() -> None:
         log_subsection(f"Webcam: {'ENABLED' if config.VISUAL_WEBCAM_ENABLED else 'DISABLED'}")
 
     # Communication settings
-    if config.EMAIL_GATEWAY_ENABLED or config.SMS_GATEWAY_ENABLED:
+    if config.EMAIL_GATEWAY_ENABLED or config.TELEGRAM_ENABLED:
         log_section("Communication", "📱")
         log_subsection(f"Email: {'ENABLED' if config.EMAIL_GATEWAY_ENABLED else 'DISABLED'}")
-        log_subsection(f"SMS: {'ENABLED' if config.SMS_GATEWAY_ENABLED else 'DISABLED'}")
-        if config.SMS_GATEWAY_ENABLED:
-            phone = config.SMS_RECIPIENT_PHONE
-            masked = f"***-***-{phone[-4:]}" if len(phone) >= 4 else "not set"
-            log_subsection(f"SMS Recipient: {masked}")
-        log_subsection(f"Rate Limits: {config.EMAIL_MAX_PER_HOUR} email/hr, {config.SMS_MAX_PER_HOUR} SMS/hr")
+        log_subsection(f"Telegram: {'ENABLED' if config.TELEGRAM_ENABLED else 'DISABLED'}")
+        if config.TELEGRAM_ENABLED:
+            chat_id = config.TELEGRAM_CHAT_ID
+            masked = f"...{chat_id[-4:]}" if len(chat_id) >= 4 else "auto-detect"
+            log_subsection(f"Telegram Chat: {masked}")
+        log_subsection(f"Rate Limits: {config.EMAIL_MAX_PER_HOUR} email/hr, {config.TELEGRAM_MAX_PER_HOUR} telegram/hr")
 
 
 def check_llm_providers() -> None:
@@ -310,6 +313,13 @@ def start_background_services() -> None:
         http_server.start()
         log_subsection(f"HTTP API started on http://{config.HTTP_HOST}:{config.HTTP_PORT}")
 
+    # Start Telegram listener if enabled (callback set by CLI)
+    if config.TELEGRAM_ENABLED:
+        from communication.telegram_listener import get_telegram_listener
+        telegram_listener = get_telegram_listener()
+        telegram_listener.start()
+        log_subsection("Telegram listener started")
+
 
 def stop_background_services() -> None:
     """Stop all background services gracefully."""
@@ -361,6 +371,16 @@ def stop_background_services() -> None:
         log_subsection("Subprocess manager stopped")
     except Exception as e:
         log_error(f"Error stopping subprocess manager: {e}")
+
+    # Stop Telegram listener if enabled
+    if config.TELEGRAM_ENABLED:
+        try:
+            from communication.telegram_listener import get_telegram_listener
+            telegram_listener = get_telegram_listener()
+            telegram_listener.stop()
+            log_subsection("Telegram listener stopped")
+        except Exception as e:
+            log_error(f"Error stopping Telegram listener: {e}")
 
     # Log final lock stats
     try:

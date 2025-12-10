@@ -46,8 +46,10 @@ class ChatCLI:
         self._commands: Dict[str, Callable] = {}
         self._pulse_queue: queue.Queue = queue.Queue()
         self._reminder_queue: queue.Queue = queue.Queue()
+        self._telegram_queue: queue.Queue = queue.Queue()
         self._system_pulse_timer = None
         self._reminder_scheduler = None
+        self._telegram_listener = None
         self._setup_commands()
 
     def _setup_commands(self) -> None:
@@ -88,6 +90,12 @@ class ChatCLI:
         self._reminder_scheduler = get_reminder_scheduler()
         self._reminder_scheduler.set_callback(self._on_reminder_fired)
 
+        # Set up Telegram listener if enabled
+        if config.TELEGRAM_ENABLED:
+            from communication.telegram_listener import get_telegram_listener
+            self._telegram_listener = get_telegram_listener()
+            self._telegram_listener.set_callback(self._on_telegram_message)
+
         # Start a session if not already active
         if not tracker.is_session_active:
             tracker.start_session()
@@ -100,6 +108,10 @@ class ChatCLI:
             self.console.print(
                 f"[dim]System pulse active: AI will speak every {config.SYSTEM_PULSE_INTERVAL // 60} minutes if idle[/dim]"
             )
+        if config.TELEGRAM_ENABLED:
+            self.console.print(
+                "[dim]Telegram bidirectional messaging active[/dim]"
+            )
         if config.DEV_MODE_ENABLED:
             self.console.print(
                 "[bold magenta]🔧 Dev mode active: Showing internal operations[/bold magenta]"
@@ -108,9 +120,10 @@ class ChatCLI:
 
         while self._running:
             try:
-                # Check for pending pulse/reminder before getting input
+                # Check for pending pulse/reminder/telegram before getting input
                 self._check_pulse_queue()
                 self._check_reminder_queue()
+                self._check_telegram_queue()
 
                 # Get user input
                 user_input = Prompt.ask("[bold green]You[/bold green]")
@@ -586,6 +599,136 @@ class ChatCLI:
             # Resume timer
             if self._system_pulse_timer:
                 self._system_pulse_timer.resume()
+
+    def _on_telegram_message(self, message) -> None:
+        """Called when a Telegram message is received (from background thread)."""
+        # Queue the message for processing in the main loop
+        self._telegram_queue.put(message)
+
+    def _check_telegram_queue(self) -> None:
+        """Check if there's a pending Telegram message to process."""
+        try:
+            # Non-blocking check
+            message = self._telegram_queue.get_nowait()
+            # Message is pending, process it
+            self._process_telegram_message(message)
+        except queue.Empty:
+            pass
+
+    def _process_telegram_message(self, message) -> None:
+        """Process an inbound Telegram message and generate AI response."""
+        conversation_mgr = get_conversation_manager()
+        router = get_llm_router()
+        prompt_builder = get_prompt_builder()
+
+        try:
+            # Pause timers during processing
+            if self._system_pulse_timer:
+                self._system_pulse_timer.pause()
+            if self._telegram_listener:
+                self._telegram_listener.pause()
+
+            # Show Telegram indicator
+            self.console.print()
+            from_info = f" from {message.from_user}" if message.from_user else ""
+            self.console.print(f"[bold cyan]📱 Telegram Message{from_info}[/bold cyan]")
+            self.console.print(f"[dim]{message.text}[/dim]")
+
+            # Store the message as user input
+            conversation_mgr.add_turn(
+                role="user",
+                content=message.text,
+                input_type="telegram"
+            )
+
+            # Build prompt
+            assembled = prompt_builder.build(
+                user_input=message.text,
+                system_prompt=""
+            )
+
+            # Get conversation history
+            history = conversation_mgr.get_recent_history(limit=30)
+
+            # Show thinking indicator
+            with self.console.status("[bold cyan]Responding to Telegram...[/bold cyan]", spinner="dots"):
+                response = router.chat(
+                    messages=history,
+                    system_prompt=assembled.full_system_prompt,
+                    task_type=TaskType.CONVERSATION,
+                    temperature=0.7
+                )
+
+            if response.success:
+                from agency.commands import get_command_processor
+
+                # Process response for AI commands
+                processor = get_command_processor()
+                processed = processor.process(response.text)
+
+                final_text = processed.display_text
+                final_provider = response.provider.value
+
+                if processed.needs_continuation:
+                    self.console.print("[dim]  ↳ Executing command...[/dim]")
+
+                    continuation_history = history.copy()
+                    continuation_history.append({"role": "assistant", "content": response.text})
+                    continuation_history.append({"role": "user", "content": processed.continuation_prompt})
+
+                    with self.console.status("[bold cyan]Continuing...[/bold cyan]", spinner="dots"):
+                        continuation = router.chat(
+                            messages=continuation_history,
+                            system_prompt=assembled.full_system_prompt,
+                            task_type=TaskType.CONVERSATION,
+                            temperature=0.7
+                        )
+
+                    if continuation.success:
+                        final_text = continuation.text
+                        final_provider = continuation.provider.value
+
+                # Store response
+                conversation_mgr.add_turn(
+                    role="assistant",
+                    content=final_text,
+                    input_type="text"
+                )
+
+                # Display with special styling
+                panel = Panel(
+                    Markdown(final_text),
+                    title=f"[bold cyan]AI (telegram)[/bold cyan] [dim]({final_provider})[/dim]",
+                    title_align="left",
+                    border_style="cyan",
+                    padding=(0, 1)
+                )
+                self.console.print(panel)
+                self.console.print()
+
+                # Also send response back to Telegram
+                if config.TELEGRAM_ENABLED:
+                    try:
+                        from communication.telegram_gateway import get_telegram_gateway
+                        gateway = get_telegram_gateway()
+                        if gateway.is_available():
+                            gateway.send(final_text)
+                    except Exception as e:
+                        log_warning(f"Failed to send response to Telegram: {e}")
+
+            else:
+                self.console.print(f"[bold red]Telegram response error:[/bold red] {response.error}")
+
+        except Exception as e:
+            log_error(f"Telegram message processing error: {e}")
+            self.console.print(f"[bold red]Telegram error:[/bold red] {e}")
+
+        finally:
+            # Resume timers
+            if self._system_pulse_timer:
+                self._system_pulse_timer.resume()
+            if self._telegram_listener:
+                self._telegram_listener.resume()
 
     def _handle_command(self, input_str: str) -> None:
         """Handle a slash command."""

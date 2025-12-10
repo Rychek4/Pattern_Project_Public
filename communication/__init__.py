@@ -1,12 +1,13 @@
 """
 Pattern Project - Communication Module
-Email and SMS gateway functionality for AI-initiated messaging.
+Email and Telegram gateway functionality for AI-initiated messaging.
 """
 
 from typing import Optional
 
 from communication.email_gateway import EmailGateway, get_email_gateway, init_email_gateway
-from communication.sms_gateway import SMSGateway, get_sms_gateway, init_sms_gateway
+from communication.telegram_gateway import TelegramGateway, get_telegram_gateway, init_telegram_gateway
+from communication.telegram_listener import TelegramListener, get_telegram_listener, init_telegram_listener
 from communication.rate_limiter import RateLimiter, get_rate_limiter
 
 
@@ -15,10 +16,13 @@ __all__ = [
     'EmailGateway',
     'get_email_gateway',
     'init_email_gateway',
-    # SMS
-    'SMSGateway',
-    'get_sms_gateway',
-    'init_sms_gateway',
+    # Telegram
+    'TelegramGateway',
+    'get_telegram_gateway',
+    'init_telegram_gateway',
+    'TelegramListener',
+    'get_telegram_listener',
+    'init_telegram_listener',
     # Rate Limiting
     'RateLimiter',
     'get_rate_limiter',
