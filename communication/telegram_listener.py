@@ -235,6 +235,35 @@ class TelegramListener:
         except Exception as e:
             log_warning(f"Failed to save chat ID to database: {e}")
 
+    def _load_last_update_id(self) -> None:
+        """
+        Load the last update ID from database state.
+
+        This prevents re-processing old messages after a restart.
+        """
+        try:
+            from core.database import get_database
+            db = get_database()
+            saved_id = db.get_state("telegram_last_update_id")
+            if saved_id:
+                self._last_update_id = int(saved_id)
+                log_info(f"Loaded Telegram update offset from database: {self._last_update_id}")
+        except Exception as e:
+            log_warning(f"Failed to load update offset from database: {e}")
+
+    def _save_last_update_id(self) -> None:
+        """
+        Save the current update ID to database state.
+
+        This ensures we don't re-process messages after a restart.
+        """
+        try:
+            from core.database import get_database
+            db = get_database()
+            db.set_state("telegram_last_update_id", str(self._last_update_id))
+        except Exception as e:
+            log_warning(f"Failed to save update offset to database: {e}")
+
     def _poll_loop(self) -> None:
         """Background polling loop with persistent event loop."""
         # Create ONE persistent event loop for this thread
@@ -242,6 +271,9 @@ class TelegramListener:
         asyncio.set_event_loop(self._loop)
 
         log_info("Telegram listener started")
+
+        # Track the offset we had at start to know if we need to save
+        last_saved_offset = self._last_update_id
 
         try:
             while self._running:
@@ -262,6 +294,11 @@ class TelegramListener:
                                 self._callback(msg)
                             except Exception as e:
                                 log_error(f"Error in message callback: {e}")
+
+                    # Save offset if it changed (after processing all messages)
+                    if self._last_update_id != last_saved_offset:
+                        self._save_last_update_id()
+                        last_saved_offset = self._last_update_id
 
                 except Exception as e:
                     log_error(f"Error in poll loop: {e}")
@@ -315,8 +352,13 @@ class TelegramListener:
         self._paused = False
 
     def is_running(self) -> bool:
-        """Check if the listener is running."""
-        return self._running and self._thread is not None and self._thread.is_alive()
+        """Check if the listener is running and ready to handle requests."""
+        return (
+            self._running
+            and self._thread is not None
+            and self._thread.is_alive()
+            and self._loop is not None  # Ensure event loop is initialized
+        )
 
     def get_stats(self) -> dict:
         """
@@ -390,5 +432,8 @@ def init_telegram_listener(
         chat_id=effective_chat_id,
         poll_interval=poll_interval or TELEGRAM_POLL_INTERVAL,
     )
+
+    # Load persisted update offset to avoid re-processing old messages
+    _listener._load_last_update_id()
 
     return _listener

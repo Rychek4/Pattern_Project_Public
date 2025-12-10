@@ -206,8 +206,27 @@ class TelegramGateway:
         except Exception as e:
             log_warning(f"Could not use shared Telegram listener: {e}")
 
-        # Fallback: create a temporary event loop (listener not running)
-        return asyncio.run(self._send_async(message, parse_mode))
+        # Fallback: create a temporary event loop with proper cleanup
+        # This handles the case where the listener isn't running yet
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            result = loop.run_until_complete(self._send_async(message, parse_mode))
+
+            # Properly shut down the bot to avoid "Event loop is closed" errors
+            if self._bot:
+                try:
+                    loop.run_until_complete(self._bot.shutdown())
+                except Exception:
+                    pass  # Ignore shutdown errors
+                self._bot = None  # Clear so next send creates fresh instance
+
+            return result
+        finally:
+            try:
+                loop.close()
+            except Exception:
+                pass
 
     def _log_to_database(
         self,
