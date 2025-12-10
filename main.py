@@ -141,10 +141,16 @@ def initialize_system() -> bool:
 
         # Initialize Telegram gateway and listener if enabled
         if config.TELEGRAM_ENABLED:
-            from communication.telegram_gateway import init_telegram_gateway
-            from communication.telegram_listener import init_telegram_listener
-            init_telegram_gateway()
-            init_telegram_listener()
+            from communication.telegram_gateway import init_telegram_gateway, get_telegram_gateway
+            from communication.telegram_listener import init_telegram_listener, get_telegram_listener
+
+            gateway = init_telegram_gateway()
+            listener = init_telegram_listener()
+
+            # Connect listener to gateway so auto-detected chat_id propagates
+            def on_chat_id_detected(chat_id: str):
+                gateway.set_chat_id(chat_id)
+            listener.set_chat_id_callback(on_chat_id_detected)
 
     # Initialize agency (legacy - disabled)
     init_proactive_agent()
