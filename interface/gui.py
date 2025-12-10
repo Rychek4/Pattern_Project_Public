@@ -70,9 +70,14 @@ class ChatInputWidget(QTextEdit):
         self.setAcceptRichText(False)
         self.setPlaceholderText("Type a message...")
 
+        # Hide scroll bar for single-line mode, show only when needed for multi-line
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
         # Calculate single line height for auto-expand limits
+        # Account for: CSS padding (8px*2), border (1px*2), document margins (~8px)
         font_metrics = self.fontMetrics()
-        self._single_line_height = font_metrics.lineSpacing() + 16  # Add padding
+        self._single_line_height = font_metrics.lineSpacing() + 28  # Increased padding
         self._max_height = self._single_line_height * 5
 
         # Set initial size
@@ -86,7 +91,7 @@ class ChatInputWidget(QTextEdit):
         """Override to recalculate line height when font changes."""
         super().setFont(font)
         font_metrics = self.fontMetrics()
-        self._single_line_height = font_metrics.lineSpacing() + 16
+        self._single_line_height = font_metrics.lineSpacing() + 28  # Match __init__ padding
         self._max_height = self._single_line_height * 5
         self.setMinimumHeight(self._single_line_height)
         self._auto_resize()
@@ -94,7 +99,7 @@ class ChatInputWidget(QTextEdit):
     def _auto_resize(self):
         """Auto-resize based on content, up to max height."""
         doc = self.document()
-        doc_height = doc.size().height() + 16  # Add padding
+        doc_height = doc.size().height() + 28  # Match padding from __init__
 
         # Clamp between single line and max
         new_height = max(self._single_line_height, min(int(doc_height), self._max_height))
