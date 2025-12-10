@@ -355,6 +355,7 @@ class TelegramListener:
         """Check if the listener is running and ready to handle requests."""
         return (
             self._running
+            and not self._paused  # Must not be paused to process coroutines
             and self._thread is not None
             and self._thread.is_alive()
             and self._loop is not None  # Ensure event loop is initialized
