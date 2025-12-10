@@ -144,6 +144,7 @@ class ChatWindow(QMainWindow):
         self._temporal_tracker = None
         self._system_pulse_timer = None
         self._reminder_scheduler = None
+        self._telegram_listener = None
 
         self._setup_ui()
         self._setup_timers()
@@ -338,7 +339,8 @@ class ChatWindow(QMainWindow):
         prompt_builder,
         temporal_tracker,
         system_pulse_timer=None,
-        reminder_scheduler=None
+        reminder_scheduler=None,
+        telegram_listener=None
     ):
         """Set backend references for communication."""
         self._conversation_mgr = conversation_mgr
@@ -347,10 +349,15 @@ class ChatWindow(QMainWindow):
         self._temporal_tracker = temporal_tracker
         self._system_pulse_timer = system_pulse_timer
         self._reminder_scheduler = reminder_scheduler
+        self._telegram_listener = telegram_listener
 
         # Set up pulse callback if timer is provided
         if self._system_pulse_timer:
             self._system_pulse_timer.set_callback(self._on_pulse_fired)
+
+        # Set up Telegram listener callback if provided
+        if self._telegram_listener:
+            self._telegram_listener.set_callback(self._on_telegram_message)
 
         # Set up reminder scheduler callback if provided
         if self._reminder_scheduler:
@@ -868,6 +875,135 @@ class ChatWindow(QMainWindow):
         if self._system_pulse_timer:
             self._system_pulse_timer.resume()
 
+        # Resume the Telegram listener
+        if self._telegram_listener:
+            self._telegram_listener.resume()
+
+    def _on_telegram_message(self, message):
+        """Called when a Telegram message is received (from background thread)."""
+        log_info(f"Telegram message received: {message.text[:50]}...", prefix="📱")
+
+        # Don't process if already handling something
+        if self._is_processing:
+            log_warning("Skipping Telegram message - already processing")
+            return
+
+        # Process in background thread
+        thread = threading.Thread(
+            target=self._process_telegram_message,
+            args=(message,),
+            daemon=True
+        )
+        thread.start()
+
+    def _process_telegram_message(self, message):
+        """Process an inbound Telegram message and generate AI response."""
+        import time
+        from llm.router import TaskType
+        from agency.commands import get_command_processor
+        import config
+
+        self._is_processing = True
+        self.signals.update_status.emit("Processing Telegram message...")
+
+        try:
+            # Pause timers during processing
+            if self._system_pulse_timer:
+                self._system_pulse_timer.pause()
+            if self._telegram_listener:
+                self._telegram_listener.pause()
+
+            # Store the message as user input
+            from_info = f" from {message.from_user}" if message.from_user else ""
+            self._conversation_mgr.add_turn(
+                role="user",
+                content=message.text,
+                input_type="telegram"
+            )
+
+            # Display in GUI
+            timestamp = self._get_timestamp()
+            display_text = f"📱 Telegram{from_info}: {message.text}"
+            self.signals.new_message.emit("user", display_text, timestamp)
+
+            # Build prompt
+            assembled = self._prompt_builder.build(
+                user_input=message.text,
+                system_prompt=""
+            )
+
+            # Get conversation history
+            history = self._conversation_mgr.get_recent_history(limit=30)
+
+            # Get response from LLM
+            self.signals.update_status.emit("Responding to Telegram...")
+            response = self._llm_router.chat(
+                messages=history,
+                system_prompt=assembled.full_system_prompt,
+                task_type=TaskType.CONVERSATION,
+                temperature=0.7
+            )
+
+            if response.success:
+                # Process response for AI commands
+                processor = get_command_processor()
+                processed = processor.process(response.text)
+                final_text = processed.display_text
+
+                # Handle continuation if needed (simplified - single pass)
+                if processed.needs_continuation:
+                    continuation_history = history.copy()
+                    continuation_history.append({"role": "assistant", "content": response.text})
+                    continuation_history.append({"role": "user", "content": processed.continuation_prompt})
+
+                    continuation = self._llm_router.chat(
+                        messages=continuation_history,
+                        system_prompt=assembled.full_system_prompt,
+                        task_type=TaskType.CONVERSATION,
+                        temperature=0.7
+                    )
+
+                    if continuation.success:
+                        processed = processor.process(continuation.text)
+                        final_text = processed.display_text
+
+                # Store response
+                self._conversation_mgr.add_turn(
+                    role="assistant",
+                    content=final_text,
+                    input_type="text"
+                )
+
+                # Emit to GUI
+                timestamp = self._get_timestamp()
+                self.signals.new_message.emit("assistant", f"📱 {final_text}", timestamp)
+
+                # Send response back to Telegram
+                if config.TELEGRAM_ENABLED:
+                    try:
+                        from communication.telegram_gateway import get_telegram_gateway
+                        gateway = get_telegram_gateway()
+                        if gateway.is_available():
+                            gateway.send(final_text)
+                            log_info("Telegram response sent successfully", prefix="📱")
+                        else:
+                            log_warning("Telegram gateway not available for response")
+                    except Exception as e:
+                        log_warning(f"Failed to send response to Telegram: {e}")
+            else:
+                self.signals.update_status.emit(f"Error: {response.error}")
+                log_error(f"Telegram response error: {response.error}")
+
+        except Exception as e:
+            error_msg = f"Telegram message processing error: {str(e)}"
+            tb = traceback.format_exc()
+            log_error(f"Exception in _process_telegram_message: {error_msg}")
+            log_error(f"Traceback:\n{tb}")
+            self.signals.update_status.emit(f"Error: {str(e)}")
+
+        finally:
+            self.signals.response_complete.emit()
+
     def _on_pulse_fired(self):
         """Called when the system pulse timer fires."""
         log_info("PULSE DEBUG: _on_pulse_fired() callback triggered", prefix="🔍")
@@ -1311,6 +1447,12 @@ def run_gui():
     from agency.system_pulse import init_system_pulse_timer, get_system_pulse_timer
     from agency.intentions import init_reminder_scheduler, get_reminder_scheduler
 
+    # Import Telegram modules if enabled
+    telegram_listener = None
+    if config.TELEGRAM_ENABLED:
+        from communication.telegram_gateway import init_telegram_gateway, get_telegram_gateway
+        from communication.telegram_listener import init_telegram_listener, get_telegram_listener
+
     # Initialize remaining components
     print("Initializing components...")
     init_lock_manager()
@@ -1324,6 +1466,21 @@ def run_gui():
     init_memory_extractor()
     init_prompt_builder()
     init_system_pulse_timer()
+
+    # Initialize Telegram gateway and listener if enabled
+    if config.TELEGRAM_ENABLED:
+        gateway = init_telegram_gateway()
+        telegram_listener = init_telegram_listener()
+
+        # Connect listener to gateway so auto-detected chat_id propagates
+        def on_chat_id_detected(chat_id: str):
+            gateway.set_chat_id(chat_id)
+            log_info(f"Telegram chat_id detected and set: {chat_id}", prefix="📱")
+        telegram_listener.set_chat_id_callback(on_chat_id_detected)
+
+        # Start the listener
+        telegram_listener.start()
+        log_info("Telegram listener started", prefix="📱")
 
     # Start system pulse timer if enabled
     pulse_timer = None
@@ -1344,7 +1501,8 @@ def run_gui():
         prompt_builder=get_prompt_builder(),
         temporal_tracker=get_temporal_tracker(),
         system_pulse_timer=pulse_timer,
-        reminder_scheduler=reminder_scheduler
+        reminder_scheduler=reminder_scheduler,
+        telegram_listener=telegram_listener
     )
 
     window.show()
@@ -1372,6 +1530,11 @@ def run_gui():
 
     # Stop reminder scheduler
     get_reminder_scheduler().stop()
+
+    # Stop Telegram listener if enabled
+    if config.TELEGRAM_ENABLED and telegram_listener:
+        telegram_listener.stop()
+        log_info("Telegram listener stopped", prefix="📱")
 
     return exit_code
 
