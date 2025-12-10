@@ -69,6 +69,7 @@ class TelegramListener:
         self._running = False
         self._paused = False
         self._thread: Optional[threading.Thread] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._callback: Optional[Callable[[InboundMessage], None]] = None
         self._chat_id_callback: Optional[Callable[[str], None]] = None
         self._last_update_id: int = 0
@@ -79,6 +80,48 @@ class TelegramListener:
         if self._bot is None:
             self._bot = Bot(token=self.bot_token)
         return self._bot
+
+    def get_bot(self) -> Bot:
+        """
+        Get the shared Bot instance.
+
+        Returns:
+            The Bot instance used by this listener
+        """
+        return self._get_bot()
+
+    def get_event_loop(self) -> Optional[asyncio.AbstractEventLoop]:
+        """
+        Get the listener's event loop.
+
+        Returns:
+            The event loop if running, None otherwise
+        """
+        return self._loop if self._running else None
+
+    def run_coroutine(self, coro, timeout: float = 30.0):
+        """
+        Run a coroutine in the listener's event loop (thread-safe).
+
+        This allows other threads (e.g., the main thread) to execute
+        async operations using this listener's event loop and Bot.
+
+        Args:
+            coro: The coroutine to run
+            timeout: Maximum seconds to wait for result
+
+        Returns:
+            The coroutine's result
+
+        Raises:
+            RuntimeError: If the listener is not running
+            TimeoutError: If the operation times out
+        """
+        if not self._loop or not self._running:
+            raise RuntimeError("Telegram listener is not running")
+
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        return future.result(timeout=timeout)
 
     def set_callback(self, callback: Callable[[InboundMessage], None]) -> None:
         """
@@ -193,33 +236,52 @@ class TelegramListener:
             log_warning(f"Failed to save chat ID to database: {e}")
 
     def _poll_loop(self) -> None:
-        """Background polling loop."""
+        """Background polling loop with persistent event loop."""
+        # Create ONE persistent event loop for this thread
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
+
         log_info("Telegram listener started")
 
-        while self._running:
-            if self._paused:
-                time.sleep(0.5)
-                continue
+        try:
+            while self._running:
+                if self._paused:
+                    time.sleep(0.5)
+                    continue
 
+                try:
+                    # Use the persistent loop instead of asyncio.run()
+                    messages = self._loop.run_until_complete(self._poll_once())
+
+                    # Process each message
+                    for msg in messages:
+                        log_info(f"Received Telegram message from {msg.from_user}: {msg.text[:50]}...")
+
+                        if self._callback:
+                            try:
+                                self._callback(msg)
+                            except Exception as e:
+                                log_error(f"Error in message callback: {e}")
+
+                except Exception as e:
+                    log_error(f"Error in poll loop: {e}")
+
+                # Wait before next poll
+                time.sleep(self.poll_interval)
+        finally:
+            # Clean up the Bot's HTTP session
+            if self._bot:
+                try:
+                    self._loop.run_until_complete(self._bot.shutdown())
+                except Exception as e:
+                    log_warning(f"Error shutting down Telegram bot: {e}")
+
+            # Close the event loop
             try:
-                # Run async poll in this thread's event loop
-                messages = asyncio.run(self._poll_once())
-
-                # Process each message
-                for msg in messages:
-                    log_info(f"Received Telegram message from {msg.from_user}: {msg.text[:50]}...")
-
-                    if self._callback:
-                        try:
-                            self._callback(msg)
-                        except Exception as e:
-                            log_error(f"Error in message callback: {e}")
-
-            except Exception as e:
-                log_error(f"Error in poll loop: {e}")
-
-            # Wait before next poll
-            time.sleep(self.poll_interval)
+                self._loop.close()
+            except Exception:
+                pass
+            self._loop = None
 
         log_info("Telegram listener stopped")
 
