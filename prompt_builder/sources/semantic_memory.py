@@ -73,6 +73,7 @@ class SemanticMemorySource(ContextSource):
                     "content": r.memory.content,
                     "score": r.combined_score,
                     "semantic_score": r.semantic_score,
+                    "importance_score": r.importance_score,
                     "freshness_score": r.freshness_score,
                     "memory_type": r.memory.memory_type,
                     "importance": r.memory.importance

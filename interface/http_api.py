@@ -125,6 +125,7 @@ def create_app() -> Flask:
                         "type": r.memory.memory_type,
                         "importance": r.memory.importance,
                         "semantic_score": r.semantic_score,
+                        "importance_score": r.importance_score,
                         "freshness_score": r.freshness_score,
                         "combined_score": r.combined_score
                     }

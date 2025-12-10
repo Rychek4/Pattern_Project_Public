@@ -294,13 +294,15 @@ class MemoryExtractor:
             MEMORY_MAX_PER_EXTRACTION,
             MEMORY_SKIP_MINOR_TOPICS,
             MEMORY_LARGE_TOPIC_THRESHOLD,
-            MEMORY_SMALL_BATCH_THRESHOLD
+            MEMORY_SMALL_BATCH_THRESHOLD,
+            MEMORY_IMPORTANCE_FLOOR
         )
         self.min_turns_per_topic = MEMORY_MIN_TURNS_PER_TOPIC
         self.max_memories_per_extraction = MEMORY_MAX_PER_EXTRACTION
         self.skip_minor_topics = MEMORY_SKIP_MINOR_TOPICS
         self.large_topic_threshold = MEMORY_LARGE_TOPIC_THRESHOLD
         self.small_batch_threshold = MEMORY_SMALL_BATCH_THRESHOLD
+        self.importance_floor = MEMORY_IMPORTANCE_FLOOR
 
     # =========================================================================
     # THRESHOLD-BASED EXTRACTION TRIGGER
@@ -459,6 +461,15 @@ class MemoryExtractor:
                     synthesized = self._synthesize_topic_memory(topic, topic_turns)
 
                     if synthesized:
+                        # Check importance floor - skip trivial memories
+                        if synthesized.importance < self.importance_floor:
+                            log_info(
+                                f"Skipping low-importance memory for topic '{topic.description[:40]}...' "
+                                f"(importance: {synthesized.importance:.2f} < floor: {self.importance_floor})",
+                                prefix="⏭️"
+                            )
+                            continue
+
                         # Determine source timestamp from the topic's turns
                         source_time = topic_turns[-1].created_at if topic_turns else datetime.now()
 
@@ -1074,7 +1085,8 @@ class MemoryExtractor:
             "min_turns_per_topic": self.min_turns_per_topic,
             "max_memories_per_extraction": self.max_memories_per_extraction,
             "skip_minor_topics": self.skip_minor_topics,
-            "small_batch_threshold": self.small_batch_threshold
+            "small_batch_threshold": self.small_batch_threshold,
+            "importance_floor": self.importance_floor
         }
 
 

@@ -67,15 +67,26 @@ MEMORY_FRESHNESS_HALF_LIFE_DAYS = 14  # Decay rate for freshness scoring (more r
 # Topic-Based Extraction Settings
 # These control how conversations are clustered into topics before memory creation
 MEMORY_MIN_TURNS_PER_TOPIC = 1  # Allow single-turn topics (importance isn't determined by length)
-MEMORY_MAX_PER_EXTRACTION = 5  # Hard cap on memories created per extraction run
+MEMORY_MAX_PER_EXTRACTION = 3  # Hard cap on memories created per extraction run
 MEMORY_SKIP_MINOR_TOPICS = True  # Skip topics marked as "minor" significance
 MEMORY_LARGE_TOPIC_THRESHOLD = 15  # Topics with more turns may get 2 memories
-MEMORY_SMALL_BATCH_THRESHOLD = 15  # Below this turn count, preserve all topics (don't skip minor)
+MEMORY_SMALL_BATCH_THRESHOLD = 10  # Below this turn count, preserve all topics (don't skip minor)
 
-# Scoring weights (must sum to 1.0)
-MEMORY_SEMANTIC_WEIGHT = 0.50  # Semantic similarity to query
-MEMORY_FRESHNESS_WEIGHT = 0.35  # Recency of memory source
-MEMORY_ACCESS_WEIGHT = 0.15  # How recently memory was recalled
+# Importance floor for memory storage
+# Memories rated below this threshold are not stored (filters trivial content)
+# Scale: 0.0-1.0 (maps from 0-10 LLM rating)
+# - 0.0-0.1: Trivial or forgettable
+# - 0.2-0.4: Minor details, casual observations
+# - 0.5-0.7: Useful information, moderate preferences
+# - 0.8-1.0: Major decisions, significant events
+MEMORY_IMPORTANCE_FLOOR = 0.3  # Don't store memories below this importance
+
+# Scoring weights for memory retrieval (must sum to 1.0)
+# Prioritizes semantic relevance and importance over recency
+MEMORY_SEMANTIC_WEIGHT = 0.55  # Semantic similarity to query (primary signal)
+MEMORY_IMPORTANCE_WEIGHT = 0.25  # Memory importance score (value-aware retrieval)
+MEMORY_FRESHNESS_WEIGHT = 0.12  # Recency of memory source (tie-breaker)
+MEMORY_ACCESS_WEIGHT = 0.08  # How recently memory was recalled (minimal bias)
 
 # =============================================================================
 # DECAY CATEGORY CONFIGURATION
