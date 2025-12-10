@@ -276,6 +276,6 @@ TELEGRAM_MAX_PER_HOUR = 30   # Maximum Telegram messages per hour
 #
 # When enabled, Claude can autonomously search the web for current information.
 # Results include citations (title, URL, cited_text) automatically.
-WEB_SEARCH_ENABLED = False                      # Master toggle for web search
+WEB_SEARCH_ENABLED = True                       # Master toggle for web search
 WEB_SEARCH_MAX_USES_PER_REQUEST = 3             # Max searches Claude can do per API call
 WEB_SEARCH_TOTAL_ALLOWED_PER_DAY = 30           # Daily budget (resets at midnight)
