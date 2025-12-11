@@ -60,8 +60,26 @@ EMBEDDING_DIMENSIONS = 384
 # =============================================================================
 # MEMORY CONFIGURATION
 # =============================================================================
-MEMORY_EXTRACTION_THRESHOLD = 10  # Unprocessed turns before triggering extraction
 MEMORY_FRESHNESS_HALF_LIFE_DAYS = 14  # Decay rate for freshness scoring (more recency bias)
+
+# -----------------------------------------------------------------------------
+# Context Window & Extraction (Windowed System)
+# -----------------------------------------------------------------------------
+# The context window holds recent conversation turns for the LLM prompt.
+# When the window exceeds its limit, oldest turns are extracted to memory
+# and removed from the active context.
+#
+# This replaces the old threshold-based extraction system where context
+# and extraction operated independently, leading to duplicate memories.
+#
+# Flow: Context Window (30) → Overflow (35) → Extract oldest 5 → Back to 30
+# The context window spans sessions for AI continuity.
+CONTEXT_WINDOW_SIZE = 30           # Target turns to keep in active context
+CONTEXT_OVERFLOW_TRIGGER = 35      # Extract when context reaches this size
+CONTEXT_EXTRACTION_BATCH = 5       # Turns to extract per overflow (35 - 30 = 5)
+
+# DEPRECATED: Old threshold-based extraction (replaced by windowed system)
+# MEMORY_EXTRACTION_THRESHOLD = 10  # No longer used - see CONTEXT_OVERFLOW_TRIGGER
 
 # -----------------------------------------------------------------------------
 # Dual-Track Retrieval Settings
@@ -77,6 +95,17 @@ MEMORY_RELEVANCE_FLOOR = 0.35       # Minimum combined score to include (filters
 
 # Legacy setting (used for tool-based search without category filter)
 MEMORY_MAX_PER_QUERY = 10  # Updated from 3 to accommodate both categories
+
+# -----------------------------------------------------------------------------
+# Retrieval Deduplication
+# -----------------------------------------------------------------------------
+# When retrieving memories, near-identical results are collapsed to prevent
+# the same fact from consuming multiple retrieval slots.
+#
+# Example: If "Brian is 45" appears 3 times due to being mentioned in
+# different conversations, only the highest-scored one is returned.
+MEMORY_DEDUP_ENABLED = True
+MEMORY_DEDUP_THRESHOLD = 0.85      # Embedding similarity threshold for "duplicate"
 
 # -----------------------------------------------------------------------------
 # Dual-Track Extraction Settings

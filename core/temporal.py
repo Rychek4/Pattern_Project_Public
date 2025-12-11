@@ -80,9 +80,13 @@ class TemporalTracker:
         """
         End the current session.
 
-        Triggers a final memory extraction before ending to ensure
-        all conversation turns are processed, regardless of which
-        interface (CLI, HTTP, GUI) ends the session.
+        NOTE (Windowed Extraction System):
+            Session end NO LONGER triggers memory extraction.
+            The context window persists across sessions for AI continuity.
+            Extraction only happens when the context window overflows.
+
+            This ensures the AI always has ~30 turns of recent context,
+            even at the start of a new session.
 
         Returns:
             Session summary dict, or None if no active session
@@ -91,18 +95,10 @@ class TemporalTracker:
             if self._current_session_id is None:
                 return None
 
-            # Trigger final memory extraction before ending session
-            # This ensures all remaining unprocessed turns are captured
-            try:
-                # Import here to avoid circular imports
-                from memory.extractor import get_memory_extractor
-                extractor = get_memory_extractor()
-                extracted_count = extractor.extract_memories(force=True)
-                if extracted_count > 0:
-                    log_info(f"Final extraction: {extracted_count} memories saved", prefix="🧠")
-            except Exception as e:
-                # Log but don't fail session end - extraction is best-effort
-                log_info(f"Final extraction skipped: {e}", prefix="⚠️")
+            # NOTE: We intentionally do NOT extract memories at session end.
+            # The windowed extraction system handles extraction only when
+            # context overflows, preserving continuity across sessions.
+            # See memory/extractor.py for the windowed extraction architecture.
 
             db = get_database()
             now = datetime.now()

@@ -20,8 +20,11 @@ from config import (
     MEMORY_MAX_PER_QUERY,
     MEMORY_MAX_EPISODIC_PER_QUERY,
     MEMORY_MAX_FACTUAL_PER_QUERY,
-    MEMORY_RELEVANCE_FLOOR
+    MEMORY_RELEVANCE_FLOOR,
+    MEMORY_DEDUP_ENABLED,
+    MEMORY_DEDUP_THRESHOLD
 )
+from core.embeddings import cosine_similarity
 
 
 class SemanticMemorySource(ContextSource):
@@ -41,7 +44,9 @@ class SemanticMemorySource(ContextSource):
         max_episodic: int = MEMORY_MAX_EPISODIC_PER_QUERY,
         max_factual: int = MEMORY_MAX_FACTUAL_PER_QUERY,
         min_score: float = MEMORY_RELEVANCE_FLOOR,
-        promotion_threshold: float = 0.85
+        promotion_threshold: float = 0.85,
+        dedup_enabled: bool = MEMORY_DEDUP_ENABLED,
+        dedup_threshold: float = MEMORY_DEDUP_THRESHOLD
     ):
         """
         Initialize the semantic memory source.
@@ -51,11 +56,15 @@ class SemanticMemorySource(ContextSource):
             max_factual: Maximum factual memories to include
             min_score: Minimum combined score to include (relevance floor)
             promotion_threshold: Score threshold for core memory promotion
+            dedup_enabled: Whether to deduplicate near-identical results
+            dedup_threshold: Embedding similarity threshold for "duplicate" (0.85 = 85% similar)
         """
         self.max_episodic = max_episodic
         self.max_factual = max_factual
         self.min_score = min_score
         self.promotion_threshold = promotion_threshold
+        self.dedup_enabled = dedup_enabled
+        self.dedup_threshold = dedup_threshold
         # Legacy compatibility
         self.max_memories = MEMORY_MAX_PER_QUERY
 
@@ -97,6 +106,22 @@ class SemanticMemorySource(ContextSource):
         )
 
         all_results = episodic_results + factual_results
+
+        # Deduplicate near-identical memories to prevent redundant context
+        # This handles cases where the same fact was extracted from multiple conversations
+        if self.dedup_enabled and all_results:
+            original_count = len(all_results)
+            all_results = self._deduplicate_results(all_results)
+            # Also deduplicate the separate lists for proper formatting
+            episodic_results = [r for r in all_results if r.memory.memory_category == "episodic"]
+            factual_results = [r for r in all_results if r.memory.memory_category == "factual"]
+            if len(all_results) < original_count:
+                from core.logger import log_info
+                log_info(
+                    f"Deduplicated {original_count} → {len(all_results)} memories "
+                    f"(threshold: {self.dedup_threshold})",
+                    prefix="🔄"
+                )
 
         # Emit memory recall to dev window
         if config.DEV_MODE_ENABLED and all_results:
@@ -192,6 +217,55 @@ class SemanticMemorySource(ContextSource):
             memory_type=memory_type,
             min_score=self.min_score
         )
+
+    def _deduplicate_results(
+        self,
+        results: List[MemorySearchResult]
+    ) -> List[MemorySearchResult]:
+        """
+        Collapse near-identical memories to prevent redundant context.
+
+        When the same fact is extracted from multiple conversations (e.g., "Brian is 45"
+        mentioned in different sessions), this method collapses them to keep only the
+        highest-scored version.
+
+        Algorithm:
+            1. Sort by combined_score (highest first)
+            2. For each result, check embedding similarity against kept results
+            3. If similar to existing (>= threshold), skip it (it's a duplicate)
+            4. Otherwise, keep it
+
+        Args:
+            results: List of MemorySearchResult from search
+
+        Returns:
+            Deduplicated list with near-identical memories collapsed
+
+        Performance: O(n²) but n is small (typically 10-15 results)
+        """
+        if not results:
+            return results
+
+        # Sort by score so we keep the best version of duplicates
+        sorted_results = sorted(results, key=lambda r: r.combined_score, reverse=True)
+
+        kept: List[MemorySearchResult] = []
+        for result in sorted_results:
+            is_duplicate = False
+            for kept_result in kept:
+                # Compare embeddings to detect semantic duplicates
+                similarity = cosine_similarity(
+                    result.memory.embedding,
+                    kept_result.memory.embedding
+                )
+                if similarity >= self.dedup_threshold:
+                    is_duplicate = True
+                    break
+
+            if not is_duplicate:
+                kept.append(result)
+
+        return kept
 
     def _get_type_indicator(self, memory_type: Optional[str]) -> str:
         """Get emoji indicator for memory type."""

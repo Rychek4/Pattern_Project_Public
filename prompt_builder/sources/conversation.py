@@ -1,6 +1,22 @@
 """
 Pattern Project - Conversation Source
 Recent conversation history with semantic timestamps
+
+ARCHITECTURE (Windowed Extraction System):
+    The context window is tightly coupled with memory extraction.
+    Turns flow: Context Window → Extraction → Memory Store
+
+    When context exceeds CONTEXT_OVERFLOW_TRIGGER, oldest turns are
+    extracted to memory and marked as processed, automatically removing
+    them from future context loads.
+
+    Key behaviors:
+    - Context spans across sessions (for AI continuity)
+    - Processed turns are excluded from context
+    - Context window never drops below CONTEXT_WINDOW_SIZE (except at start)
+
+    This replaces the old system where context and extraction were
+    independent, which caused duplicate memory extraction.
 """
 
 from typing import Optional, Dict, Any, List
@@ -8,30 +24,34 @@ from typing import Optional, Dict, Any, List
 from prompt_builder.sources.base import ContextSource, ContextBlock, SourcePriority
 from memory.conversation import get_conversation_manager
 from core.temporal import format_fuzzy_relative_time
-
-
-# 15 exchanges = 30 turns (user + assistant pairs)
-DEFAULT_EXCHANGE_COUNT = 15
+from config import CONTEXT_WINDOW_SIZE
 
 
 class ConversationSource(ContextSource):
     """
     Provides recent conversation history for prompt context.
 
-    Includes the last N exchanges (user + assistant pairs) to maintain
-    coherence within the current session without growing infinitely.
+    ARCHITECTURE (Windowed Extraction):
+        Uses get_context_window() which:
+        - Spans across sessions (NOT session-scoped) for AI continuity
+        - Excludes processed turns (coordinated with extraction)
+        - Returns most recent unprocessed turns up to window size
+
+        This ensures the AI always has ~30 turns of context, and those
+        turns are only extracted to memory when they overflow the window.
     """
 
-    def __init__(self, exchange_count: int = DEFAULT_EXCHANGE_COUNT):
+    def __init__(self, window_size: int = CONTEXT_WINDOW_SIZE):
         """
         Initialize conversation source.
 
         Args:
-            exchange_count: Number of exchanges to include (user + reply pairs)
+            window_size: Number of turns to include in context window
         """
-        self.exchange_count = exchange_count
-        # Each exchange = 2 turns (user + assistant)
-        self.turn_limit = exchange_count * 2
+        self.window_size = window_size
+        # Legacy compatibility
+        self.exchange_count = window_size // 2
+        self.turn_limit = window_size
 
     @property
     def source_name(self) -> str:
@@ -46,11 +66,18 @@ class ConversationSource(ContextSource):
         user_input: str,
         session_context: Dict[str, Any]
     ) -> Optional[ContextBlock]:
-        """Get recent conversation history with semantic timestamps."""
+        """
+        Get recent conversation history with semantic timestamps.
+
+        Uses the windowed context system:
+        - Loads unprocessed turns across all sessions (for continuity)
+        - Processed turns are automatically excluded
+        - Coordinates with extraction system to prevent duplicates
+        """
         conversation_mgr = get_conversation_manager()
 
-        # Get full turn objects with timestamps
-        turns = conversation_mgr.get_session_history(limit=self.turn_limit)
+        # Get context window (excludes processed turns, spans sessions)
+        turns = conversation_mgr.get_context_window(limit=self.window_size)
 
         # Filter to user/assistant only
         turns = [t for t in turns if t.role in ("user", "assistant")]
@@ -82,7 +109,7 @@ class ConversationSource(ContextSource):
                 "turn_count": len(turns),
                 "user_turns": user_turns,
                 "assistant_turns": assistant_turns,
-                "exchange_limit": self.exchange_count
+                "window_size": self.window_size
             }
         )
 
@@ -90,16 +117,21 @@ class ConversationSource(ContextSource):
         """
         Get raw conversation history for LLM API calls.
 
+        Uses the windowed context system for consistency with get_context().
+
         Args:
-            limit: Max turns to return (uses default if None)
+            limit: Max turns to return (uses window_size if None)
 
         Returns:
             List of {"role": ..., "content": ...} dicts
         """
         conversation_mgr = get_conversation_manager()
-        return conversation_mgr.get_recent_history(
-            limit=limit or self.turn_limit
-        )
+        turns = conversation_mgr.get_context_window(limit=limit or self.window_size)
+        return [
+            {"role": turn.role, "content": turn.content}
+            for turn in turns
+            if turn.role in ("user", "assistant")
+        ]
 
 
 # Global instance
