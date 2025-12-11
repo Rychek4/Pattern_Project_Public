@@ -124,6 +124,19 @@ def initialize_system() -> bool:
     # Initialize prompt builder (must come after memory/vector store)
     init_prompt_builder()
 
+    # Initialize agency economy and bootstrap goal if enabled
+    if config.AGENCY_ECONOMY_ENABLED:
+        from agency.economy import init_economy_manager, get_agency_engine
+        from agency.goals import init_goal_manager
+
+        init_goal_manager()
+        init_economy_manager()
+
+        # Create bootstrap goal if this is a fresh install
+        engine = get_agency_engine()
+        if engine.run_bootstrap():
+            log_subsection("Bootstrap goal created - AI goal system initialized")
+
     # Initialize communication gateways if enabled
     if config.EMAIL_GATEWAY_ENABLED or config.TELEGRAM_ENABLED:
         from communication.rate_limiter import init_rate_limiter

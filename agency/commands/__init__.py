@@ -97,6 +97,22 @@ def _register_default_handlers(processor: CommandProcessor) -> None:
         from agency.commands.handlers.email_handler import SendEmailHandler
         processor.register(SendEmailHandler())
 
+    # Register goal and economy handlers
+    if config.AGENCY_ECONOMY_ENABLED:
+        from agency.commands.handlers.goal_handler import (
+            SetGoalHandler,
+            CompleteGoalHandler,
+            ActivateGoalHandler,
+            SelectTopGoalHandler,
+        )
+        from agency.commands.handlers.economy_handler import SetTempoHandler
+
+        processor.register(SetGoalHandler())
+        processor.register(CompleteGoalHandler())
+        processor.register(ActivateGoalHandler())
+        processor.register(SelectTopGoalHandler())
+        processor.register(SetTempoHandler())
+
 
 __all__ = [
     # Processor

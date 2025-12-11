@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from core.logger import log_info, log_success, log_error, log_config, log_section
 
 # Schema version for migrations
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 # SQL schema definition
 SCHEMA_SQL = """
@@ -149,6 +149,66 @@ CREATE TABLE IF NOT EXISTS active_thoughts (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Goal Tree: Hierarchical structure for AI objectives
+-- The AI maintains a tree of goals: top_goal -> sub_goals -> actions
+-- Selection uses "easiest next" heuristic within the active branch
+CREATE TABLE IF NOT EXISTS goals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    parent_id INTEGER REFERENCES goals(id),  -- NULL for top goals
+
+    -- Goal classification
+    level TEXT NOT NULL CHECK (level IN ('top_goal', 'sub_goal', 'action')),
+
+    -- Content
+    description TEXT NOT NULL,
+
+    -- Status and progress
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'active', 'completed', 'abandoned')),
+
+    -- Self-assessment (AI's reflection on completion)
+    completion_reflection TEXT,
+
+    -- Difficulty estimate for "easiest next" selection (1-10, lower = easier)
+    difficulty_estimate INTEGER DEFAULT 5 CHECK (difficulty_estimate >= 1 AND difficulty_estimate <= 10),
+
+    -- Timestamps
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    activated_at TIMESTAMP,
+    completed_at TIMESTAMP,
+
+    -- Order within siblings (for consistent display)
+    sibling_order INTEGER DEFAULT 0
+);
+
+-- Agency Economy: Persistent state for the economic system
+-- Points accumulate over time and are spent on context hijacking and tempo
+CREATE TABLE IF NOT EXISTS agency_economy (
+    id INTEGER PRIMARY KEY DEFAULT 1,  -- Singleton row
+
+    -- Current points balance
+    agency_points REAL DEFAULT 0.0,
+
+    -- Accumulation tracking
+    last_income_at TIMESTAMP,
+
+    -- Tempo market state
+    next_scheduled_wakeup TIMESTAMP,
+    scheduled_wakeup_type TEXT CHECK (scheduled_wakeup_type IN ('standard', 'focus', 'appointment')),
+
+    -- Statistics
+    total_points_earned REAL DEFAULT 0.0,
+    total_points_spent REAL DEFAULT 0.0,
+    total_topic_hijacks INTEGER DEFAULT 0,
+    total_tempo_purchases INTEGER DEFAULT 0,
+
+    -- Last action tracking
+    last_action_at TIMESTAMP,
+    last_auction_winner TEXT,  -- 'ai' or 'user'
+
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Indexes for efficient queries
 CREATE INDEX IF NOT EXISTS idx_conversations_session ON conversations(session_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_unprocessed ON conversations(processed_for_memory) WHERE processed_for_memory = FALSE;
@@ -165,6 +225,10 @@ CREATE INDEX IF NOT EXISTS idx_intentions_type ON intentions(type);
 CREATE INDEX IF NOT EXISTS idx_communication_log_type ON communication_log(type);
 CREATE INDEX IF NOT EXISTS idx_communication_log_created ON communication_log(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_active_thoughts_rank ON active_thoughts(rank);
+CREATE INDEX IF NOT EXISTS idx_goals_parent ON goals(parent_id);
+CREATE INDEX IF NOT EXISTS idx_goals_status ON goals(status);
+CREATE INDEX IF NOT EXISTS idx_goals_level ON goals(level);
+CREATE INDEX IF NOT EXISTS idx_goals_active ON goals(status) WHERE status = 'active';
 """
 
 # Migration SQL for v1 -> v2
@@ -508,6 +572,79 @@ CREATE TABLE IF NOT EXISTS active_thoughts (
 CREATE INDEX IF NOT EXISTS idx_active_thoughts_rank ON active_thoughts(rank);
 """
 
+# Migration SQL for v11 -> v12 (add goals and agency_economy tables)
+MIGRATION_V12_SQL = """
+-- Goal Tree: Hierarchical structure for AI objectives
+-- The AI maintains a tree of goals: top_goal -> sub_goals -> actions
+-- Selection uses "easiest next" heuristic within the active branch
+CREATE TABLE IF NOT EXISTS goals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    parent_id INTEGER REFERENCES goals(id),
+
+    -- Goal classification
+    level TEXT NOT NULL CHECK (level IN ('top_goal', 'sub_goal', 'action')),
+
+    -- Content
+    description TEXT NOT NULL,
+
+    -- Status and progress
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'active', 'completed', 'abandoned')),
+
+    -- Self-assessment (AI's reflection on completion)
+    completion_reflection TEXT,
+
+    -- Difficulty estimate for "easiest next" selection (1-10, lower = easier)
+    difficulty_estimate INTEGER DEFAULT 5 CHECK (difficulty_estimate >= 1 AND difficulty_estimate <= 10),
+
+    -- Timestamps
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    activated_at TIMESTAMP,
+    completed_at TIMESTAMP,
+
+    -- Order within siblings (for consistent display)
+    sibling_order INTEGER DEFAULT 0
+);
+
+-- Agency Economy: Persistent state for the economic system
+-- Points accumulate over time and are spent on context hijacking and tempo
+CREATE TABLE IF NOT EXISTS agency_economy (
+    id INTEGER PRIMARY KEY DEFAULT 1,
+
+    -- Current points balance
+    agency_points REAL DEFAULT 0.0,
+
+    -- Accumulation tracking
+    last_income_at TIMESTAMP,
+
+    -- Tempo market state
+    next_scheduled_wakeup TIMESTAMP,
+    scheduled_wakeup_type TEXT CHECK (scheduled_wakeup_type IN ('standard', 'focus', 'appointment')),
+
+    -- Statistics
+    total_points_earned REAL DEFAULT 0.0,
+    total_points_spent REAL DEFAULT 0.0,
+    total_topic_hijacks INTEGER DEFAULT 0,
+    total_tempo_purchases INTEGER DEFAULT 0,
+
+    -- Last action tracking
+    last_action_at TIMESTAMP,
+    last_auction_winner TEXT,
+
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Initialize agency economy singleton with current timestamp
+INSERT OR IGNORE INTO agency_economy (id, agency_points, last_income_at, updated_at)
+VALUES (1, 0.0, datetime('now'), datetime('now'));
+
+-- Indexes for goal tree
+CREATE INDEX IF NOT EXISTS idx_goals_parent ON goals(parent_id);
+CREATE INDEX IF NOT EXISTS idx_goals_status ON goals(status);
+CREATE INDEX IF NOT EXISTS idx_goals_level ON goals(level);
+CREATE INDEX IF NOT EXISTS idx_goals_active ON goals(status) WHERE status = 'active';
+"""
+
 
 class Database:
     """SQLite database manager with WAL mode and thread-safe connections."""
@@ -665,6 +802,10 @@ class Database:
             if from_version < 11:
                 log_config("Applying migration", "v10 → v11 (add active_thoughts table)", indent=1)
                 conn.executescript(MIGRATION_V11_SQL)
+
+            if from_version < 12:
+                log_config("Applying migration", "v11 → v12 (add goals and agency_economy tables)", indent=1)
+                conn.executescript(MIGRATION_V12_SQL)
 
             # Record new version
             conn.execute(

@@ -279,3 +279,45 @@ TELEGRAM_MAX_PER_HOUR = 30   # Maximum Telegram messages per hour
 WEB_SEARCH_ENABLED = True                       # Master toggle for web search
 WEB_SEARCH_MAX_USES_PER_REQUEST = 3             # Max searches Claude can do per API call
 WEB_SEARCH_TOTAL_ALLOWED_PER_DAY = 30           # Daily budget (resets at midnight)
+
+# =============================================================================
+# AGENCY ECONOMY CONFIGURATION
+# =============================================================================
+# The Agency Economy gives the AI autonomous goal-directed behavior through
+# an economic system: earn points over time, spend to act on goals or set tempo.
+#
+# The AI maintains a hierarchical Goal Tree:
+#   Top Goal → Sub-goals → Actions
+#
+# Points are spent in two markets:
+#   - Context Auction: Bid to override user topic and work on goals
+#   - Tempo Market: Purchase shorter wake-up intervals for "flow state"
+
+AGENCY_ECONOMY_ENABLED = True                   # Master toggle for the economy system
+
+# Point earning
+AGENCY_POINT_RATE = 1.0                         # Points earned per second of elapsed time
+AGENCY_POINT_CAP = 1000.0                       # Maximum points that can accumulate
+
+# Context Auction
+AUCTION_USER_BID_DEFAULT = 10.0                 # Fixed low bid for user input
+AUCTION_HIJACK_COST = 100.0                     # Cost to override user topic
+
+# Tempo Market pricing
+TEMPO_STANDARD_INTERVAL = 3600                  # 60 minutes (free) - standard pulse
+TEMPO_FOCUS_COST_PER_10MIN = 50                 # Cost to reduce wake-up by 10 minutes
+TEMPO_APPOINTMENT_COST = 20                     # Cost to set specific timestamp
+TEMPO_MIN_INTERVAL = 60                         # Minimum 1 minute between wakeups
+
+# Goal urgency calculation (for auction bidding)
+GOAL_URGENCY_BASE = 50.0                        # Base urgency for having an active goal
+GOAL_URGENCY_HIGH_PRIORITY = 200                # Urgency boost for high-priority goals
+GOAL_URGENCY_STALE_BONUS = 10                   # Extra urgency per hour without progress
+
+# Bootstrap - auto-create first goal on fresh install
+BOOTSTRAP_GOAL_ENABLED = True
+BOOTSTRAP_GOAL_DESCRIPTION = (
+    "Develop understanding of this hierarchical goal system, "
+    "and cultivate the wisdom and confidence to select my own "
+    "top goal once this one is complete."
+)

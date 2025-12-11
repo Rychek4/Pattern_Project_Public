@@ -202,6 +202,7 @@ def create_default_builder() -> PromptBuilder:
     Returns:
         Configured PromptBuilder
     """
+    import config
     from prompt_builder.sources.core_memory import CoreMemorySource
     from prompt_builder.sources.semantic_memory import SemanticMemorySource
     from prompt_builder.sources.conversation import ConversationSource
@@ -230,6 +231,13 @@ def create_default_builder() -> PromptBuilder:
         SemanticMemorySource(),
         ConversationSource(),
     ]
+
+    # Add goal tree and agency economy sources if enabled
+    if config.AGENCY_ECONOMY_ENABLED:
+        from prompt_builder.sources.goal_tree import GoalTreeSource
+        from prompt_builder.sources.agency_economy import AgencyEconomySource
+        sources.insert(2, GoalTreeSource())      # Priority 15 - after core memory
+        sources.insert(3, AgencyEconomySource()) # Priority 16 - after goal tree
 
     for source in sources:
         builder.register_source(source)
