@@ -44,11 +44,11 @@ class ImageContent:
     Attributes:
         media_type: MIME type (e.g., "image/jpeg", "image/png")
         data: Base64-encoded image data
-        source_type: Origin of image ("screenshot" or "webcam")
+        source_type: Origin of image ("screenshot", "webcam", or "telegram")
     """
     media_type: str
     data: str  # Base64 encoded
-    source_type: str
+    source_type: str  # "screenshot", "webcam", or "telegram"
 
     def to_api_format(self) -> Dict[str, Any]:
         """
@@ -166,7 +166,7 @@ def format_image_for_claude(
 
     Args:
         image_bytes: Raw image data
-        source_type: Origin of image ("screenshot" or "webcam")
+        source_type: Origin of image ("screenshot", "webcam", or "telegram")
         media_type: MIME type of the image
 
     Returns:

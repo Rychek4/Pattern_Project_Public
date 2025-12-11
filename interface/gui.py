@@ -767,6 +767,38 @@ class ChatWindow(QMainWindow):
             log_error(f"Failed to build multimodal continuation: {e}")
             return {"role": "user", "content": prompt_text}
 
+    def _build_telegram_image_message(self, text: str, image) -> dict:
+        """
+        Build a multimodal message from a Telegram photo attachment.
+
+        This is used when processing Telegram messages that include user-sent
+        images. Unlike _capture_visuals_for_message() which captures local
+        screen/webcam, this uses an image the user explicitly sent via Telegram.
+
+        Args:
+            text: The message text (or caption)
+            image: ImageContent object from Telegram photo processing
+
+        Returns:
+            Message dict with multimodal content array
+        """
+        try:
+            from agency.visual_capture import build_multimodal_content
+
+            content_array = build_multimodal_content(text, [image])
+
+            log_info(
+                f"Built Telegram image message (source: {image.source_type})",
+                prefix="📷"
+            )
+
+            return {"role": "user", "content": content_array}
+
+        except Exception as e:
+            log_error(f"Failed to build Telegram image message: {e}")
+            # Fallback to text-only
+            return {"role": "user", "content": text}
+
     def _process_message(self, user_input: str):
         """Process a message in background thread."""
         import time
@@ -986,7 +1018,17 @@ class ChatWindow(QMainWindow):
         thread.start()
 
     def _process_telegram_message(self, message):
-        """Process an inbound Telegram message and generate AI response."""
+        """
+        Process an inbound Telegram message and generate AI response.
+
+        IMPORTANT: Visual capture (screenshot/webcam) is intentionally NOT used
+        for Telegram messages. The user is interacting remotely, so capturing
+        the local screen or webcam would not be relevant to their context.
+
+        Instead, we only process images that the user explicitly sends via
+        Telegram as attachments. These are handled by the InboundMessage.image
+        field populated by the telegram_listener.
+        """
         import time
         from llm.router import TaskType
         from agency.commands import get_command_processor
@@ -1010,9 +1052,10 @@ class ChatWindow(QMainWindow):
                 input_type="telegram"
             )
 
-            # Display in GUI
+            # Display in GUI (indicate if image was attached)
             timestamp = self._get_timestamp()
-            display_text = f"📱 Telegram{from_info}: {message.text}"
+            image_indicator = " 🖼️" if message.image else ""
+            display_text = f"📱 Telegram{from_info}{image_indicator}: {message.text}"
             self.signals.new_message.emit("user", display_text, timestamp)
 
             # Build prompt
@@ -1023,6 +1066,21 @@ class ChatWindow(QMainWindow):
 
             # Get conversation history
             history = self._conversation_mgr.get_recent_history(limit=30)
+
+            # Build user message - include Telegram image if present
+            # NOTE: We do NOT capture local screen/webcam for Telegram (see docstring)
+            if message.image:
+                # Build multimodal message with Telegram-sent image
+                user_message = self._build_telegram_image_message(
+                    message.text,
+                    message.image
+                )
+                log_info("Telegram message includes user-sent image", prefix="📷")
+            else:
+                # Text-only message
+                user_message = {"role": "user", "content": message.text}
+
+            history.append(user_message)
 
             # Get response from LLM
             self.signals.update_status.emit("Responding to Telegram...")
@@ -1049,7 +1107,13 @@ class ChatWindow(QMainWindow):
                 if processed.needs_continuation:
                     continuation_history = history.copy()
                     continuation_history.append({"role": "assistant", "content": response.text})
-                    continuation_history.append({"role": "user", "content": processed.continuation_prompt})
+
+                    # Build continuation message (may include images from visual commands)
+                    continuation_msg = self._build_continuation_message(
+                        processed.continuation_prompt,
+                        processed.continuation_images
+                    )
+                    continuation_history.append(continuation_msg)
 
                     continuation = self._llm_router.chat(
                         messages=continuation_history,
