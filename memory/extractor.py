@@ -2,21 +2,42 @@
 Pattern Project - Memory Extractor
 Extracts memories from conversations using topic-based clustering.
 
-Trigger: Extraction is triggered when unprocessed conversation turns reach a threshold
-(default: 10 turns). This happens immediately when the threshold is reached, not on a timer.
+ARCHITECTURE (Windowed Extraction System):
+    The extractor is tightly coupled with the context window system.
+    Turns flow: Context Window → Extraction → Memory Store → Gone from context
 
-Architecture:
+    OLD SYSTEM (Threshold-Based) - DEPRECATED:
+        - Triggered when unprocessed turns >= 10
+        - Processed up to 50 turns at once
+        - Context window and extraction were independent
+        - Problem: Same turns could be in context AND queued for extraction
+        - Problem: Same facts extracted from different turn batches
+
+    NEW SYSTEM (Windowed):
+        - Triggered when context window overflows (35 > 30)
+        - Processes exactly the overflow amount (oldest 5 turns)
+        - Context window and extraction are coordinated via processed_for_memory flag
+        - Turns removed from context immediately after extraction
+        - Clean flow: turns are extracted exactly once, right as they leave context
+
+    The key insight: extraction happens AT THE BOUNDARY of the context window,
+    not independently. This ensures each turn is extracted exactly once.
+
+Extraction Process:
     The extractor uses a TWO-PHASE approach to create high-quality, consolidated memories:
 
     Phase 1 - Topic Segmentation:
         Analyzes conversation turns to identify distinct topic clusters.
-        Example: 10 turns about debugging + 2 turns about lunch = 2 topic clusters
+        Example: 5 turns about debugging + 2 turns about lunch = 2 topic clusters
 
     Phase 2 - Memory Synthesis:
         For each significant topic cluster, synthesizes ONE consolidated memory.
-        Example: 10 debugging turns → 1 memory capturing the key insight
+        Example: 5 debugging turns → 1 memory capturing the key insight
 
-    Result: 10-50 conversation turns → 1-5 high-quality memories (not 1 per turn)
+    Result: 5 overflow turns → 1-3 high-quality memories (not 1 per turn)
+
+    Additionally, a parallel FACTUAL EXTRACTION pass extracts concrete facts
+    (e.g., "Brian is 45 years old") as separate memories.
 """
 
 import re
@@ -361,35 +382,42 @@ class MemoryExtractor:
     """
     Extracts memories from conversations using topic-based clustering.
 
-    The extractor uses a two-phase approach:
+    ARCHITECTURE (Windowed Extraction):
+        The extractor is coordinated with the context window system:
+        - Triggered when context overflows (unprocessed turns > overflow_trigger)
+        - Processes exactly the overflow amount (oldest turns leaving context)
+        - Marks processed turns, which removes them from context window
 
-    1. Topic Segmentation: Identify distinct topic clusters in the conversation
-    2. Memory Synthesis: Create ONE consolidated memory per significant topic
+        This ensures each turn is extracted exactly once, right as it
+        leaves the active context window.
 
-    This approach produces 1-5 high-quality memories from 10-50 turns, rather than
-    the naive approach of ~1 memory per turn.
+    Extraction Process:
+        1. Topic Segmentation: Identify distinct topic clusters
+        2. Memory Synthesis: Create ONE consolidated memory per significant topic
+        3. Factual Extraction: Extract concrete facts as separate memories
 
     Triggers:
-        - Threshold reached: When unprocessed turns >= extraction_threshold (default: 10)
-        - Session end: Explicit trigger via extract_memories(force=True)
-        - Manual /extract command
+        - Context overflow: When unprocessed turns >= CONTEXT_OVERFLOW_TRIGGER (35)
+        - Manual /extract command (processes current overflow if any)
+
+    Note: Session end NO LONGER triggers extraction. The context window
+    persists across sessions for AI continuity.
     """
 
-    def __init__(self, extraction_threshold: int = 10):
+    def __init__(self):
         """
-        Initialize the memory extractor.
-
-        Args:
-            extraction_threshold: Minimum turns before triggering extraction
+        Initialize the memory extractor with windowed extraction settings.
         """
-        self.extraction_threshold = extraction_threshold
         self._lock_manager = get_lock_manager()
         self._extraction_count = 0
         self._factual_extraction_count = 0
         self._extraction_in_progress = threading.Event()
 
-        # Load extraction settings
+        # Load windowed extraction settings
         from config import (
+            CONTEXT_WINDOW_SIZE,
+            CONTEXT_OVERFLOW_TRIGGER,
+            CONTEXT_EXTRACTION_BATCH,
             MEMORY_MIN_TURNS_PER_TOPIC,
             MEMORY_MAX_PER_EXTRACTION,
             MEMORY_SKIP_MINOR_TOPICS,
@@ -399,6 +427,12 @@ class MemoryExtractor:
             MEMORY_MAX_EPISODIC_PER_EXTRACTION,
             MEMORY_MAX_FACTUAL_PER_EXTRACTION
         )
+
+        # Windowed extraction settings (NEW)
+        self.context_window_size = CONTEXT_WINDOW_SIZE          # 30
+        self.overflow_trigger = CONTEXT_OVERFLOW_TRIGGER        # 35
+        self.extraction_batch = CONTEXT_EXTRACTION_BATCH        # 5
+
         # Episodic extraction settings (topic-based)
         self.min_turns_per_topic = MEMORY_MIN_TURNS_PER_TOPIC
         self.max_memories_per_extraction = MEMORY_MAX_PER_EXTRACTION  # Legacy
@@ -412,16 +446,21 @@ class MemoryExtractor:
         self.max_factual_per_extraction = MEMORY_MAX_FACTUAL_PER_EXTRACTION
 
     # =========================================================================
-    # THRESHOLD-BASED EXTRACTION TRIGGER
+    # WINDOWED EXTRACTION TRIGGER
     # =========================================================================
 
     def check_and_extract(self) -> None:
         """
-        Check if threshold is reached and trigger extraction asynchronously.
+        Check if context window has overflowed and trigger extraction.
 
         Called after each conversation turn is added. If the number of unprocessed
-        turns meets the threshold, extraction runs in a background thread to avoid
-        blocking the conversation flow.
+        turns exceeds the overflow trigger (35), extraction runs in a background
+        thread to process the oldest turns leaving the context window.
+
+        WINDOWED EXTRACTION LOGIC:
+            if unprocessed_count >= overflow_trigger (35):
+                extract oldest (unprocessed_count - context_window_size) turns
+                mark them as processed (removes from context)
 
         Thread-safe: Uses an event flag to prevent multiple concurrent extractions.
         """
@@ -433,14 +472,18 @@ class MemoryExtractor:
             conversation_mgr = get_conversation_manager()
             unprocessed_count = conversation_mgr.get_unprocessed_count()
 
-            if unprocessed_count >= self.extraction_threshold:
+            if unprocessed_count >= self.overflow_trigger:
                 # Mark extraction as in progress before starting thread
                 if self._extraction_in_progress.is_set():
                     return  # Another thread beat us to it
                 self._extraction_in_progress.set()
 
+                # Calculate how many turns to extract (the overflow)
+                overflow_count = unprocessed_count - self.context_window_size
+
                 log_info(
-                    f"Extraction triggered: {unprocessed_count} unprocessed turns",
+                    f"Context overflow: {unprocessed_count} turns >= {self.overflow_trigger} trigger. "
+                    f"Extracting oldest {overflow_count} turns.",
                     prefix="🧠"
                 )
 
@@ -453,7 +496,7 @@ class MemoryExtractor:
                 thread.start()
 
         except Exception as e:
-            log_error(f"Error checking extraction threshold: {e}")
+            log_error(f"Error checking context overflow: {e}")
 
     def _run_extraction(self) -> None:
         """
@@ -470,24 +513,29 @@ class MemoryExtractor:
 
     def extract_memories(self, force: bool = False) -> int:
         """
-        Extract memories from unprocessed conversations using dual-track extraction.
+        Extract memories from oldest unprocessed turns (windowed extraction).
 
         This is the main entry point for memory extraction. Runs TWO extraction passes:
 
-        1. EPISODIC EXTRACTION (existing behavior):
+        1. EPISODIC EXTRACTION:
            - Identifies topic clusters in the conversation
            - Synthesizes narrative memories per significant topic
            - Captures "what happened" - relationship texture and experiences
 
-        2. FACTUAL EXTRACTION (new):
-           - Scans entire conversation for concrete facts
+        2. FACTUAL EXTRACTION:
+           - Scans conversation for concrete facts
            - Extracts atomic assertions about people, places, things
            - Captures "what is true" - factual scaffolding
 
-        Both passes run sequentially to avoid race conditions with local LLM.
+        WINDOWED EXTRACTION:
+            - Processes only the OLDEST turns that exceed context_window_size
+            - Example: 37 unprocessed turns → extract oldest 7 (37 - 30 = 7)
+            - Marks extracted turns as processed, removing them from context
 
         Args:
-            force: Force extraction even if below threshold
+            force: If True, extract any overflow even if below normal trigger.
+                   NOTE: force no longer means "extract all" - context window
+                   is always preserved for AI continuity.
 
         Returns:
             Total number of memories created (episodic + factual)
@@ -498,16 +546,32 @@ class MemoryExtractor:
                 vector_store = get_vector_store()
                 tracker = get_temporal_tracker()
 
-                # Get unprocessed turns (up to 50 at a time)
-                turns = conversation_mgr.get_unprocessed_turns(limit=50)
+                # Calculate how many turns to extract (the overflow)
+                unprocessed_count = conversation_mgr.get_unprocessed_count()
+
+                if unprocessed_count <= self.context_window_size:
+                    # No overflow - nothing to extract
+                    if not force:
+                        return 0
+                    # Even with force, we preserve the context window
+                    log_info(
+                        f"No overflow to extract ({unprocessed_count} <= {self.context_window_size})",
+                        prefix="🧠"
+                    )
+                    return 0
+
+                # Extract only the overflow (oldest turns leaving context window)
+                overflow_count = unprocessed_count - self.context_window_size
+                turns = conversation_mgr.get_unprocessed_turns(limit=overflow_count)
 
                 if not turns:
                     return 0
 
-                if len(turns) < self.extraction_threshold and not force:
-                    return 0
-
-                log_info(f"Processing {len(turns)} turns for dual-track extraction", prefix="🧠")
+                log_info(
+                    f"Processing {len(turns)} overflow turns for dual-track extraction "
+                    f"(keeping {self.context_window_size} in context)",
+                    prefix="🧠"
+                )
 
                 # =============================================================
                 # TRACK 1: EPISODIC EXTRACTION
@@ -1401,7 +1465,10 @@ class MemoryExtractor:
             "total_factual_extractions": self._factual_extraction_count,
             "total_extractions": self._extraction_count + self._factual_extraction_count,
             "extraction_in_progress": self._extraction_in_progress.is_set(),
-            "threshold": self.extraction_threshold,
+            # Windowed extraction settings
+            "context_window_size": self.context_window_size,
+            "overflow_trigger": self.overflow_trigger,
+            "extraction_batch": self.extraction_batch,
             # Episodic settings
             "min_turns_per_topic": self.min_turns_per_topic,
             "max_episodic_per_extraction": self.max_episodic_per_extraction,
@@ -1425,18 +1492,12 @@ def get_memory_extractor() -> MemoryExtractor:
     """Get the global memory extractor instance (lazy initialization)."""
     global _extractor
     if _extractor is None:
-        from config import MEMORY_EXTRACTION_THRESHOLD
-        _extractor = MemoryExtractor(
-            extraction_threshold=MEMORY_EXTRACTION_THRESHOLD
-        )
+        _extractor = MemoryExtractor()
     return _extractor
 
 
 def init_memory_extractor() -> MemoryExtractor:
     """Initialize the global memory extractor (explicit initialization)."""
     global _extractor
-    from config import MEMORY_EXTRACTION_THRESHOLD
-    _extractor = MemoryExtractor(
-        extraction_threshold=MEMORY_EXTRACTION_THRESHOLD
-    )
+    _extractor = MemoryExtractor()
     return _extractor

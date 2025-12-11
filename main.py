@@ -211,21 +211,22 @@ def print_configuration() -> None:
 
     # Background threads
     log_section("Background Threads", "🧵")
-    log_subsection(f"Memory Extractor: THRESHOLD-TRIGGERED (every {config.MEMORY_EXTRACTION_THRESHOLD} turns)")
+    log_subsection(f"Memory Extractor: WINDOWED (overflow at {config.CONTEXT_OVERFLOW_TRIGGER} turns)")
     log_subsection(f"Health Monitor: ENABLED (interval: {config.HEALTH_CHECK_INTERVAL}s)")
     log_subsection(f"Lock Stats: ENABLED (interval: {config.LOCK_STATS_INTERVAL}s)")
 
     # Memory settings
     log_section("Memory Settings", "🧠")
-    log_subsection(f"Extraction Threshold: {config.MEMORY_EXTRACTION_THRESHOLD} turns")
+    log_subsection(f"Context Window: {config.CONTEXT_WINDOW_SIZE} turns (overflow trigger: {config.CONTEXT_OVERFLOW_TRIGGER})")
     log_subsection(f"Freshness Half-Life: {config.MEMORY_FRESHNESS_HALF_LIFE_DAYS} days")
     log_subsection(f"Scoring Weights: semantic={config.MEMORY_SEMANTIC_WEIGHT}, "
                    f"freshness={config.MEMORY_FRESHNESS_WEIGHT}, access={config.MEMORY_ACCESS_WEIGHT}")
 
     # Prompt Builder settings
     log_section("Prompt Builder", "📝")
-    log_subsection(f"Conversation History: {config.CONVERSATION_EXCHANGE_LIMIT} exchanges")
+    log_subsection(f"Conversation History: {config.CONTEXT_WINDOW_SIZE} turns (windowed)")
     log_subsection(f"Memory Promotion Threshold: {config.MEMORY_PROMOTION_THRESHOLD}")
+    log_subsection(f"Deduplication: {'ENABLED' if config.MEMORY_DEDUP_ENABLED else 'DISABLED'} (threshold: {config.MEMORY_DEDUP_THRESHOLD})")
 
     # Visual settings
     if config.VISUAL_ENABLED:

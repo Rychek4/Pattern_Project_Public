@@ -186,6 +186,64 @@ class ConversationManager:
         ]
 
     @db_retry()
+    def get_context_window(
+        self,
+        limit: int = 30,
+        exclude_processed: bool = True
+    ) -> List[ConversationTurn]:
+        """
+        Get turns for the active context window.
+
+        This method supports the windowed extraction system where:
+        - Context spans across sessions (for AI continuity)
+        - Processed turns are excluded (coordinated with extraction)
+        - Turns flow: Context → Extraction → Memory → Gone from context
+
+        Unlike get_session_history(), this method is NOT session-scoped.
+        It returns the most recent unprocessed turns regardless of which
+        session they belong to, providing continuity across sessions.
+
+        Args:
+            limit: Maximum turns to return (default: CONTEXT_WINDOW_SIZE)
+            exclude_processed: If True, exclude already-extracted turns
+
+        Returns:
+            List of ConversationTurn in chronological order (oldest first)
+        """
+        with self._lock_manager.acquire("conversation"):
+            db = get_database()
+
+            if exclude_processed:
+                # Get most recent UNPROCESSED turns (spans all sessions)
+                result = db.execute(
+                    """
+                    SELECT * FROM conversations
+                    WHERE processed_for_memory = FALSE
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                    fetch=True
+                )
+            else:
+                # Get most recent turns regardless of processed status
+                result = db.execute(
+                    """
+                    SELECT * FROM conversations
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                    fetch=True
+                )
+
+            # Reverse to chronological order (oldest first)
+            turns = [self._row_to_turn(row) for row in result]
+            turns.reverse()
+
+            return turns
+
+    @db_retry()
     def get_unprocessed_turns(self, limit: int = 100) -> List[ConversationTurn]:
         """Get turns that haven't been processed for memory extraction."""
         with self._lock_manager.acquire("conversation"):
