@@ -108,7 +108,7 @@ Commands:
         # Show top goal
         root = tree.root
         status_emoji = self._get_status_emoji(root.status)
-        lines.append(f"Top Goal: {root.description}")
+        lines.append(f"Top Goal [{root.id}]: {root.description}")
         lines.append(f"Status: {status_emoji} {root.status.title()}")
 
         # Show progress
@@ -117,17 +117,17 @@ Commands:
 
         lines.append("")
 
-        # Show current focus path
-        if tree.active_path and len(tree.active_path) > 1:
-            lines.append("Current Focus:")
-            self._render_active_path(tree.active_path, lines)
+        # Show full tree structure
+        if root.children:
+            lines.append("Goal Tree:")
+            self._render_full_tree(root, lines, indent=0)
             lines.append("")
 
-        # Show next actionable item
+        # Show next actionable item (highlighted)
         easiest = manager.get_easiest_actionable()
         if easiest:
-            lines.append(f"Next Action (easiest): [{easiest.id}] {easiest.description}")
-            lines.append(f"  Difficulty: {easiest.difficulty_estimate}/10")
+            lines.append(f">>> Suggested Next Action: [{easiest.id}] {easiest.description}")
+            lines.append(f"    (Difficulty: {easiest.difficulty_estimate}/10 - easiest available)")
             lines.append("")
 
         # Show command reference
@@ -145,6 +145,41 @@ Commands:
         lines.append("</goal_tree>")
 
         return "\n".join(lines)
+
+    def _render_full_tree(self, goal, lines, indent=0) -> None:
+        """
+        Render the full goal tree with status indicators.
+
+        Shows sub-goals and their actions in a tree format:
+        ├─ [▶️] Sub-goal [2]: Audit available capabilities (d:2)
+        │  ├─ [▶️] Action [3]: Search memories... (d:1)
+        │  └─ [▶️] Action [4]: Read a command handler... (d:2)
+        """
+        prefix = "  " * indent
+        children = goal.children if goal.children else []
+
+        for i, child in enumerate(children):
+            is_last = i == len(children) - 1
+            connector = "└─" if is_last else "├─"
+            child_prefix = "   " if is_last else "│  "
+            status = self._get_status_emoji(child.status)
+
+            # Level indicator
+            level_label = {
+                "sub_goal": "Sub-goal",
+                "action": "Action"
+            }.get(child.level, child.level)
+
+            # Truncate description for readability
+            desc = child.description[:55]
+            if len(child.description) > 55:
+                desc += "..."
+
+            lines.append(f"{prefix}{connector} [{status}] {level_label} [{child.id}]: {desc} (d:{child.difficulty_estimate})")
+
+            # Recursively render children
+            if child.children:
+                self._render_full_tree(child, lines, indent + 1)
 
     def _render_active_path(self, path, lines, indent=2) -> None:
         """Render the active path as an indented tree."""

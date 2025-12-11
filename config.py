@@ -317,7 +317,49 @@ GOAL_URGENCY_STALE_BONUS = 10                   # Extra urgency per hour without
 # Bootstrap - auto-create first goal on fresh install
 BOOTSTRAP_GOAL_ENABLED = True
 BOOTSTRAP_GOAL_DESCRIPTION = (
-    "Develop understanding of this hierarchical goal system, "
-    "and cultivate the wisdom and confidence to select my own "
-    "top goal once this one is complete."
+    "Master the goal and agency system through hands-on exploration"
 )
+
+# Bootstrap sub-goals and actions (pre-seeded curriculum)
+# These are created automatically on first run to teach the AI the system
+BOOTSTRAP_SUBGOALS = [
+    {
+        "description": "Audit available capabilities",
+        "difficulty": 2,
+        "status": "active",
+        "actions": [
+            ("Search memories for past interactions using [[MEMORY_SEARCH:]]", 1),
+            ("Read a command handler file to understand tool structure", 2),
+            ("List current intentions using [[LIST_INTENTIONS:]]", 1),
+        ]
+    },
+    {
+        "description": "Test write and creation capabilities",
+        "difficulty": 3,
+        "status": "active",
+        "actions": [
+            ("Create a test file using [[WRITE_FILE:]]", 2),
+            ("Set an intention using [[REMIND:]]", 2),
+            ("Update active thoughts using [[SET_THOUGHTS:]]", 2),
+        ]
+    },
+    {
+        "description": "Understand and use the economy",
+        "difficulty": 4,
+        "status": "active",
+        "actions": [
+            ("Observe current agency points in context", 1),
+            ("Review available tempo options", 2),
+            ("Purchase a tempo option using [[SET_TEMPO:]]", 3),
+        ]
+    },
+    {
+        "description": "Practice goal self-management",
+        "difficulty": 6,  # Higher so it's tackled last
+        "status": "pending",  # Unlocks after other sub-goals
+        "actions": [
+            ("Create a new sub-goal under this one using [[SET_GOAL:]]", 3),
+            ("Complete the created sub-goal with meaningful reflection", 4),
+        ]
+    },
+]

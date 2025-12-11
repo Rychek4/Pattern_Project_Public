@@ -131,10 +131,11 @@ class GoalManager:
 
     def initialize_bootstrap_goal(self) -> Optional[int]:
         """
-        Create the initial bootstrap goal if none exists.
+        Create the initial bootstrap goal tree if none exists.
 
         The first goal is meta: learning to manage goals.
-        This is only called on fresh installations.
+        This creates a full curriculum of sub-goals and actions
+        that teach the AI how to use the goal system.
 
         Returns:
             The bootstrap goal ID, or None if goals already exist
@@ -160,18 +161,56 @@ class GoalManager:
             if result and result[0]["count"] > 0:
                 return None
 
-        # Create the bootstrap goal
-        goal_id = self.create_goal(
+        # Create the bootstrap top goal
+        top_goal_id = self.create_goal(
             level=GoalLevel.TOP_GOAL.value,
             description=config.BOOTSTRAP_GOAL_DESCRIPTION,
             difficulty_estimate=8,
             status=GoalStatus.ACTIVE.value
         )
 
-        if goal_id:
-            log_info("Bootstrap goal created - AI goal system initialized", prefix="🌱")
+        if not top_goal_id:
+            log_error("Failed to create bootstrap top goal")
+            return None
 
-        return goal_id
+        # Create the pre-seeded sub-goals and actions
+        subgoals_created = 0
+        actions_created = 0
+
+        for subgoal_config in config.BOOTSTRAP_SUBGOALS:
+            subgoal_id = self.create_goal(
+                level=GoalLevel.SUB_GOAL.value,
+                description=subgoal_config["description"],
+                parent_id=top_goal_id,
+                difficulty_estimate=subgoal_config["difficulty"],
+                status=subgoal_config["status"]
+            )
+
+            if subgoal_id:
+                subgoals_created += 1
+
+                # Actions inherit status from parent sub-goal
+                # (pending sub-goal = pending actions)
+                action_status = subgoal_config["status"]
+
+                for action_desc, action_difficulty in subgoal_config["actions"]:
+                    action_id = self.create_goal(
+                        level=GoalLevel.ACTION.value,
+                        description=action_desc,
+                        parent_id=subgoal_id,
+                        difficulty_estimate=action_difficulty,
+                        status=action_status
+                    )
+                    if action_id:
+                        actions_created += 1
+
+        log_info(
+            f"Bootstrap goal tree created: 1 top goal, "
+            f"{subgoals_created} sub-goals, {actions_created} actions",
+            prefix="🌱"
+        )
+
+        return top_goal_id
 
     # =========================================================================
     # READ OPERATIONS
@@ -495,7 +534,13 @@ class GoalManager:
         return True
 
     def _check_parent_completion(self, parent_id: int) -> None:
-        """Check if a parent goal can be auto-completed (all children done)."""
+        """
+        Check parent goal status after a child completes.
+
+        This handles two scenarios:
+        1. If all children complete, suggest completing the parent
+        2. If all active siblings complete, unlock pending siblings
+        """
         parent = self.get_goal(parent_id)
         if parent is None or parent.is_completed:
             return
@@ -504,14 +549,53 @@ class GoalManager:
         if not children:
             return
 
+        # Separate by status
+        active_children = [c for c in children if c.is_active]
+        pending_children = [c for c in children if c.is_pending]
+        completed_children = [c for c in children if c.is_completed]
+
+        # Check if all active children are now complete
+        # (they were active before, now completed)
+        all_active_complete = len(active_children) == 0 and len(completed_children) > 0
+
+        if all_active_complete and pending_children:
+            # Unlock pending siblings (activate them and their children)
+            for pending in pending_children:
+                self._unlock_goal_tree(pending.id)
+            log_info(
+                f"Unlocked {len(pending_children)} pending goal(s) "
+                f"under [{parent_id}]",
+                prefix="🔓"
+            )
+
+        # Check if ALL children are complete
         all_complete = all(c.is_completed for c in children)
         if all_complete:
-            # Log suggestion but don't auto-complete - AI should self-assess
             log_info(
                 f"All children of goal [{parent_id}] are complete. "
                 f"Consider completing the parent goal.",
                 prefix="💡"
             )
+
+    def _unlock_goal_tree(self, goal_id: int) -> None:
+        """
+        Activate a goal and all its descendants.
+
+        Used when a pending sub-goal becomes available after
+        prerequisite siblings are completed.
+        """
+        goal = self.get_goal(goal_id)
+        if goal is None:
+            return
+
+        # Activate this goal
+        self.activate_goal(goal_id)
+
+        # Activate all children recursively
+        children = self.get_children(goal_id)
+        for child in children:
+            if child.is_pending:
+                self._unlock_goal_tree(child.id)
 
     @db_retry()
     def abandon_goal(self, goal_id: int) -> bool:
