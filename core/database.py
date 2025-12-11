@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from core.logger import log_info, log_success, log_error, log_config, log_section
 
 # Schema version for migrations
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 # SQL schema definition
 SCHEMA_SQL = """
@@ -74,7 +74,11 @@ CREATE TABLE IF NOT EXISTS memories (
 
     -- Scoring
     importance REAL DEFAULT 0.5 CHECK (importance >= 0 AND importance <= 1),
-    memory_type TEXT CHECK (memory_type IN ('fact', 'preference', 'event', 'reflection', 'observation'))
+    memory_type TEXT CHECK (memory_type IN ('fact', 'preference', 'event', 'reflection', 'observation')),
+    -- memory_category distinguishes extraction method:
+    --   'episodic': Narrative memories about what happened (default, existing behavior)
+    --   'factual': Concrete facts extracted from conversations
+    memory_category TEXT DEFAULT 'episodic' CHECK (memory_category IN ('episodic', 'factual'))
 );
 
 -- Core memories: permanent, foundational knowledge always included
@@ -157,6 +161,7 @@ CREATE INDEX IF NOT EXISTS idx_memories_recency ON memories(last_accessed_at DES
 CREATE INDEX IF NOT EXISTS idx_memories_source_time ON memories(source_timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type);
 CREATE INDEX IF NOT EXISTS idx_memories_importance ON memories(importance DESC);
+CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(memory_category);
 CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(ended_at) WHERE ended_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_core_memories_category ON core_memories(category);
 CREATE INDEX IF NOT EXISTS idx_intentions_status ON intentions(status);
@@ -508,6 +513,23 @@ CREATE TABLE IF NOT EXISTS active_thoughts (
 CREATE INDEX IF NOT EXISTS idx_active_thoughts_rank ON active_thoughts(rank);
 """
 
+# Migration SQL for v11 -> v12 (add memory_category column for dual-track extraction)
+MIGRATION_V12_SQL = """
+-- Add memory_category column to distinguish episodic vs factual memories
+-- Episodic: Narrative memories about what happened (existing behavior)
+-- Factual: Concrete facts extracted from conversations (new)
+--
+-- All existing memories are marked as 'episodic' since they were extracted
+-- using the narrative-focused extraction prompts.
+
+-- Add the column with default value
+ALTER TABLE memories ADD COLUMN memory_category TEXT DEFAULT 'episodic'
+    CHECK (memory_category IN ('episodic', 'factual'));
+
+-- Create index for category-filtered queries
+CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(memory_category);
+"""
+
 
 class Database:
     """SQLite database manager with WAL mode and thread-safe connections."""
@@ -665,6 +687,10 @@ class Database:
             if from_version < 11:
                 log_config("Applying migration", "v10 → v11 (add active_thoughts table)", indent=1)
                 conn.executescript(MIGRATION_V11_SQL)
+
+            if from_version < 12:
+                log_config("Applying migration", "v11 → v12 (add memory_category for dual-track extraction)", indent=1)
+                conn.executescript(MIGRATION_V12_SQL)
 
             # Record new version
             conn.execute(

@@ -145,6 +145,52 @@ Respond with only one word (fact, preference, event, reflection, or observation)
 
 
 # =============================================================================
+# FACTUAL EXTRACTION PROMPTS (DUAL-TRACK SYSTEM)
+# =============================================================================
+# Factual extraction runs as a parallel pass alongside episodic extraction.
+# It focuses on extracting concrete facts rather than narrative summaries.
+#
+# Key differences from episodic extraction:
+# - Output style: Third-person assertions ("Brian is 45") not first-person narratives
+# - No topic clustering: Facts are extracted from the whole conversation at once
+# - More granular: One fact per statement, atomic facts
+# - Different decay: Facts generally persist longer than episodic observations
+
+FACTUAL_EXTRACTION_PROMPT = """Extract concrete facts from this conversation.
+
+Instructions:
+1. Extract explicitly stated facts about people, places, preferences, and things
+2. Focus on: names, locations, ages, relationships, preferences, technical choices, habits
+3. Output facts as standalone assertions using third-person ("Brian is..." not "I learned...")
+4. Each fact should be atomic - one fact per line
+5. Ignore: opinions in flux, hypotheticals, emotional reactions, conversational filler
+6. Only extract facts that were clearly stated or strongly implied
+
+Output format (one fact per line):
+FACT: [fact statement]
+IMPORTANCE: [HIGH/MEDIUM/LOW]
+TYPE: [fact/preference]
+
+Example output:
+FACT: Brian is 45 years old
+IMPORTANCE: MEDIUM
+TYPE: fact
+
+FACT: Brian prefers human-scale urban design over car-centric sprawl
+IMPORTANCE: HIGH
+TYPE: preference
+
+FACT: Brian bikes everywhere and doesn't own a car
+IMPORTANCE: HIGH
+TYPE: preference
+
+Conversation:
+{conversation}
+
+Extract the facts (output NONE if no concrete facts are present):"""
+
+
+# =============================================================================
 # DATA STRUCTURES
 # =============================================================================
 
@@ -195,6 +241,28 @@ class SynthesizedMemory:
     decay_category: str  # 'permanent', 'standard', or 'ephemeral'
     source_turn_ids: List[int] = field(default_factory=list)
     source_topic: Optional[str] = None
+
+
+@dataclass
+class ExtractedFact:
+    """
+    A concrete fact extracted from conversation.
+
+    Created during factual extraction (parallel to episodic extraction).
+    Facts are atomic assertions about people, places, or things.
+
+    Attributes:
+        content: The fact statement (third-person assertion)
+        importance: Score from 0.0-1.0 indicating significance
+        memory_type: 'fact' or 'preference' (factual extraction only produces these)
+        decay_category: Controls freshness decay rate (more generous for facts)
+        source_turn_ids: Database IDs of conversation turns this came from
+    """
+    content: str
+    importance: float
+    memory_type: str  # 'fact' or 'preference'
+    decay_category: str  # 'permanent' or 'standard' (no ephemeral for facts)
+    source_turn_ids: List[int] = field(default_factory=list)
 
 
 # =============================================================================
@@ -253,6 +321,38 @@ def infer_decay_category(memory_type: str, importance: float) -> str:
     return "standard"
 
 
+def infer_decay_category_factual(memory_type: str, importance: float) -> str:
+    """
+    Infer decay category for factual memories (more generous than episodic).
+
+    Facts generally should be more persistent than episodic memories because
+    facts don't become "less true" over time the way experiences fade.
+
+    Args:
+        memory_type: 'fact' or 'preference' (factual extraction only produces these)
+        importance: Score from 0.0 to 1.0
+
+    Returns:
+        One of: 'permanent', 'standard' (no 'ephemeral' for facts)
+
+    Inference Rules:
+        1. High or medium-high importance (≥0.6) → 'permanent'
+           Lower threshold than episodic because facts are inherently more stable.
+
+        2. Everything else → 'standard'
+           Low-importance facts can decay normally, but not ephemerally.
+           No 'ephemeral' category for facts - they're either worth keeping or not.
+    """
+    # Rule 1: Facts/preferences with reasonable importance are permanent
+    # Lower threshold (0.6) than episodic (0.7) because facts are stable
+    if importance >= 0.6:
+        return "permanent"
+
+    # Rule 2: Low-importance facts use standard decay
+    # No ephemeral for facts - if it's worth extracting, give it standard lifetime
+    return "standard"
+
+
 # =============================================================================
 # MEMORY EXTRACTOR CLASS
 # =============================================================================
@@ -285,23 +385,31 @@ class MemoryExtractor:
         self.extraction_threshold = extraction_threshold
         self._lock_manager = get_lock_manager()
         self._extraction_count = 0
+        self._factual_extraction_count = 0
         self._extraction_in_progress = threading.Event()
 
-        # Load topic-based extraction settings
+        # Load extraction settings
         from config import (
             MEMORY_MIN_TURNS_PER_TOPIC,
             MEMORY_MAX_PER_EXTRACTION,
             MEMORY_SKIP_MINOR_TOPICS,
             MEMORY_LARGE_TOPIC_THRESHOLD,
             MEMORY_SMALL_BATCH_THRESHOLD,
-            MEMORY_IMPORTANCE_FLOOR
+            MEMORY_IMPORTANCE_FLOOR,
+            MEMORY_MAX_EPISODIC_PER_EXTRACTION,
+            MEMORY_MAX_FACTUAL_PER_EXTRACTION
         )
+        # Episodic extraction settings (topic-based)
         self.min_turns_per_topic = MEMORY_MIN_TURNS_PER_TOPIC
-        self.max_memories_per_extraction = MEMORY_MAX_PER_EXTRACTION
+        self.max_memories_per_extraction = MEMORY_MAX_PER_EXTRACTION  # Legacy
+        self.max_episodic_per_extraction = MEMORY_MAX_EPISODIC_PER_EXTRACTION
         self.skip_minor_topics = MEMORY_SKIP_MINOR_TOPICS
         self.large_topic_threshold = MEMORY_LARGE_TOPIC_THRESHOLD
         self.small_batch_threshold = MEMORY_SMALL_BATCH_THRESHOLD
         self.importance_floor = MEMORY_IMPORTANCE_FLOOR
+
+        # Factual extraction settings
+        self.max_factual_per_extraction = MEMORY_MAX_FACTUAL_PER_EXTRACTION
 
     # =========================================================================
     # THRESHOLD-BASED EXTRACTION TRIGGER
@@ -362,18 +470,27 @@ class MemoryExtractor:
 
     def extract_memories(self, force: bool = False) -> int:
         """
-        Extract memories from unprocessed conversations using topic-based clustering.
+        Extract memories from unprocessed conversations using dual-track extraction.
 
-        This is the main entry point for memory extraction. Uses a two-phase approach:
+        This is the main entry point for memory extraction. Runs TWO extraction passes:
 
-        Phase 1: Identify topic clusters in the conversation
-        Phase 2: Synthesize ONE memory per significant topic cluster
+        1. EPISODIC EXTRACTION (existing behavior):
+           - Identifies topic clusters in the conversation
+           - Synthesizes narrative memories per significant topic
+           - Captures "what happened" - relationship texture and experiences
+
+        2. FACTUAL EXTRACTION (new):
+           - Scans entire conversation for concrete facts
+           - Extracts atomic assertions about people, places, things
+           - Captures "what is true" - factual scaffolding
+
+        Both passes run sequentially to avoid race conditions with local LLM.
 
         Args:
             force: Force extraction even if below threshold
 
         Returns:
-            Number of memories created
+            Total number of memories created (episodic + factual)
         """
         with self._lock_manager.acquire("memory_extraction"):
             try:
@@ -390,7 +507,13 @@ class MemoryExtractor:
                 if len(turns) < self.extraction_threshold and not force:
                     return 0
 
-                log_info(f"Processing {len(turns)} turns for topic-based extraction", prefix="🧠")
+                log_info(f"Processing {len(turns)} turns for dual-track extraction", prefix="🧠")
+
+                # =============================================================
+                # TRACK 1: EPISODIC EXTRACTION
+                # Narrative memories about what happened
+                # =============================================================
+                log_info("Starting episodic extraction (narrative memories)...", prefix="📖")
 
                 # ─────────────────────────────────────────────────────────────
                 # PHASE 1: Topic Segmentation
@@ -415,7 +538,8 @@ class MemoryExtractor:
                 # Create ONE memory per significant topic cluster
                 # ─────────────────────────────────────────────────────────────
                 session_id = tracker.current_session_id
-                memories_created = 0
+                episodic_created = 0
+                factual_created = 0
 
                 # Track which turns were successfully incorporated into memories
                 successfully_processed_turn_ids = set()
@@ -432,9 +556,9 @@ class MemoryExtractor:
                     )
 
                 for topic in topics:
-                    # Check if we've hit the memory cap for this extraction run
-                    if memories_created >= self.max_memories_per_extraction:
-                        log_info(f"Hit max memories per extraction ({self.max_memories_per_extraction})")
+                    # Check if we've hit the episodic memory cap for this extraction run
+                    if episodic_created >= self.max_episodic_per_extraction:
+                        log_info(f"Hit max episodic memories per extraction ({self.max_episodic_per_extraction})")
                         break
 
                     # Skip minor topics if configured (adaptive based on batch size)
@@ -479,18 +603,68 @@ class MemoryExtractor:
                             source_timestamp=source_time,
                             importance=synthesized.importance,
                             memory_type=synthesized.memory_type,
-                            decay_category=synthesized.decay_category
+                            decay_category=synthesized.decay_category,
+                            memory_category="episodic"  # Dual-track: narrative memories
                         )
 
                         if memory_id:
-                            memories_created += 1
+                            episodic_created += 1
                             # Track turns that successfully became part of a memory
                             successfully_processed_turn_ids.update(topic.turn_ids)
                             log_info(
-                                f"Created memory for topic '{topic.description[:40]}...' "
+                                f"Created episodic memory for topic '{topic.description[:40]}...' "
                                 f"(importance: {synthesized.importance:.2f})",
-                                prefix="💾"
+                                prefix="📖"
                             )
+
+                log_info(f"Episodic extraction complete: {episodic_created} memories", prefix="📖")
+
+                # =============================================================
+                # TRACK 2: FACTUAL EXTRACTION
+                # Concrete facts extracted from conversation
+                # =============================================================
+                log_info("Starting factual extraction (concrete facts)...", prefix="📌")
+
+                # Extract facts from the entire conversation batch
+                # No topic clustering needed - facts are extracted globally
+                facts = self._extract_facts(turns)
+
+                if facts:
+                    all_turn_ids_set = set(t.id for t in turns)
+                    source_time = turns[-1].created_at if turns else datetime.now()
+
+                    for fact in facts[:self.max_factual_per_extraction]:
+                        # Check importance floor
+                        if fact.importance < self.importance_floor:
+                            log_info(
+                                f"Skipping low-importance fact: '{fact.content[:40]}...' "
+                                f"(importance: {fact.importance:.2f})",
+                                prefix="⏭️"
+                            )
+                            continue
+
+                        memory_id = vector_store.add_memory(
+                            content=fact.content,
+                            source_conversation_ids=list(all_turn_ids_set),
+                            source_session_id=session_id,
+                            source_timestamp=source_time,
+                            importance=fact.importance,
+                            memory_type=fact.memory_type,
+                            decay_category=fact.decay_category,
+                            memory_category="factual"  # Dual-track: concrete facts
+                        )
+
+                        if memory_id:
+                            factual_created += 1
+                            # Facts come from entire conversation, mark all turns
+                            successfully_processed_turn_ids.update(all_turn_ids_set)
+                            log_info(
+                                f"Created factual memory: '{fact.content[:50]}...' "
+                                f"(importance: {fact.importance:.2f})",
+                                prefix="📌"
+                            )
+
+                log_info(f"Factual extraction complete: {factual_created} facts", prefix="📌")
 
                 # ─────────────────────────────────────────────────────────────
                 # CLEANUP: Mark processed turns
@@ -499,6 +673,7 @@ class MemoryExtractor:
                 # infinite retry loops, but log a warning.
                 # ─────────────────────────────────────────────────────────────
                 all_turn_ids = [t.id for t in turns]
+                total_memories = episodic_created + factual_created
 
                 if successfully_processed_turn_ids:
                     # Normal case: mark only the turns that produced memories
@@ -518,13 +693,15 @@ class MemoryExtractor:
                     )
                     conversation_mgr.mark_processed(all_turn_ids)
 
-                self._extraction_count += memories_created
+                self._extraction_count += episodic_created
+                self._factual_extraction_count += factual_created
                 log_success(
-                    f"Topic-based extraction complete: {memories_created} memories from "
-                    f"{len(turns)} turns across {len(topics)} topics"
+                    f"Dual-track extraction complete: {episodic_created} episodic + "
+                    f"{factual_created} factual = {total_memories} memories from "
+                    f"{len(turns)} turns"
                 )
 
-                return memories_created
+                return total_memories
 
             except Exception as e:
                 log_error(f"Memory extraction failed: {e}")
@@ -973,6 +1150,137 @@ class MemoryExtractor:
         return "observation"  # Default
 
     # =========================================================================
+    # FACTUAL EXTRACTION (DUAL-TRACK SYSTEM)
+    # =========================================================================
+
+    def _extract_facts(self, turns: List[ConversationTurn]) -> List[ExtractedFact]:
+        """
+        Extract concrete facts from conversation turns.
+
+        Unlike episodic extraction, factual extraction:
+        - Processes the entire conversation at once (no topic clustering)
+        - Extracts atomic facts as third-person assertions
+        - Uses a single LLM call with structured output parsing
+
+        Args:
+            turns: List of conversation turns to extract facts from
+
+        Returns:
+            List of ExtractedFact objects, or empty list on failure
+        """
+        router = get_llm_router()
+
+        # Format conversation for factual extraction
+        conversation_text = self._format_turns_for_synthesis(turns)
+
+        log_info("Extracting facts from conversation...", prefix="📌")
+
+        # Single LLM call to extract all facts
+        fact_prompt = FACTUAL_EXTRACTION_PROMPT.format(conversation=conversation_text)
+
+        fact_response = router.generate(
+            prompt=fact_prompt,
+            task_type=TaskType.EXTRACTION,
+            temperature=0.2,  # Low for consistent extraction
+            max_tokens=1024   # Allow multiple facts
+        )
+
+        if not fact_response.success:
+            log_error(f"Factual extraction failed: {fact_response.error}")
+            return []
+
+        # Parse the response into ExtractedFact objects
+        facts = self._parse_facts_response(fact_response.text, turns)
+
+        log_info(f"Extracted {len(facts)} facts from conversation", prefix="📌")
+        return facts
+
+    def _parse_facts_response(
+        self,
+        response_text: str,
+        turns: List[ConversationTurn]
+    ) -> List[ExtractedFact]:
+        """
+        Parse factual extraction response into ExtractedFact objects.
+
+        Expected format:
+        FACT: [fact statement]
+        IMPORTANCE: [HIGH/MEDIUM/LOW]
+        TYPE: [fact/preference]
+
+        Args:
+            response_text: Raw LLM response
+            turns: Source turns (for turn ID tracking)
+
+        Returns:
+            List of ExtractedFact objects
+        """
+        facts = []
+        text = response_text.strip()
+
+        # Check for "NONE" response (no facts found)
+        if text.upper() == "NONE" or "no concrete facts" in text.lower():
+            return []
+
+        # Split into fact blocks
+        # Each block starts with "FACT:" and continues until the next "FACT:" or end
+        lines = text.split('\n')
+
+        current_fact = None
+        current_importance = "MEDIUM"
+        current_type = "fact"
+
+        all_turn_ids = [t.id for t in turns]
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+
+            # Check for FACT line
+            if line.upper().startswith("FACT:"):
+                # Save previous fact if exists
+                if current_fact:
+                    importance_value = self._parse_importance_response(current_importance)
+                    decay_category = infer_decay_category_factual(current_type, importance_value)
+                    facts.append(ExtractedFact(
+                        content=current_fact,
+                        importance=importance_value,
+                        memory_type=current_type,
+                        decay_category=decay_category,
+                        source_turn_ids=all_turn_ids
+                    ))
+
+                # Start new fact
+                current_fact = line[5:].strip()  # Remove "FACT:" prefix
+                current_importance = "MEDIUM"  # Reset defaults
+                current_type = "fact"
+
+            # Check for IMPORTANCE line
+            elif line.upper().startswith("IMPORTANCE:"):
+                current_importance = line[11:].strip()
+
+            # Check for TYPE line
+            elif line.upper().startswith("TYPE:"):
+                type_value = line[5:].strip().lower()
+                if type_value in ("fact", "preference"):
+                    current_type = type_value
+
+        # Don't forget the last fact
+        if current_fact:
+            importance_value = self._parse_importance_response(current_importance)
+            decay_category = infer_decay_category_factual(current_type, importance_value)
+            facts.append(ExtractedFact(
+                content=current_fact,
+                importance=importance_value,
+                memory_type=current_type,
+                decay_category=decay_category,
+                source_turn_ids=all_turn_ids
+            ))
+
+        return facts
+
+    # =========================================================================
     # FORMATTING HELPERS
     # =========================================================================
 
@@ -1089,13 +1397,19 @@ class MemoryExtractor:
             Dictionary with extraction metrics
         """
         return {
-            "total_extractions": self._extraction_count,
+            "total_episodic_extractions": self._extraction_count,
+            "total_factual_extractions": self._factual_extraction_count,
+            "total_extractions": self._extraction_count + self._factual_extraction_count,
             "extraction_in_progress": self._extraction_in_progress.is_set(),
             "threshold": self.extraction_threshold,
+            # Episodic settings
             "min_turns_per_topic": self.min_turns_per_topic,
-            "max_memories_per_extraction": self.max_memories_per_extraction,
+            "max_episodic_per_extraction": self.max_episodic_per_extraction,
             "skip_minor_topics": self.skip_minor_topics,
             "small_batch_threshold": self.small_batch_threshold,
+            # Factual settings
+            "max_factual_per_extraction": self.max_factual_per_extraction,
+            # Shared settings
             "importance_floor": self.importance_floor
         }
 
