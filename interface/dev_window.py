@@ -87,12 +87,20 @@ class MemoryRecallData:
     timestamp: str = ""
 
 
+@dataclass
+class ActiveThoughtsData:
+    """Data about active thoughts update."""
+    thoughts: List[Dict[str, Any]] = field(default_factory=list)
+    timestamp: str = ""
+
+
 class DevWindowSignals(QObject):
     """Signals for updating the dev window from other threads."""
     prompt_assembly = pyqtSignal(object)  # PromptAssemblyData
     command_executed = pyqtSignal(object)  # CommandExecutionData
     response_pass = pyqtSignal(object)  # ResponsePassData
     memory_recall = pyqtSignal(object)  # MemoryRecallData
+    active_thoughts_updated = pyqtSignal(object)  # ActiveThoughtsData
     clear_all = pyqtSignal()
 
 
@@ -120,6 +128,7 @@ class DevWindow(QMainWindow):
         self.signals.command_executed.connect(self._on_command_executed)
         self.signals.response_pass.connect(self._on_response_pass)
         self.signals.memory_recall.connect(self._on_memory_recall)
+        self.signals.active_thoughts_updated.connect(self._on_active_thoughts_updated)
         self.signals.clear_all.connect(self._clear_all)
 
     def _setup_ui(self):
@@ -148,6 +157,7 @@ class DevWindow(QMainWindow):
         self._create_commands_tab()
         self._create_response_tab()
         self._create_memory_tab()
+        self._create_active_thoughts_tab()
 
         # Status bar
         self.status_label = QLabel("Dev mode active")
@@ -266,6 +276,24 @@ class DevWindow(QMainWindow):
 
         self.tabs.addTab(tab, "Memory Recall")
 
+    def _create_active_thoughts_tab(self):
+        """Create the Active Thoughts tab."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # Info label
+        info = QLabel("Shows the AI's active working memory")
+        info.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 11px;")
+        layout.addWidget(info)
+
+        # Content area
+        self.active_thoughts_display = QTextBrowser()
+        self.active_thoughts_display.setFont(QFont("Consolas", 10))
+        self.active_thoughts_display.setOpenExternalLinks(False)
+        layout.addWidget(self.active_thoughts_display)
+
+        self.tabs.addTab(tab, "Active Thoughts")
+
     def _apply_style(self):
         """Apply dark theme styling."""
         self.setStyleSheet(f"""
@@ -355,12 +383,23 @@ class DevWindow(QMainWindow):
             )
         self._update_status(f"Memory recall: {len(data.results)} results")
 
+    def _on_active_thoughts_updated(self, data: ActiveThoughtsData):
+        """Handle active thoughts update."""
+        html = self._format_active_thoughts(data)
+        self.active_thoughts_display.append(html)
+        if self.auto_scroll_check.isChecked():
+            self.active_thoughts_display.verticalScrollBar().setValue(
+                self.active_thoughts_display.verticalScrollBar().maximum()
+            )
+        self._update_status(f"Active thoughts updated: {len(data.thoughts)} items")
+
     def _clear_all(self):
         """Clear all displays."""
         self.prompt_display.clear()
         self.commands_display.clear()
         self.response_display.clear()
         self.memory_display.clear()
+        self.active_thoughts_display.clear()
         self._update_status("Cleared all")
 
     def _update_status(self, message: str):
@@ -560,6 +599,46 @@ class DevWindow(QMainWindow):
         lines.append('</div>')
         return ''.join(lines)
 
+    def _format_active_thoughts(self, data: ActiveThoughtsData) -> str:
+        """Format active thoughts data as HTML."""
+        lines = [
+            f'<div style="margin-bottom: 15px; padding: 10px; background-color: {COLORS["surface_alt"]}; border-radius: 5px;">',
+            f'<div style="color: {COLORS["purple"]}; font-weight: bold; margin-bottom: 8px;">'
+            f'Active Thoughts Updated - {data.timestamp}</div>',
+            f'<div style="color: {COLORS["text_dim"]}; margin-bottom: 10px;">'
+            f'{len(data.thoughts)} item{"s" if len(data.thoughts) != 1 else ""}</div>',
+        ]
+
+        if not data.thoughts:
+            lines.append(
+                f'<div style="color: {COLORS["text_dim"]}; font-style: italic;">List cleared</div>'
+            )
+        else:
+            for thought in sorted(data.thoughts, key=lambda t: t.get("rank", 99)):
+                rank = thought.get("rank", "?")
+                slug = thought.get("slug", "unknown")
+                topic = thought.get("topic", "")[:60]
+                topic = topic.replace("<", "&lt;").replace(">", "&gt;")
+                elaboration = thought.get("elaboration", "")[:120]
+                elaboration = elaboration.replace("<", "&lt;").replace(">", "&gt;")
+
+                # Color gradient based on rank (higher rank = more dimmed)
+                rank_color = COLORS["purple"] if rank <= 3 else (
+                    COLORS["info"] if rank <= 6 else COLORS["text_dim"]
+                )
+
+                lines.append(
+                    f'<div style="margin: 8px 0; padding: 8px; border-left: 3px solid {rank_color};">'
+                    f'<div style="color: {rank_color}; font-weight: bold;">#{rank} [{slug}]</div>'
+                    f'<div style="color: {COLORS["text"]}; margin-top: 3px;">{topic}</div>'
+                    f'<div style="color: {COLORS["text_dim"]}; font-size: 11px; font-style: italic; margin-top: 3px;">'
+                    f'"{elaboration}{"..." if len(thought.get("elaboration", "")) > 120 else ""}"</div>'
+                    f'</div>'
+                )
+
+        lines.append('</div>')
+        return ''.join(lines)
+
 
 # Global instance
 _dev_window: Optional[DevWindow] = None
@@ -655,3 +734,13 @@ def emit_memory_recall(query: str, results: List[Dict[str, Any]]):
             timestamp=datetime.now().strftime("%H:%M:%S.%f")[:-3]
         )
         _dev_window.signals.memory_recall.emit(data)
+
+
+def emit_active_thoughts_update(thoughts: List[Dict[str, Any]]):
+    """Emit active thoughts update to dev window if active."""
+    if _dev_window and config.DEV_MODE_ENABLED:
+        data = ActiveThoughtsData(
+            thoughts=thoughts,
+            timestamp=datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        )
+        _dev_window.signals.active_thoughts_updated.emit(data)

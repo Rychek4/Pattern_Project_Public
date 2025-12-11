@@ -65,9 +65,13 @@ def _register_default_handlers(processor: CommandProcessor) -> None:
         AppendFileHandler,
         ListFilesHandler,
     )
+    from agency.commands.handlers.active_thoughts_handler import SetThoughtsHandler
 
     # Register memory search handler
     processor.register(MemorySearchHandler())
+
+    # Register active thoughts handler
+    processor.register(SetThoughtsHandler())
 
     # Register intention handlers
     processor.register(RemindHandler())

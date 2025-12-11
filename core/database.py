@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from core.logger import log_info, log_success, log_error, log_config, log_section
 
 # Schema version for migrations
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 # SQL schema definition
 SCHEMA_SQL = """
@@ -138,6 +138,17 @@ CREATE TABLE IF NOT EXISTS communication_log (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Active thoughts: AI's working memory - ranked list of current priorities
+CREATE TABLE IF NOT EXISTS active_thoughts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rank INTEGER NOT NULL UNIQUE CHECK(rank >= 1 AND rank <= 10),
+    slug TEXT NOT NULL,
+    topic TEXT NOT NULL,
+    elaboration TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Indexes for efficient queries
 CREATE INDEX IF NOT EXISTS idx_conversations_session ON conversations(session_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_unprocessed ON conversations(processed_for_memory) WHERE processed_for_memory = FALSE;
@@ -153,6 +164,7 @@ CREATE INDEX IF NOT EXISTS idx_intentions_trigger_at ON intentions(trigger_at) W
 CREATE INDEX IF NOT EXISTS idx_intentions_type ON intentions(type);
 CREATE INDEX IF NOT EXISTS idx_communication_log_type ON communication_log(type);
 CREATE INDEX IF NOT EXISTS idx_communication_log_created ON communication_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_active_thoughts_rank ON active_thoughts(rank);
 """
 
 # Migration SQL for v1 -> v2
@@ -478,6 +490,24 @@ CREATE INDEX IF NOT EXISTS idx_communication_log_created ON communication_log(cr
 PRAGMA foreign_keys=ON;
 """
 
+# Migration SQL for v10 -> v11 (add active_thoughts table)
+MIGRATION_V11_SQL = """
+-- Active thoughts: AI's working memory - ranked list of current priorities
+-- This is the AI's private "stream of consciousness" that persists across sessions
+CREATE TABLE IF NOT EXISTS active_thoughts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rank INTEGER NOT NULL UNIQUE CHECK(rank >= 1 AND rank <= 10),
+    slug TEXT NOT NULL,
+    topic TEXT NOT NULL,
+    elaboration TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Index for efficient rank-ordered queries
+CREATE INDEX IF NOT EXISTS idx_active_thoughts_rank ON active_thoughts(rank);
+"""
+
 
 class Database:
     """SQLite database manager with WAL mode and thread-safe connections."""
@@ -631,6 +661,10 @@ class Database:
             if from_version < 10:
                 log_config("Applying migration", "v9 → v10 (replace SMS with Telegram)", indent=1)
                 conn.executescript(MIGRATION_V10_SQL)
+
+            if from_version < 11:
+                log_config("Applying migration", "v10 → v11 (add active_thoughts table)", indent=1)
+                conn.executescript(MIGRATION_V11_SQL)
 
             # Record new version
             conn.execute(
