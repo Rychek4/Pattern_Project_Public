@@ -61,13 +61,35 @@ EMBEDDING_DIMENSIONS = 384
 # MEMORY CONFIGURATION
 # =============================================================================
 MEMORY_EXTRACTION_THRESHOLD = 10  # Unprocessed turns before triggering extraction
-MEMORY_MAX_PER_QUERY = 3  # Max memories to retrieve per query (focused context)
 MEMORY_FRESHNESS_HALF_LIFE_DAYS = 14  # Decay rate for freshness scoring (more recency bias)
 
-# Topic-Based Extraction Settings
+# -----------------------------------------------------------------------------
+# Dual-Track Retrieval Settings
+# -----------------------------------------------------------------------------
+# Memories are now extracted in two categories:
+#   - Episodic: Narrative memories about what happened ("We discussed X")
+#   - Factual: Concrete facts extracted from conversation ("Brian is 45")
+#
+# Retrieval queries both categories separately to ensure balanced results.
+MEMORY_MAX_EPISODIC_PER_QUERY = 5   # Max episodic memories to retrieve
+MEMORY_MAX_FACTUAL_PER_QUERY = 5    # Max factual memories to retrieve
+MEMORY_RELEVANCE_FLOOR = 0.35       # Minimum combined score to include (filters noise)
+
+# Legacy setting (used for tool-based search without category filter)
+MEMORY_MAX_PER_QUERY = 10  # Updated from 3 to accommodate both categories
+
+# -----------------------------------------------------------------------------
+# Dual-Track Extraction Settings
+# -----------------------------------------------------------------------------
+# Both extraction passes run on same trigger (10 unprocessed turns).
+# Episodic extraction uses topic clustering; factual extraction scans whole batch.
+MEMORY_MAX_EPISODIC_PER_EXTRACTION = 3   # Max episodic memories per extraction run
+MEMORY_MAX_FACTUAL_PER_EXTRACTION = 6    # Max factual memories per extraction run (facts are granular)
+
+# Topic-Based Extraction Settings (for episodic extraction)
 # These control how conversations are clustered into topics before memory creation
 MEMORY_MIN_TURNS_PER_TOPIC = 1  # Allow single-turn topics (importance isn't determined by length)
-MEMORY_MAX_PER_EXTRACTION = 3  # Hard cap on memories created per extraction run
+MEMORY_MAX_PER_EXTRACTION = 3  # Legacy: Hard cap on memories (now MEMORY_MAX_EPISODIC_PER_EXTRACTION)
 MEMORY_SKIP_MINOR_TOPICS = True  # Skip topics marked as "minor" significance
 MEMORY_LARGE_TOPIC_THRESHOLD = 15  # Topics with more turns may get 2 memories
 MEMORY_SMALL_BATCH_THRESHOLD = 10  # Below this turn count, preserve all topics (don't skip minor)

@@ -46,6 +46,9 @@ class Memory:
             - 'ephemeral': 7-day half-life (situational observations)
         importance: Significance score from 0.0 to 1.0
         memory_type: Category ('fact', 'preference', 'event', 'reflection', 'observation')
+        memory_category: Extraction method category:
+            - 'episodic': Narrative memories about what happened
+            - 'factual': Concrete facts extracted from conversations
     """
     id: int
     content: str
@@ -59,6 +62,7 @@ class Memory:
     decay_category: str  # 'permanent', 'standard', or 'ephemeral'
     importance: float
     memory_type: Optional[str]
+    memory_category: str = "episodic"  # 'episodic' or 'factual'
 
 
 @dataclass
@@ -117,7 +121,8 @@ class VectorStore:
         source_timestamp: Optional[datetime] = None,
         importance: float = 0.5,
         memory_type: Optional[str] = None,
-        decay_category: str = "standard"
+        decay_category: str = "standard",
+        memory_category: str = "episodic"
     ) -> Optional[int]:
         """
         Add a new memory to the store.
@@ -133,6 +138,9 @@ class VectorStore:
                 - 'permanent': Never decays (core identity, lasting preferences)
                 - 'standard': 30-day half-life (events, discussions)
                 - 'ephemeral': 7-day half-life (situational observations)
+            memory_category: Extraction method category:
+                - 'episodic': Narrative memories about what happened (default)
+                - 'factual': Concrete facts extracted from conversations
 
         Returns:
             The new memory ID, or None if embedding failed
@@ -154,16 +162,13 @@ class VectorStore:
             if source_timestamp is None:
                 source_timestamp = now
 
-            # Note: The database column is still named 'temporal_relevance' for
-            # backward compatibility until migration v6 renames it to 'decay_category'.
-            # The migration maps: 'recent' -> 'standard', 'dated' -> 'ephemeral'
             db.execute(
                 """
                 INSERT INTO memories
                 (content, embedding, source_conversation_ids, source_session_id,
                  source_timestamp, importance, memory_type, decay_category,
-                 created_at, last_accessed_at, access_count)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 memory_category, created_at, last_accessed_at, access_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     content,
@@ -174,6 +179,7 @@ class VectorStore:
                     importance,
                     memory_type,
                     decay_category,
+                    memory_category,
                     now.isoformat(),
                     now.isoformat(),
                     0
@@ -193,6 +199,7 @@ class VectorStore:
         query: str,
         limit: int = 10,
         memory_type: Optional[str] = None,
+        memory_category: Optional[str] = None,
         min_score: float = 0.0
     ) -> List[MemorySearchResult]:
         """
@@ -201,7 +208,8 @@ class VectorStore:
         Args:
             query: The search query
             limit: Maximum results to return
-            memory_type: Filter by memory type
+            memory_type: Filter by memory type ('fact', 'preference', etc.)
+            memory_category: Filter by extraction category ('episodic' or 'factual')
             min_score: Minimum combined score threshold
 
         Returns:
@@ -220,13 +228,21 @@ class VectorStore:
             db = get_database()
             now = datetime.now()
 
-            # Build query
+            # Build query with optional filters
             sql = "SELECT * FROM memories"
+            conditions = []
             params = []
 
             if memory_type:
-                sql += " WHERE memory_type = ?"
+                conditions.append("memory_type = ?")
                 params.append(memory_type)
+
+            if memory_category:
+                conditions.append("memory_category = ?")
+                params.append(memory_category)
+
+            if conditions:
+                sql += " WHERE " + " AND ".join(conditions)
 
             result = db.execute(sql, tuple(params), fetch=True)
 
@@ -438,6 +454,11 @@ class VectorStore:
         }
         decay_category = legacy_mapping.get(decay_category, decay_category)
 
+        # Handle memory_category with default for pre-v12 databases
+        # All existing memories are treated as 'episodic' since they were extracted
+        # using the narrative-focused prompts before dual-track extraction was added
+        memory_category = row["memory_category"] if row["memory_category"] else "episodic"
+
         return Memory(
             id=row["id"],
             content=row["content"],
@@ -450,7 +471,8 @@ class VectorStore:
             source_timestamp=source_timestamp,
             decay_category=decay_category,
             importance=row["importance"],
-            memory_type=row["memory_type"]
+            memory_type=row["memory_type"],
+            memory_category=memory_category
         )
 
 
