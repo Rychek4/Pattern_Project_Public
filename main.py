@@ -44,7 +44,10 @@ from memory.extractor import init_memory_extractor
 from interface.cli import init_cli, get_cli
 from interface.http_api import init_http_server, get_http_server
 from agency.proactive import init_proactive_agent, get_proactive_agent
-from agency.visual_capture import init_visual_capture, get_visual_capture
+# Visual capture is now stateless - no init/start/stop lifecycle needed.
+# Capture happens on-demand via capture_all_visuals() in gui.py.
+# Import availability checker for startup logging only.
+from agency.visual_capture import is_visual_capture_available
 from agency.system_pulse import init_system_pulse_timer, get_system_pulse_timer
 from agency.intentions import init_reminder_scheduler, get_reminder_scheduler
 from subprocess_mgmt.manager import init_subprocess_manager, get_subprocess_manager
@@ -161,14 +164,14 @@ def initialize_system() -> bool:
     # Initialize reminder scheduler
     init_reminder_scheduler(enabled=True)
 
-    # Initialize visual capture if enabled
+    # Visual capture check - the new system is stateless (no init needed).
+    # Just verify availability for startup logging.
     if config.VISUAL_ENABLED:
-        init_visual_capture(
-            gemini_api_key=config.GOOGLE_API_KEY,
-            capture_interval=config.VISUAL_CAPTURE_INTERVAL,
-            enable_screenshot=config.VISUAL_SCREENSHOT_ENABLED,
-            enable_webcam=config.VISUAL_WEBCAM_ENABLED
-        )
+        screenshot_ok, webcam_ok = is_visual_capture_available()
+        if not screenshot_ok and config.VISUAL_SCREENSHOT_ENABLED:
+            log_warning("Screenshot capture unavailable (PIL not installed)")
+        if not webcam_ok and config.VISUAL_WEBCAM_ENABLED:
+            log_warning("Webcam capture unavailable (OpenCV not installed)")
 
     # Initialize subprocess manager and register subprocesses
     init_subprocess_manager()
@@ -296,11 +299,10 @@ def start_background_services() -> None:
     reminder_scheduler.start()
     log_subsection("Reminder scheduler started")
 
-    # Start visual capture if enabled
+    # Visual capture is stateless - no background service to start.
+    # Capture happens on-demand when building messages in gui.py.
     if config.VISUAL_ENABLED:
-        visual_capture = get_visual_capture()
-        visual_capture.start()
-        log_subsection("Visual capture started")
+        log_subsection("Visual capture ready (on-demand)")
 
     # Start subprocess manager monitoring
     subprocess_mgr = get_subprocess_manager()
@@ -360,14 +362,8 @@ def stop_background_services() -> None:
     except Exception as e:
         log_error(f"Error stopping reminder scheduler: {e}")
 
-    # Stop visual capture if enabled
-    if config.VISUAL_ENABLED:
-        try:
-            visual_capture = get_visual_capture()
-            visual_capture.stop()
-            log_subsection("Visual capture stopped")
-        except Exception as e:
-            log_error(f"Error stopping visual capture: {e}")
+    # Visual capture is stateless - no background service to stop.
+    # Nothing to clean up here.
 
     # Stop subprocesses
     try:
