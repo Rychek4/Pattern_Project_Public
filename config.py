@@ -183,7 +183,7 @@ MEMORY_PROMOTION_THRESHOLD = 0.85  # Score threshold for core memory promotion
 #
 # In auto mode, both screenshot and webcam are attached to each message.
 # In on_demand mode, the AI can request captures using command syntax.
-VISUAL_ENABLED = os.getenv("VISUAL_ENABLED", "false").lower() == "true"
+VISUAL_ENABLED = os.getenv("VISUAL_ENABLED", "true").lower() == "true"
 VISUAL_CAPTURE_MODE = os.getenv("VISUAL_CAPTURE_MODE", "auto")  # "auto" or "on_demand"
 VISUAL_SCREENSHOT_ENABLED = os.getenv("VISUAL_SCREENSHOT_ENABLED", "true").lower() == "true"
 VISUAL_WEBCAM_ENABLED = os.getenv("VISUAL_WEBCAM_ENABLED", "true").lower() == "true"
