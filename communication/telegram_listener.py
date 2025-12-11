@@ -3,20 +3,31 @@ Pattern Project - Telegram Listener
 Background polling for inbound Telegram messages.
 
 This module polls the Telegram Bot API for new messages from the user
-and triggers AI responses when messages arrive.
+and triggers AI responses when messages arrive. Supports both text
+messages and photo attachments (single image per message).
 """
 
 import asyncio
+import io
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional, Callable, List
+from typing import Optional, Callable, List, TYPE_CHECKING
 
 from telegram import Bot, Update
 from telegram.error import TelegramError
 
 from core.logger import log_info, log_error, log_warning, log_success
+
+# Type hint for ImageContent without circular import
+if TYPE_CHECKING:
+    from agency.visual_capture import ImageContent
+
+
+# Constants for Telegram image handling
+TELEGRAM_IMAGE_MAX_SIZE = (640, 480)  # Match webcam resolution for consistency
+TELEGRAM_IMAGE_QUALITY = 85  # JPEG quality
 
 
 @dataclass
@@ -25,17 +36,19 @@ class InboundMessage:
     Represents an inbound message from Telegram.
 
     Attributes:
-        text: The message text
+        text: The message text (or caption for photos)
         chat_id: The chat this message came from
         message_id: Telegram's message ID
         timestamp: When the message was received
         from_user: Username or first name of sender
+        image: Optional image attachment (max 1 per message)
     """
     text: str
     chat_id: str
     message_id: int
     timestamp: datetime
     from_user: str
+    image: Optional["ImageContent"] = field(default=None)
 
 
 class TelegramListener:
@@ -80,6 +93,75 @@ class TelegramListener:
         if self._bot is None:
             self._bot = Bot(token=self.bot_token)
         return self._bot
+
+    async def _download_and_process_photo(self, photo_list) -> Optional["ImageContent"]:
+        """
+        Download and process a photo from Telegram.
+
+        Takes the largest available photo size, downloads it, resizes to
+        a reasonable dimension, and formats for Claude's multimodal API.
+
+        Args:
+            photo_list: List of PhotoSize objects from Telegram (sorted by size)
+
+        Returns:
+            ImageContent object ready for Claude API, or None on failure
+        """
+        if not photo_list:
+            return None
+
+        try:
+            # Import image processing utilities
+            from PIL import Image
+            from agency.visual_capture import format_image_for_claude
+
+            bot = self._get_bot()
+
+            # Get the largest photo (last in list, sorted by size)
+            largest_photo = photo_list[-1]
+
+            # Download the file
+            file = await bot.get_file(largest_photo.file_id)
+            image_bytes = await file.download_as_bytearray()
+
+            if not image_bytes:
+                log_warning("Telegram photo download returned empty data")
+                return None
+
+            # Resize if needed (like webcam: 640x480 for consistency)
+            image = Image.open(io.BytesIO(image_bytes))
+
+            # Resize maintaining aspect ratio
+            image.thumbnail(TELEGRAM_IMAGE_MAX_SIZE, Image.Resampling.LANCZOS)
+
+            # Convert to JPEG bytes
+            output_buffer = io.BytesIO()
+            # Convert to RGB if necessary (handles PNG with alpha)
+            if image.mode in ('RGBA', 'LA', 'P'):
+                image = image.convert('RGB')
+            image.save(output_buffer, format='JPEG', quality=TELEGRAM_IMAGE_QUALITY)
+            processed_bytes = output_buffer.getvalue()
+
+            # Format for Claude API
+            image_content = format_image_for_claude(
+                processed_bytes,
+                source_type="telegram"
+            )
+
+            log_info(
+                f"Telegram photo processed: {len(processed_bytes)} bytes "
+                f"({image.width}x{image.height})",
+                prefix="📷"
+            )
+
+            return image_content
+
+        except ImportError as e:
+            log_warning(f"PIL not available for Telegram image processing: {e}")
+            return None
+        except Exception as e:
+            log_error(f"Failed to download/process Telegram photo: {e}")
+            return None
 
     def get_bot(self) -> Bot:
         """
@@ -155,6 +237,10 @@ class TelegramListener:
         """
         Poll for new messages once.
 
+        Handles both text messages and photo attachments. For photos,
+        downloads the image and formats it for Claude's multimodal API.
+        Only one image per message is processed (first photo if multiple).
+
         Returns:
             List of new InboundMessage objects
         """
@@ -174,11 +260,23 @@ class TelegramListener:
                 # Update the offset to acknowledge this update
                 self._last_update_id = update.update_id
 
-                # Skip if no message
-                if not update.message or not update.message.text:
+                # Skip if no message at all
+                if not update.message:
                     continue
 
                 msg = update.message
+
+                # Determine if this is a processable message:
+                # - Has text (regular text message)
+                # - Has photo (image attachment, may have caption)
+                has_text = bool(msg.text)
+                has_photo = bool(msg.photo)
+
+                # Skip messages with neither text nor photo
+                # (e.g., documents, videos, voice - not supported)
+                if not has_text and not has_photo:
+                    continue
+
                 chat_id = str(msg.chat.id)
 
                 # Auto-detect chat ID if not set
@@ -204,12 +302,31 @@ class TelegramListener:
                 if msg.from_user:
                     from_user = msg.from_user.username or msg.from_user.first_name or ""
 
+                # Determine message text
+                # For photos: use caption, or default placeholder
+                # For text: use the text content
+                if has_photo:
+                    text_content = msg.caption or "[User sent an image]"
+                else:
+                    text_content = msg.text
+
+                # Process photo attachment if present (max 1 image)
+                image_content = None
+                if has_photo:
+                    log_info(f"Processing Telegram photo from {from_user}", prefix="📷")
+                    image_content = await self._download_and_process_photo(msg.photo)
+                    if image_content:
+                        log_info("Telegram photo attached to message", prefix="📷")
+                    else:
+                        log_warning("Failed to process Telegram photo, continuing with text only")
+
                 inbound = InboundMessage(
-                    text=msg.text,
+                    text=text_content,
                     chat_id=chat_id,
                     message_id=msg.message_id,
                     timestamp=msg.date or datetime.now(),
-                    from_user=from_user
+                    from_user=from_user,
+                    image=image_content
                 )
                 messages.append(inbound)
 

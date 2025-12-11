@@ -87,7 +87,7 @@ class AnthropicClient:
 
     def chat(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         system_prompt: Optional[str] = None,
         max_tokens: Optional[int] = None,
         temperature: float = 0.7,
@@ -98,8 +98,22 @@ class AnthropicClient:
         """
         Send a chat completion request.
 
+        Supports both text-only and multimodal messages.
+
+        Text-only message format:
+            {"role": "user", "content": "Hello"}
+
+        Multimodal message format (with images):
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "..."}},
+                    {"type": "text", "text": "What's in this image?"}
+                ]
+            }
+
         Args:
-            messages: List of {"role": "user"|"assistant", "content": "..."}
+            messages: List of message dicts. Content can be string or content array.
             system_prompt: Optional system prompt
             max_tokens: Maximum tokens to generate (uses default if None)
             temperature: Sampling temperature

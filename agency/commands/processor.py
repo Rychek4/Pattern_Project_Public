@@ -5,10 +5,14 @@ Core two-pass engine for AI command execution
 
 import re
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any, TYPE_CHECKING
 
 from agency.commands.handlers.base import CommandHandler, CommandResult
 from core.logger import log_info, log_warning, log_error
+
+# Type hint for ImageContent without circular import
+if TYPE_CHECKING:
+    from agency.visual_capture import ImageContent
 
 
 @dataclass
@@ -21,13 +25,19 @@ class ProcessedResponse:
         display_text: Text formatted for display (commands may be styled)
         commands_executed: List of all executed commands
         needs_continuation: Whether a second LLM pass is required
-        continuation_prompt: Formatted prompt for pass 2 (if needed)
+        continuation_prompt: Formatted prompt text for pass 2 (if needed)
+        continuation_images: Images to attach to continuation message
     """
     original_text: str
     display_text: str
     commands_executed: List[CommandResult] = field(default_factory=list)
     needs_continuation: bool = False
     continuation_prompt: Optional[str] = None
+    continuation_images: Optional[List["ImageContent"]] = field(default=None)
+
+    def has_continuation_images(self) -> bool:
+        """Check if there are images to include in continuation."""
+        return self.continuation_images is not None and len(self.continuation_images) > 0
 
 
 class CommandProcessor:
@@ -128,10 +138,11 @@ class CommandProcessor:
                     ))
                     needs_continuation = True
 
-        # Build continuation prompt if needed
+        # Build continuation prompt and collect images if needed
         continuation_prompt = None
+        continuation_images = None
         if needs_continuation and commands_executed:
-            continuation_prompt = self._build_continuation_prompt(commands_executed)
+            continuation_prompt, continuation_images = self._build_continuation_prompt(commands_executed)
 
         # Format display text
         display_text = self._format_display_text(response_text, commands_executed)
@@ -141,28 +152,39 @@ class CommandProcessor:
             display_text=display_text,
             commands_executed=commands_executed,
             needs_continuation=needs_continuation,
-            continuation_prompt=continuation_prompt
+            continuation_prompt=continuation_prompt,
+            continuation_images=continuation_images
         )
 
-    def _build_continuation_prompt(self, results: List[CommandResult]) -> str:
+    def _build_continuation_prompt(self, results: List[CommandResult]) -> tuple:
         """
         Build the continuation prompt with command results.
 
         Includes both successful commands that need continuation AND
         any commands that encountered errors (so AI can recover).
+        Also collects any images from visual commands.
 
         Args:
             results: List of CommandResult from executed commands
 
         Returns:
-            Formatted prompt string for pass 2
+            Tuple of (prompt_text, images_list) for pass 2
         """
         lines = ["[Command Results]", ""]
+        collected_images = []
 
         for result in results:
             # Include commands that need continuation OR had errors
             if result.needs_continuation or result.error:
                 handler = self._handlers.get(result.command_name)
+
+                # Collect images from visual commands
+                if result.has_images():
+                    collected_images.extend(result.image_data)
+                    log_info(
+                        f"Collected {len(result.image_data)} image(s) from [[{result.command_name}]]",
+                        prefix="🖼️"
+                    )
 
                 # Format the result data
                 if handler:
@@ -180,12 +202,20 @@ class CommandProcessor:
                 else:
                     formatted = str(result.data)
 
-                lines.append(f"Your [[{result.command_name}: {result.query}]] returned:")
+                # Use command name without query for parameterless commands
+                if result.query:
+                    lines.append(f"Your [[{result.command_name}: {result.query}]] returned:")
+                else:
+                    lines.append(f"Your [[{result.command_name}]] returned:")
                 lines.append(formatted)
                 lines.append("")
 
         lines.append("Continue your response naturally, incorporating this information.")
-        return "\n".join(lines)
+
+        prompt_text = "\n".join(lines)
+        images_list = collected_images if collected_images else None
+
+        return prompt_text, images_list
 
     def _format_display_text(self, text: str, results: List[CommandResult]) -> str:
         """

@@ -202,11 +202,11 @@ def create_default_builder() -> PromptBuilder:
     Returns:
         Configured PromptBuilder
     """
+    import config
     from prompt_builder.sources.core_memory import CoreMemorySource
     from prompt_builder.sources.semantic_memory import SemanticMemorySource
     from prompt_builder.sources.conversation import ConversationSource
     from prompt_builder.sources.temporal import TemporalSource
-    from prompt_builder.sources.visual import VisualSource
     from prompt_builder.sources.system_pulse import SystemPulseSource
     from prompt_builder.sources.ai_commands import AICommandsSource
     from prompt_builder.sources.intention_source import IntentionSource
@@ -226,10 +226,20 @@ def create_default_builder() -> PromptBuilder:
         SystemPulseSource(),
         AICommandsSource(),
         TemporalSource(),
-        VisualSource(),
         SemanticMemorySource(),
         ConversationSource(),
     ]
+
+    # Legacy VisualSource is disabled by default
+    # The new visual capture system sends images directly to Claude via multimodal messages
+    # VisualSource (which used Gemini for text descriptions) is kept for potential fallback
+    # To enable legacy mode, set VISUAL_CAPTURE_MODE="legacy" (not currently implemented)
+    if getattr(config, 'VISUAL_CAPTURE_MODE', 'auto') == "legacy":
+        from prompt_builder.sources.visual import VisualSource
+        sources.append(VisualSource())
+        log_info("Legacy VisualSource enabled (Gemini text descriptions)", prefix="📷")
+    else:
+        log_info("VisualSource disabled (using direct Claude multimodal)", prefix="📷")
 
     for source in sources:
         builder.register_source(source)

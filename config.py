@@ -174,10 +174,22 @@ MEMORY_PROMOTION_THRESHOLD = 0.85  # Score threshold for core memory promotion
 # =============================================================================
 # VISUAL CAPTURE CONFIGURATION
 # =============================================================================
+# Visual capture sends screenshots and webcam images directly to Claude for
+# interpretation. Images are attached to user messages as multimodal content.
+#
+# Capture modes:
+#   - "auto": Capture screenshot and webcam on every prompt (user input or pulse)
+#   - "on_demand": Only capture when AI uses [[SCREENSHOT]] or [[WEBCAM]] commands
+#
+# In auto mode, both screenshot and webcam are attached to each message.
+# In on_demand mode, the AI can request captures using command syntax.
 VISUAL_ENABLED = os.getenv("VISUAL_ENABLED", "false").lower() == "true"
+VISUAL_CAPTURE_MODE = os.getenv("VISUAL_CAPTURE_MODE", "auto")  # "auto" or "on_demand"
+VISUAL_SCREENSHOT_ENABLED = os.getenv("VISUAL_SCREENSHOT_ENABLED", "true").lower() == "true"
+VISUAL_WEBCAM_ENABLED = os.getenv("VISUAL_WEBCAM_ENABLED", "true").lower() == "true"
+
+# Legacy: Timer-based capture interval (deprecated, kept for fallback system)
 VISUAL_CAPTURE_INTERVAL = int(os.getenv("VISUAL_CAPTURE_INTERVAL", "30"))
-VISUAL_SCREENSHOT_ENABLED = True
-VISUAL_WEBCAM_ENABLED = True
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 
 # =============================================================================
