@@ -117,18 +117,17 @@ Conversation:
 
 Write your memory:"""
 
-# Pass 2: Rate importance (single number)
-MEMORY_IMPORTANCE_PROMPT = """Rate the importance of this memory from 0 to 10.
+# Pass 2: Rate importance (categorical - more reliable than numeric scale)
+MEMORY_IMPORTANCE_PROMPT = """Rate this memory's importance.
 
-Scoring guide:
-- 8-10: Major decisions, strong preferences, significant events, personal revelations
-- 5-7: Useful information, moderate preferences, notable interactions
-- 2-4: Minor details, casual observations, brief exchanges
-- 0-1: Trivial or forgettable
+Choose ONE:
+- HIGH: Life decisions, identity insights, strong preferences, significant milestones
+- MEDIUM: Useful context, notable conversations, moderate preferences
+- LOW: Casual observations, minor details, brief or forgettable exchanges
 
 Memory: {content}
 
-Respond with only a number from 0 to 10:"""
+Respond with one word (HIGH, MEDIUM, or LOW):"""
 
 # Pass 3: Classify type (single word)
 MEMORY_TYPE_PROMPT = """Classify this memory into one category.
@@ -925,25 +924,36 @@ class MemoryExtractor:
     def _parse_importance_response(self, response_text: str) -> float:
         """
         Parse importance rating from LLM response.
-        Expects a number 0-10, converts to 0.0-1.0 scale.
-        Returns 0.5 as default if parsing fails.
+        Expects categorical: HIGH, MEDIUM, or LOW.
+        Maps to: HIGH → 0.85, MEDIUM → 0.55, LOW → 0.25
+        Returns 0.55 (MEDIUM) as default if parsing fails.
         """
-        text = response_text.strip()
+        text = response_text.strip().lower()
 
-        # Extract first number found
+        # Map categorical responses to numerical values
+        # These values are chosen to create meaningful differentiation:
+        # - HIGH (0.85): Will often become "permanent" for facts/preferences
+        # - MEDIUM (0.55): Standard decay, useful but not critical
+        # - LOW (0.25): Below importance floor (0.3), will be filtered out
+        if "high" in text:
+            return 0.85
+        elif "medium" in text:
+            return 0.55
+        elif "low" in text:
+            return 0.25
+
+        # Fallback: check for legacy numeric responses (in case of model variation)
         match = re.search(r'(\d+(?:\.\d+)?)', text)
         if match:
             try:
                 value = float(match.group(1))
-                # Convert 0-10 scale to 0.0-1.0
                 if value > 1.0:
                     value = value / 10.0
-                # Clamp to valid range
                 return max(0.0, min(1.0, value))
             except ValueError:
                 pass
 
-        return 0.5  # Default
+        return 0.55  # Default to MEDIUM
 
     def _parse_type_response(self, response_text: str) -> str:
         """

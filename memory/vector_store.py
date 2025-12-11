@@ -318,8 +318,8 @@ class VectorStore:
         if not memory.source_timestamp:
             return 0.5
 
-        # Calculate age in days
-        age_days = (now - memory.source_timestamp).days
+        # Calculate age in days (guard against negative age from clock skew/timezone issues)
+        age_days = max(0, (now - memory.source_timestamp).days)
 
         # Select half-life based on decay category
         # Using a dict lookup with fallback to standard for any unexpected values
@@ -334,7 +334,8 @@ class VectorStore:
         # Exponential decay: ln(2) ≈ 0.693 gives proper half-life behavior
         # At age = half_life_days, score = 0.5
         # At age = 2 * half_life_days, score = 0.25
-        return math.exp(-0.693 * age_days / half_life_days)
+        # Clamp to 1.0 as a safety measure (should already be <= 1.0 with non-negative age)
+        return min(1.0, math.exp(-0.693 * age_days / half_life_days))
 
     def _compute_access_score(self, memory: Memory, now: datetime) -> float:
         """Compute access recency score."""
