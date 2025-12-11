@@ -50,6 +50,7 @@ class ChatCLI:
         self._system_pulse_timer = None
         self._reminder_scheduler = None
         self._telegram_listener = None
+        self._is_first_message_of_session = True  # Track for next_session reminder triggers
         self._setup_commands()
 
     def _setup_commands(self) -> None:
@@ -149,10 +150,13 @@ class ChatCLI:
                 )
 
                 # Build rich prompt with all context sources (no base prompt - emergent personality)
+                # Pass is_session_start flag to trigger next_session reminders on first message
                 assembled = prompt_builder.build(
                     user_input=user_input,
-                    system_prompt=""
+                    system_prompt="",
+                    additional_context={"is_session_start": self._is_first_message_of_session}
                 )
+                self._is_first_message_of_session = False  # Only first message triggers session start
 
                 # Display dev mode prompt assembly info
                 self._display_dev_prompt_assembly(assembled)
@@ -809,6 +813,7 @@ class ChatCLI:
             self._cmd_end_session("")
 
         session_id = tracker.start_session()
+        self._is_first_message_of_session = True  # Reset flag for next_session reminder triggers
         self.console.print(f"[green]Started new session {session_id}[/green]")
 
     def _cmd_stats(self, args: str) -> None:

@@ -141,6 +141,7 @@ class ChatWindow(QMainWindow):
         self._first_session_start: Optional[datetime] = None
         self._is_processing = False
         self._message_queue = queue.Queue()
+        self._is_first_message_of_session = True  # Track for next_session reminder triggers
 
         # Backend references (set during initialization)
         self._conversation_mgr = None
@@ -813,10 +814,13 @@ class ChatWindow(QMainWindow):
                 )
 
             # Build prompt (no base prompt - emergent personality from context)
+            # Pass is_session_start flag to trigger next_session reminders on first message
             assembled = self._prompt_builder.build(
                 user_input=user_input,
-                system_prompt=""
+                system_prompt="",
+                additional_context={"is_session_start": self._is_first_message_of_session}
             )
+            self._is_first_message_of_session = False  # Only first message triggers session start
 
             # Emit prompt assembly to dev window
             if config.DEV_MODE_ENABLED:
