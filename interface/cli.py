@@ -387,6 +387,19 @@ class ChatCLI:
             if self._system_pulse_timer:
                 self._system_pulse_timer.pause()
 
+            # Run agency economy cycle if enabled
+            agency_decision = None
+            if config.AGENCY_ECONOMY_ENABLED:
+                from agency.economy import get_agency_engine
+                engine = get_agency_engine()
+                agency_decision = engine.on_wakeup(trigger_type="pulse")
+
+                # Apply tempo decision to pulse timer if one was made
+                if agency_decision.tempo_decision and self._system_pulse_timer:
+                    new_interval = agency_decision.tempo_decision.selected_option.wakeup_minutes * 60
+                    self._system_pulse_timer.pulse_interval = new_interval
+                    log_info(f"Pulse interval set to {new_interval}s", prefix="⏱️")
+
             # Show pulse indicator
             self.console.print()
             self.console.print("[bold magenta]⏱️ System Pulse[/bold magenta]")

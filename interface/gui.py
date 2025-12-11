@@ -1062,6 +1062,20 @@ class ChatWindow(QMainWindow):
                 self._system_pulse_timer.pause()
                 log_info("PULSE DEBUG: Timer paused", prefix="🔍")
 
+            # Run agency economy cycle if enabled
+            agency_decision = None
+            if config.AGENCY_ECONOMY_ENABLED:
+                from agency.economy import get_agency_engine
+                engine = get_agency_engine()
+                agency_decision = engine.on_wakeup(trigger_type="pulse")
+                log_info(f"PULSE DEBUG: Agency decision made, AI acting: {agency_decision.ai_is_acting}", prefix="🔍")
+
+                # Apply tempo decision to pulse timer if one was made
+                if agency_decision.tempo_decision and self._system_pulse_timer:
+                    new_interval = agency_decision.tempo_decision.selected_option.wakeup_minutes * 60
+                    self._system_pulse_timer.pulse_interval = new_interval
+                    log_info(f"Pulse interval set to {new_interval}s by tempo decision", prefix="⏱️")
+
             # Update UI status
             self.signals.update_status.emit("System pulse...")
 
