@@ -44,9 +44,10 @@ class TemporalSource(ContextSource):
         # Convert to semantic description
         semantic_text = temporal_context_to_semantic(context)
 
-        # Format for prompt
+        # Format for prompt (handle multi-line content with proper indentation)
         lines = ["<temporal_context>"]
-        lines.append(f"  {semantic_text}")
+        for line in semantic_text.split("\n"):
+            lines.append(f"  {line}")
         lines.append("</temporal_context>")
 
         # Store context in session for other sources

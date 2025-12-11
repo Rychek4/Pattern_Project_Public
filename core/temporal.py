@@ -396,19 +396,79 @@ def format_fuzzy_relative_time(dt: datetime) -> str:
         return "A while ago"
 
 
+def get_gap_descriptor(gap_seconds: float) -> str:
+    """
+    Get a human-readable descriptor for a session gap.
+
+    Args:
+        gap_seconds: Duration of gap between sessions in seconds
+
+    Returns:
+        Descriptor like 'brief pause', 'overnight', etc.
+    """
+    if gap_seconds < 300:  # 5 minutes
+        return "brief pause"
+    elif gap_seconds < 1800:  # 30 minutes
+        return "short break"
+    elif gap_seconds < 7200:  # 2 hours
+        return "stepped away"
+    elif gap_seconds < 21600:  # 6 hours
+        return "extended break"
+    elif gap_seconds < 43200:  # 12 hours
+        return "long absence"
+    else:
+        return "extended time away"
+
+
+def format_session_duration(session_started_at: datetime) -> str:
+    """
+    Format how long the current session has been active.
+
+    Args:
+        session_started_at: When the session started
+
+    Returns:
+        Fuzzy duration like '45 minutes ago', 'Just now', etc.
+    """
+    return format_fuzzy_relative_time(session_started_at)
+
+
 def temporal_context_to_semantic(context: TemporalContext) -> str:
     """
     Convert temporal context to semantic/natural language for prompts.
 
     Returns a simple, human-like time description rather than precise timestamps.
+    Includes session duration and gap since last session when available.
 
     Args:
         context: The temporal context to convert
 
     Returns:
-        Semantic description like 'The current time is Sunday Morning. Early December.'
+        Semantic description with current time, session duration, and session gap.
     """
-    return f"The current time is {format_semantic_current_time(context.current_time)}"
+    lines = [format_semantic_current_time(context.current_time)]
+
+    # Add session duration if available
+    if context.session_started_at:
+        duration_str = format_session_duration(context.session_started_at)
+        lines.append(f"Session started: {duration_str}")
+
+    # Add gap since last session if available
+    if context.last_session_ended_at:
+        gap_str = format_fuzzy_relative_time(context.last_session_ended_at)
+
+        # Calculate gap descriptor based on time between sessions
+        if context.session_started_at:
+            gap_seconds = (context.session_started_at - context.last_session_ended_at).total_seconds()
+            if gap_seconds > 0:
+                descriptor = get_gap_descriptor(gap_seconds)
+                lines.append(f"Last session ended: {gap_str} ({descriptor})")
+            else:
+                lines.append(f"Last session ended: {gap_str}")
+        else:
+            lines.append(f"Last session ended: {gap_str}")
+
+    return "\n".join(lines)
 
 
 # Global temporal tracker instance
