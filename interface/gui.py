@@ -694,6 +694,79 @@ class ChatWindow(QMainWindow):
         )
         thread.start()
 
+    def _capture_visuals_for_message(self, text_content: str) -> dict:
+        """
+        Capture visual content and build a multimodal message if enabled.
+
+        In auto mode with VISUAL_ENABLED, captures screenshot and/or webcam
+        and returns a message dict with multimodal content array.
+
+        In on_demand mode or when disabled, returns a simple text message.
+
+        Args:
+            text_content: The text content for the message
+
+        Returns:
+            Message dict suitable for LLM API (text-only or multimodal)
+        """
+        # Check if visual capture is enabled and in auto mode
+        if not config.VISUAL_ENABLED or config.VISUAL_CAPTURE_MODE != "auto":
+            return {"role": "user", "content": text_content}
+
+        try:
+            from agency.visual_capture import capture_all_visuals, build_multimodal_content
+
+            # Capture all enabled visual sources
+            images = capture_all_visuals()
+
+            if not images:
+                # No images captured (failed or disabled), use text-only
+                return {"role": "user", "content": text_content}
+
+            # Build multimodal content array
+            content_array = build_multimodal_content(text_content, images)
+
+            log_info(
+                f"Built multimodal message with {len(images)} image(s)",
+                prefix="👁️"
+            )
+
+            return {"role": "user", "content": content_array}
+
+        except Exception as e:
+            log_error(f"Visual capture error, falling back to text-only: {e}")
+            return {"role": "user", "content": text_content}
+
+    def _build_continuation_message(self, prompt_text: str, images=None) -> dict:
+        """
+        Build a continuation message, optionally with images from commands.
+
+        Args:
+            prompt_text: The continuation prompt text
+            images: Optional list of ImageContent from command results
+
+        Returns:
+            Message dict (text-only or multimodal)
+        """
+        if not images:
+            return {"role": "user", "content": prompt_text}
+
+        try:
+            from agency.visual_capture import build_multimodal_content
+
+            content_array = build_multimodal_content(prompt_text, images)
+
+            log_info(
+                f"Built multimodal continuation with {len(images)} image(s)",
+                prefix="🖼️"
+            )
+
+            return {"role": "user", "content": content_array}
+
+        except Exception as e:
+            log_error(f"Failed to build multimodal continuation: {e}")
+            return {"role": "user", "content": prompt_text}
+
     def _process_message(self, user_input: str):
         """Process a message in background thread."""
         import time
@@ -730,6 +803,11 @@ class ChatWindow(QMainWindow):
 
             # Get conversation history
             history = self._conversation_mgr.get_recent_history(limit=30)
+
+            # Capture visuals and build multimodal message if in auto mode
+            # This adds the current user input with any captured images
+            user_message = self._capture_visuals_for_message(user_input)
+            history.append(user_message)
 
             # Get LLM response
             from llm.router import TaskType
@@ -802,9 +880,15 @@ class ChatWindow(QMainWindow):
                     else:
                         self.signals.update_status.emit(f"Executing command (pass {pass_num})...")
 
-                    # Build continuation history
+                    # Build continuation history with potential images from commands
                     current_history.append({"role": "assistant", "content": current_text})
-                    current_history.append({"role": "user", "content": processed.continuation_prompt})
+
+                    # Build continuation message (may include images from visual commands)
+                    continuation_msg = self._build_continuation_message(
+                        processed.continuation_prompt,
+                        processed.continuation_images
+                    )
+                    current_history.append(continuation_msg)
 
                     # Get next response
                     cont_start = time.time()
@@ -1103,7 +1187,9 @@ class ChatWindow(QMainWindow):
 
             # Add the pulse prompt as the message to respond to
             # (role="user" is an API constraint, but content clarifies it's automated)
-            history.append({"role": "user", "content": pulse_prompt})
+            # Capture visuals for the pulse message (same as user messages in auto mode)
+            pulse_message = self._capture_visuals_for_message(pulse_prompt)
+            history.append(pulse_message)
             log_info(f"PULSE DEBUG: Added pulse_prompt to history, now {len(history)} messages", prefix="🔍")
 
             # Get LLM response
@@ -1142,10 +1228,16 @@ class ChatWindow(QMainWindow):
                 if processed.needs_continuation:
                     self.signals.update_status.emit("Executing command...")
 
-                    # Build continuation
+                    # Build continuation with potential images from commands
                     continuation_history = history.copy()
                     continuation_history.append({"role": "assistant", "content": response.text})
-                    continuation_history.append({"role": "user", "content": processed.continuation_prompt})
+
+                    # Build continuation message (may include images from visual commands)
+                    continuation_msg = self._build_continuation_message(
+                        processed.continuation_prompt,
+                        processed.continuation_images
+                    )
+                    continuation_history.append(continuation_msg)
 
                     continuation = self._llm_router.chat(
                         messages=continuation_history,

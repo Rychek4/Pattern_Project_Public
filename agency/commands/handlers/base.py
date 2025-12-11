@@ -4,10 +4,14 @@ Abstract interface for AI command handlers
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Any, Optional, Union
+from dataclasses import dataclass, field
+from typing import Any, Optional, Union, List, TYPE_CHECKING
 
 from agency.commands.errors import ToolError
+
+# Type hint for ImageContent without circular import
+if TYPE_CHECKING:
+    from agency.visual_capture import ImageContent
 
 
 @dataclass
@@ -22,6 +26,7 @@ class CommandResult:
         needs_continuation: Whether AI needs to see results in pass 2
         display_text: Optional user-facing status text
         error: Error message or ToolError if execution failed
+        image_data: Optional list of ImageContent for visual commands
     """
     command_name: str
     query: str
@@ -29,6 +34,7 @@ class CommandResult:
     needs_continuation: bool
     display_text: Optional[str] = None
     error: Optional[Union[str, ToolError]] = None
+    image_data: Optional[List["ImageContent"]] = field(default=None)
 
     def get_error_message(self) -> Optional[str]:
         """
@@ -42,6 +48,15 @@ class CommandResult:
         if isinstance(self.error, ToolError):
             return self.error.format_for_ai()
         return str(self.error)
+
+    def has_images(self) -> bool:
+        """
+        Check if this result contains image data.
+
+        Returns:
+            True if image_data is not None and not empty
+        """
+        return self.image_data is not None and len(self.image_data) > 0
 
 
 class CommandHandler(ABC):

@@ -97,6 +97,24 @@ def _register_default_handlers(processor: CommandProcessor) -> None:
         from agency.commands.handlers.email_handler import SendEmailHandler
         processor.register(SendEmailHandler())
 
+    # Register visual capture handlers (only in on_demand mode)
+    # In auto mode, images are automatically attached to every prompt
+    # In on_demand mode, AI can request captures via [[SCREENSHOT]] and [[WEBCAM]]
+    if config.VISUAL_ENABLED and config.VISUAL_CAPTURE_MODE == "on_demand":
+        from agency.commands.handlers.visual_handler import (
+            ScreenshotHandler,
+            WebcamHandler
+        )
+        from core.logger import log_info
+
+        if config.VISUAL_SCREENSHOT_ENABLED:
+            processor.register(ScreenshotHandler())
+
+        if config.VISUAL_WEBCAM_ENABLED:
+            processor.register(WebcamHandler())
+
+        log_info("Visual capture commands registered (on_demand mode)", prefix="📷")
+
 
 __all__ = [
     # Processor

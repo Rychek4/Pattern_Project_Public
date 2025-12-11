@@ -143,7 +143,7 @@ class LLMRouter:
 
     def chat(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         system_prompt: Optional[str] = None,
         task_type: TaskType = TaskType.CONVERSATION,
         max_tokens: Optional[int] = None,
@@ -153,8 +153,11 @@ class LLMRouter:
         """
         Send a chat request, routing to appropriate provider.
 
+        Supports both text-only and multimodal messages. When using multimodal,
+        message content can be an array of content blocks (text + images).
+
         Args:
-            messages: List of {"role": "user"|"assistant", "content": "..."}
+            messages: List of message dicts. Content can be string or content array.
             system_prompt: Optional system prompt
             task_type: Type of task for routing
             max_tokens: Maximum tokens to generate
