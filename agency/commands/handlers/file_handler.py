@@ -326,6 +326,10 @@ Use this when:
 - The user asks you to check or read a file you previously saved
 - You need to retrieve stored information
 
+Rules:
+- Simple filenames only (no paths or slashes: use "notes.txt" not "folder/notes.txt")
+- No hidden files (cannot start with ".")
+
 The file must exist in your file storage. Use [[LIST_FILES]] to see available files."""
 
     def format_result(self, result: CommandResult) -> str:
@@ -461,6 +465,11 @@ class WriteFileHandler(CommandHandler):
 Use this when:
 - The user asks you to save something (notes, lists, information)
 - You want to store data for later retrieval
+
+Rules:
+- Simple filenames only (no paths or slashes: use "notes.txt" not "folder/notes.txt")
+- Must have an allowed extension (.txt, .md, .json, .csv, .log)
+- No hidden files (cannot start with ".")
 
 Note: This overwrites any existing file with the same name. Use [[APPEND_FILE:]] to add to existing files."""
 
@@ -614,6 +623,11 @@ Use this when:
 - Adding items to an existing list
 - Adding new entries to a log or notes file
 - You want to preserve existing content and add more
+
+Rules:
+- Simple filenames only (no paths or slashes: use "notes.txt" not "folder/notes.txt")
+- Must have an allowed extension (.txt, .md, .json, .csv, .log)
+- No hidden files (cannot start with ".")
 
 If the file doesn't exist, it will be created."""
 
