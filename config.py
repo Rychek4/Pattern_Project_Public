@@ -260,11 +260,11 @@ COMMAND_SEARCH_MIN_SCORE = 0.3  # Minimum relevance score for search results
 #   - Typed error handling
 #   - Reduced prompt size (no command documentation needed)
 #
-# Set to True to enable native tools.
-# Set to False to use legacy [[COMMAND]] syntax (default, backwards compatible).
+# Set to True to enable native tools (default).
+# Set to False to use legacy [[COMMAND]] syntax (backwards compatible).
 #
 # Both systems use the same underlying handlers - only the invocation changes.
-USE_NATIVE_TOOLS = os.getenv("USE_NATIVE_TOOLS", "false").lower() == "true"
+USE_NATIVE_TOOLS = os.getenv("USE_NATIVE_TOOLS", "true").lower() == "true"
 
 # =============================================================================
 # INTENTION SYSTEM CONFIGURATION
