@@ -62,6 +62,10 @@ Today's budget: {remaining} searches remaining ({used}/{total} used)
         """
         Get command instructions for prompt injection.
 
+        When USE_NATIVE_TOOLS is enabled, command instructions are skipped
+        because tool schemas provide this information. Only web search
+        status is included.
+
         Args:
             user_input: The user's current message
             session_context: Shared context dict
@@ -69,16 +73,20 @@ Today's budget: {remaining} searches remaining ({used}/{total} used)
         Returns:
             ContextBlock with command instructions, or None if no commands registered
         """
-        from agency.commands import get_command_processor
-
-        processor = get_command_processor()
         content_parts = []
 
-        # Add command instructions if any handlers registered
-        if processor.has_handlers():
-            instructions = processor.get_all_instructions()
-            if instructions:
-                content_parts.append(f"""<ai_commands>
+        # Only add command instructions if NOT using native tools
+        # Native tools get their instructions from tool schemas in the API call
+        if not config.USE_NATIVE_TOOLS:
+            from agency.commands import get_command_processor
+
+            processor = get_command_processor()
+
+            # Add command instructions if any handlers registered
+            if processor.has_handlers():
+                instructions = processor.get_all_instructions()
+                if instructions:
+                    content_parts.append(f"""<ai_commands>
 {instructions}
 </ai_commands>""")
 
@@ -94,9 +102,14 @@ Today's budget: {remaining} searches remaining ({used}/{total} used)
 
         # Build metadata
         metadata = {}
-        if processor.has_handlers():
-            metadata["handler_count"] = len(processor.list_handlers())
-            metadata["handlers"] = processor.list_handlers()
+        if config.USE_NATIVE_TOOLS:
+            metadata["native_tools_mode"] = True
+        else:
+            from agency.commands import get_command_processor
+            processor = get_command_processor()
+            if processor.has_handlers():
+                metadata["handler_count"] = len(processor.list_handlers())
+                metadata["handlers"] = processor.list_handlers()
         if web_search_status:
             metadata["web_search_enabled"] = True
 

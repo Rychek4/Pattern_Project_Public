@@ -848,125 +848,44 @@ class ChatWindow(QMainWindow):
 
             # Get LLM response
             from llm.router import TaskType
+
+            # Get tool definitions if using native tools
+            tools = None
+            if config.USE_NATIVE_TOOLS:
+                from agency.tools import get_tool_definitions
+                tools = get_tool_definitions()
+
             start_time = time.time()
             response = self._llm_router.chat(
                 messages=history,
                 system_prompt=assembled.full_system_prompt,
                 task_type=TaskType.CONVERSATION,
-                temperature=0.7
+                temperature=0.7,
+                tools=tools
             )
             pass1_duration = (time.time() - start_time) * 1000
 
             if response.success:
-                from agency.commands import get_command_processor
-
-                processor = get_command_processor()
-                max_passes = getattr(config, 'COMMAND_MAX_PASSES', 3)
-
                 # Check initial response for pulse timer command
                 pulse_interval = self._parse_pulse_command(response.text)
                 if pulse_interval is not None:
                     self.signals.pulse_interval_change.emit(pulse_interval)
 
-                # Multi-pass command processing loop
-                current_text = response.text
-                current_history = history.copy()
-                pass_num = 1
-                current_duration = pass1_duration
+                max_passes = getattr(config, 'COMMAND_MAX_PASSES', 3)
 
-                while pass_num <= max_passes:
-                    # Process current response for commands
-                    processed = processor.process(current_text)
-
-                    # Extract detected command names for dev window
-                    commands_detected = [cmd.command_name for cmd in processed.commands_executed]
-
-                    # Emit response pass to dev window
-                    if config.DEV_MODE_ENABLED:
-                        from interface.dev_window import emit_response_pass, emit_command_executed
-                        emit_response_pass(
-                            pass_number=pass_num,
-                            provider=response.provider.value if pass_num == 1 else "continuation",
-                            response_text=current_text,
-                            tokens_in=getattr(response, 'tokens_in', 0) if pass_num == 1 else 0,
-                            tokens_out=getattr(response, 'tokens_out', 0) if pass_num == 1 else 0,
-                            duration_ms=current_duration,
-                            commands_detected=commands_detected,
-                            web_searches_used=getattr(response, 'web_searches_used', 0) if pass_num == 1 else 0,
-                            citations=getattr(response, 'citations', []) if pass_num == 1 else []
-                        )
-
-                        # Emit each command execution
-                        for cmd_result in processed.commands_executed:
-                            emit_command_executed(
-                                command_name=cmd_result.command_name,
-                                query=cmd_result.query,
-                                result_data=cmd_result.data,
-                                error=str(cmd_result.error) if cmd_result.error else None,
-                                needs_continuation=cmd_result.needs_continuation
-                            )
-
-                    # If no continuation needed, we're done
-                    if not processed.needs_continuation:
-                        final_text = processed.display_text
-                        break
-
-                    # Show status for command execution
-                    if pass_num == 1:
-                        self.signals.update_status.emit("Executing command...")
-                    else:
-                        self.signals.update_status.emit(f"Executing command (pass {pass_num})...")
-
-                    # Build continuation history with potential images from commands
-                    current_history.append({"role": "assistant", "content": current_text})
-
-                    # Build continuation message (may include images from visual commands)
-                    continuation_msg = self._build_continuation_message(
-                        processed.continuation_prompt,
-                        processed.continuation_images
+                # Branch based on native tools mode
+                if config.USE_NATIVE_TOOLS:
+                    # Native tool use path
+                    final_text = self._process_native_tools_response(
+                        response, history, assembled.full_system_prompt,
+                        tools, max_passes, pass1_duration
                     )
-                    current_history.append(continuation_msg)
-
-                    # Get next response
-                    cont_start = time.time()
-                    continuation = self._llm_router.chat(
-                        messages=current_history,
-                        system_prompt=assembled.full_system_prompt,
-                        task_type=TaskType.CONVERSATION,
-                        temperature=0.7
-                    )
-                    current_duration = (time.time() - cont_start) * 1000
-
-                    if not continuation.success:
-                        # On failure, use last successful response
-                        final_text = processed.display_text
-                        break
-
-                    # Check continuation for pulse commands
-                    pulse_interval = self._parse_pulse_command(continuation.text)
-                    if pulse_interval is not None:
-                        self.signals.pulse_interval_change.emit(pulse_interval)
-
-                    # Prepare for next iteration
-                    current_text = continuation.text
-                    pass_num += 1
                 else:
-                    # Hit max passes - use final response as-is
-                    processed = processor.process(current_text)
-                    final_text = processed.display_text
-
-                    # Emit final pass to dev window
-                    if config.DEV_MODE_ENABLED:
-                        from interface.dev_window import emit_response_pass
-                        emit_response_pass(
-                            pass_number=pass_num,
-                            provider="max_passes_reached",
-                            response_text=current_text,
-                            duration_ms=current_duration,
-                            commands_detected=[cmd.command_name for cmd in processed.commands_executed],
-                            web_searches_used=0,
-                            citations=[]
-                        )
+                    # Legacy [[COMMAND]] path
+                    final_text = self._process_legacy_commands_response(
+                        response, history, assembled.full_system_prompt,
+                        max_passes, pass1_duration
+                    )
 
                 # Store response
                 self._conversation_mgr.add_turn(
@@ -990,6 +909,236 @@ class ChatWindow(QMainWindow):
 
         finally:
             self.signals.response_complete.emit()
+
+    def _process_native_tools_response(
+        self,
+        response,
+        history: list,
+        system_prompt: str,
+        tools: list,
+        max_passes: int,
+        pass1_duration: float
+    ) -> str:
+        """
+        Process response using native tool use.
+
+        Args:
+            response: Initial LLMResponse
+            history: Conversation history
+            system_prompt: System prompt for continuations
+            tools: Tool definitions list
+            max_passes: Maximum tool execution passes
+            pass1_duration: Duration of first API call
+
+        Returns:
+            Final response text
+        """
+        import time
+        from llm.router import TaskType
+        from agency.tools import get_tool_processor
+
+        processor = get_tool_processor()
+        current_response = response
+        current_history = history.copy()
+        current_duration = pass1_duration
+
+        for pass_num in range(1, max_passes + 1):
+            # Process response for tool calls
+            processed = processor.process(current_response, context={})
+
+            # Emit to dev window
+            if config.DEV_MODE_ENABLED:
+                from interface.dev_window import emit_response_pass, emit_command_executed
+                tool_names = [tc.name for tc in current_response.tool_calls] if current_response.has_tool_calls() else []
+                emit_response_pass(
+                    pass_number=pass_num,
+                    provider=response.provider.value if pass_num == 1 else "continuation",
+                    response_text=current_response.text,
+                    tokens_in=getattr(current_response, 'tokens_in', 0) if pass_num == 1 else 0,
+                    tokens_out=getattr(current_response, 'tokens_out', 0) if pass_num == 1 else 0,
+                    duration_ms=current_duration,
+                    commands_detected=tool_names,
+                    web_searches_used=getattr(current_response, 'web_searches_used', 0) if pass_num == 1 else 0,
+                    citations=getattr(current_response, 'citations', []) if pass_num == 1 else []
+                )
+
+                # Emit each tool execution
+                for result in processed.tool_results:
+                    emit_command_executed(
+                        command_name=result.tool_name,
+                        query=str(result.content)[:100] if result.content else "",
+                        result_data=result.content,
+                        error=str(result.content) if result.is_error else None,
+                        needs_continuation=True
+                    )
+
+            # If no continuation needed (no tool calls or stop_reason != "tool_use")
+            if not processed.needs_continuation:
+                return processed.display_text
+
+            # Show status
+            if pass_num == 1:
+                self.signals.update_status.emit("Executing tools...")
+            else:
+                self.signals.update_status.emit(f"Executing tools (pass {pass_num})...")
+
+            # Build continuation: add assistant message with raw content blocks
+            current_history.append({
+                "role": "assistant",
+                "content": current_response.raw_content
+            })
+
+            # Add tool results message
+            current_history.append(processed.tool_result_message)
+
+            # Get next response
+            cont_start = time.time()
+            continuation = self._llm_router.chat(
+                messages=current_history,
+                system_prompt=system_prompt,
+                task_type=TaskType.CONVERSATION,
+                temperature=0.7,
+                tools=tools
+            )
+            current_duration = (time.time() - cont_start) * 1000
+
+            if not continuation.success:
+                # On failure, return last text
+                return processed.display_text
+
+            # Check for pulse commands in continuation
+            pulse_interval = self._parse_pulse_command(continuation.text)
+            if pulse_interval is not None:
+                self.signals.pulse_interval_change.emit(pulse_interval)
+
+            current_response = continuation
+
+        # Hit max passes - return final text
+        return current_response.text
+
+    def _process_legacy_commands_response(
+        self,
+        response,
+        history: list,
+        system_prompt: str,
+        max_passes: int,
+        pass1_duration: float
+    ) -> str:
+        """
+        Process response using legacy [[COMMAND]] pattern.
+
+        Args:
+            response: Initial LLMResponse
+            history: Conversation history
+            system_prompt: System prompt for continuations
+            max_passes: Maximum command execution passes
+            pass1_duration: Duration of first API call
+
+        Returns:
+            Final response text
+        """
+        import time
+        from llm.router import TaskType
+        from agency.commands import get_command_processor
+
+        processor = get_command_processor()
+        current_text = response.text
+        current_history = history.copy()
+        current_duration = pass1_duration
+        pass_num = 1
+
+        while pass_num <= max_passes:
+            # Process current response for commands
+            processed = processor.process(current_text)
+
+            # Extract detected command names for dev window
+            commands_detected = [cmd.command_name for cmd in processed.commands_executed]
+
+            # Emit response pass to dev window
+            if config.DEV_MODE_ENABLED:
+                from interface.dev_window import emit_response_pass, emit_command_executed
+                emit_response_pass(
+                    pass_number=pass_num,
+                    provider=response.provider.value if pass_num == 1 else "continuation",
+                    response_text=current_text,
+                    tokens_in=getattr(response, 'tokens_in', 0) if pass_num == 1 else 0,
+                    tokens_out=getattr(response, 'tokens_out', 0) if pass_num == 1 else 0,
+                    duration_ms=current_duration,
+                    commands_detected=commands_detected,
+                    web_searches_used=getattr(response, 'web_searches_used', 0) if pass_num == 1 else 0,
+                    citations=getattr(response, 'citations', []) if pass_num == 1 else []
+                )
+
+                # Emit each command execution
+                for cmd_result in processed.commands_executed:
+                    emit_command_executed(
+                        command_name=cmd_result.command_name,
+                        query=cmd_result.query,
+                        result_data=cmd_result.data,
+                        error=str(cmd_result.error) if cmd_result.error else None,
+                        needs_continuation=cmd_result.needs_continuation
+                    )
+
+            # If no continuation needed, we're done
+            if not processed.needs_continuation:
+                return processed.display_text
+
+            # Show status for command execution
+            if pass_num == 1:
+                self.signals.update_status.emit("Executing command...")
+            else:
+                self.signals.update_status.emit(f"Executing command (pass {pass_num})...")
+
+            # Build continuation history with potential images from commands
+            current_history.append({"role": "assistant", "content": current_text})
+
+            # Build continuation message (may include images from visual commands)
+            continuation_msg = self._build_continuation_message(
+                processed.continuation_prompt,
+                processed.continuation_images
+            )
+            current_history.append(continuation_msg)
+
+            # Get next response
+            cont_start = time.time()
+            continuation = self._llm_router.chat(
+                messages=current_history,
+                system_prompt=system_prompt,
+                task_type=TaskType.CONVERSATION,
+                temperature=0.7
+            )
+            current_duration = (time.time() - cont_start) * 1000
+
+            if not continuation.success:
+                # On failure, use last successful response
+                return processed.display_text
+
+            # Check continuation for pulse commands
+            pulse_interval = self._parse_pulse_command(continuation.text)
+            if pulse_interval is not None:
+                self.signals.pulse_interval_change.emit(pulse_interval)
+
+            # Prepare for next iteration
+            current_text = continuation.text
+            pass_num += 1
+
+        # Hit max passes - use final response as-is
+        processed = processor.process(current_text)
+
+        # Emit final pass to dev window
+        if config.DEV_MODE_ENABLED:
+            from interface.dev_window import emit_response_pass
+            emit_response_pass(
+                pass_number=pass_num,
+                provider="max_passes_reached",
+                response_text=current_text,
+                duration_ms=current_duration,
+                commands_detected=[cmd.command_name for cmd in processed.commands_executed],
+                web_searches_used=0,
+                citations=[]
+            )
+
+        return processed.display_text
 
     def _on_response_complete(self):
         """Called when response processing is complete."""

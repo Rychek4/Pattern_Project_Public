@@ -1,0 +1,537 @@
+"""
+Pattern Project - Tool Executor
+Maps native tool calls to existing command handlers.
+
+This module bridges Claude's native tool use with the existing handler infrastructure.
+Each tool call is routed to the appropriate handler, reusing all existing logic.
+"""
+
+from dataclasses import dataclass, field
+from typing import Any, Dict, Optional, List, Callable, TYPE_CHECKING
+
+from core.logger import log_info, log_warning, log_error
+
+if TYPE_CHECKING:
+    from agency.visual_capture import ImageContent
+
+
+@dataclass
+class ToolResult:
+    """Result from executing a tool."""
+    tool_use_id: str
+    tool_name: str
+    content: Any  # Result data (will be formatted as string for Claude)
+    is_error: bool = False
+    image_data: Optional[List["ImageContent"]] = field(default=None)
+
+    def has_images(self) -> bool:
+        """Check if result includes images."""
+        return self.image_data is not None and len(self.image_data) > 0
+
+
+class ToolExecutor:
+    """
+    Executes tool calls by routing to existing handlers.
+
+    This class maps tool names to handler execution functions.
+    Each function wraps an existing CommandHandler, adapting the
+    structured tool input to the handler's expected format.
+    """
+
+    def __init__(self):
+        """Initialize the executor with tool-to-handler mappings."""
+        # Map tool names to execution methods
+        self._handlers: Dict[str, Callable] = {
+            "search_memories": self._exec_search_memories,
+            "create_reminder": self._exec_create_reminder,
+            "complete_reminder": self._exec_complete_reminder,
+            "dismiss_reminder": self._exec_dismiss_reminder,
+            "list_reminders": self._exec_list_reminders,
+            "read_file": self._exec_read_file,
+            "write_file": self._exec_write_file,
+            "append_file": self._exec_append_file,
+            "list_files": self._exec_list_files,
+            "send_telegram": self._exec_send_telegram,
+            "send_email": self._exec_send_email,
+            "capture_screenshot": self._exec_capture_screenshot,
+            "capture_webcam": self._exec_capture_webcam,
+            "set_active_thoughts": self._exec_set_active_thoughts,
+        }
+
+    def execute(
+        self,
+        tool_name: str,
+        tool_input: Dict[str, Any],
+        tool_use_id: str,
+        context: Optional[Dict] = None
+    ) -> ToolResult:
+        """
+        Execute a tool call and return the result.
+
+        Args:
+            tool_name: Name of the tool to execute
+            tool_input: Structured input arguments from Claude
+            tool_use_id: Unique ID for this tool use (for result correlation)
+            context: Optional session context dict
+
+        Returns:
+            ToolResult with execution outcome
+        """
+        context = context or {}
+
+        handler_fn = self._handlers.get(tool_name)
+        if not handler_fn:
+            log_warning(f"Unknown tool: {tool_name}")
+            return ToolResult(
+                tool_use_id=tool_use_id,
+                tool_name=tool_name,
+                content=f"Unknown tool: {tool_name}. Available tools: {list(self._handlers.keys())}",
+                is_error=True
+            )
+
+        try:
+            log_info(f"Executing tool: {tool_name}", prefix="🔧")
+            return handler_fn(tool_input, tool_use_id, context)
+        except Exception as e:
+            log_error(f"Tool execution error ({tool_name}): {e}")
+            return ToolResult(
+                tool_use_id=tool_use_id,
+                tool_name=tool_name,
+                content=f"Tool execution error: {str(e)}",
+                is_error=True
+            )
+
+    # =========================================================================
+    # MEMORY TOOLS
+    # =========================================================================
+
+    def _exec_search_memories(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Execute memory search."""
+        from agency.commands.handlers.memory_search import MemorySearchHandler
+
+        handler = MemorySearchHandler()
+        query = input.get("query", "")
+
+        result = handler.execute(query, ctx)
+
+        if result.error:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="search_memories",
+                content=result.get_error_message(),
+                is_error=True
+            )
+
+        # Format the result using existing formatter
+        formatted = handler.format_result(result)
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="search_memories",
+            content=formatted
+        )
+
+    # =========================================================================
+    # INTENTION/REMINDER TOOLS
+    # =========================================================================
+
+    def _exec_create_reminder(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Create a reminder."""
+        from agency.commands.handlers.intention_handler import RemindHandler
+
+        handler = RemindHandler()
+
+        # Build query string in handler's expected format: "when | what | context"
+        when = input.get("when", "")
+        what = input.get("what", "")
+        context_note = input.get("context", "")
+
+        if context_note:
+            query = f"{when} | {what} | {context_note}"
+        else:
+            query = f"{when} | {what}"
+
+        result = handler.execute(query, ctx)
+
+        if result.error:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="create_reminder",
+                content=result.get_error_message(),
+                is_error=True
+            )
+
+        # Return success message
+        data = result.data or {}
+        intention_id = data.get("intention_id", "?")
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="create_reminder",
+            content=f"Reminder created (I-{intention_id}): {what}"
+        )
+
+    def _exec_complete_reminder(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Complete a reminder."""
+        from agency.commands.handlers.intention_handler import CompleteHandler
+
+        handler = CompleteHandler()
+
+        # Build query: "I-id | outcome"
+        reminder_id = input.get("reminder_id", 0)
+        outcome = input.get("outcome", "")
+
+        if outcome:
+            query = f"I-{reminder_id} | {outcome}"
+        else:
+            query = f"I-{reminder_id}"
+
+        result = handler.execute(query, ctx)
+
+        if result.error:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="complete_reminder",
+                content=result.get_error_message(),
+                is_error=True
+            )
+
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="complete_reminder",
+            content=f"Completed reminder I-{reminder_id}"
+        )
+
+    def _exec_dismiss_reminder(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Dismiss a reminder."""
+        from agency.commands.handlers.intention_handler import DismissHandler
+
+        handler = DismissHandler()
+        reminder_id = input.get("reminder_id", 0)
+
+        result = handler.execute(f"I-{reminder_id}", ctx)
+
+        if result.error:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="dismiss_reminder",
+                content=result.get_error_message(),
+                is_error=True
+            )
+
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="dismiss_reminder",
+            content=f"Dismissed reminder I-{reminder_id}"
+        )
+
+    def _exec_list_reminders(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """List all active reminders."""
+        from agency.commands.handlers.intention_handler import ListIntentionsHandler
+
+        handler = ListIntentionsHandler()
+        result = handler.execute("", ctx)
+
+        if result.error:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="list_reminders",
+                content=result.get_error_message(),
+                is_error=True
+            )
+
+        formatted = handler.format_result(result)
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="list_reminders",
+            content=formatted
+        )
+
+    # =========================================================================
+    # FILE TOOLS
+    # =========================================================================
+
+    def _exec_read_file(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Read a file."""
+        from agency.commands.handlers.file_handler import ReadFileHandler
+
+        handler = ReadFileHandler()
+        filename = input.get("filename", "")
+
+        result = handler.execute(filename, ctx)
+
+        if result.error:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="read_file",
+                content=result.get_error_message(),
+                is_error=True
+            )
+
+        formatted = handler.format_result(result)
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="read_file",
+            content=formatted
+        )
+
+    def _exec_write_file(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Write a file."""
+        from agency.commands.handlers.file_handler import WriteFileHandler
+
+        handler = WriteFileHandler()
+        filename = input.get("filename", "")
+        content = input.get("content", "")
+
+        # Build query in handler's expected format: "filename | content"
+        query = f"{filename} | {content}"
+
+        result = handler.execute(query, ctx)
+
+        if result.error:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="write_file",
+                content=result.get_error_message(),
+                is_error=True
+            )
+
+        formatted = handler.format_result(result)
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="write_file",
+            content=formatted
+        )
+
+    def _exec_append_file(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Append to a file."""
+        from agency.commands.handlers.file_handler import AppendFileHandler
+
+        handler = AppendFileHandler()
+        filename = input.get("filename", "")
+        content = input.get("content", "")
+
+        query = f"{filename} | {content}"
+
+        result = handler.execute(query, ctx)
+
+        if result.error:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="append_file",
+                content=result.get_error_message(),
+                is_error=True
+            )
+
+        formatted = handler.format_result(result)
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="append_file",
+            content=formatted
+        )
+
+    def _exec_list_files(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """List available files."""
+        from agency.commands.handlers.file_handler import ListFilesHandler
+
+        handler = ListFilesHandler()
+        result = handler.execute("", ctx)
+
+        if result.error:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="list_files",
+                content=result.get_error_message(),
+                is_error=True
+            )
+
+        formatted = handler.format_result(result)
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="list_files",
+            content=formatted
+        )
+
+    # =========================================================================
+    # COMMUNICATION TOOLS
+    # =========================================================================
+
+    def _exec_send_telegram(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Send a Telegram message."""
+        from agency.commands.handlers.telegram_handler import SendTelegramHandler
+
+        handler = SendTelegramHandler()
+        message = input.get("message", "")
+
+        result = handler.execute(message, ctx)
+
+        if result.error:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="send_telegram",
+                content=result.get_error_message(),
+                is_error=True
+            )
+
+        formatted = handler.format_result(result)
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="send_telegram",
+            content=formatted
+        )
+
+    def _exec_send_email(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Send an email."""
+        try:
+            from agency.commands.handlers.email_handler import SendEmailHandler
+        except ImportError:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="send_email",
+                content="Email handler not available",
+                is_error=True
+            )
+
+        handler = SendEmailHandler()
+        to = input.get("to", "")
+        subject = input.get("subject", "")
+        body = input.get("body", "")
+
+        # Build query in handler's expected format: "to | subject | body"
+        query = f"{to} | {subject} | {body}"
+
+        result = handler.execute(query, ctx)
+
+        if result.error:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="send_email",
+                content=result.get_error_message(),
+                is_error=True
+            )
+
+        formatted = handler.format_result(result)
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="send_email",
+            content=formatted
+        )
+
+    # =========================================================================
+    # VISUAL CAPTURE TOOLS
+    # =========================================================================
+
+    def _exec_capture_screenshot(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Capture screenshot."""
+        from agency.commands.handlers.visual_handler import ScreenshotHandler
+
+        handler = ScreenshotHandler()
+        result = handler.execute("", ctx)
+
+        if result.error:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="capture_screenshot",
+                content=result.get_error_message(),
+                is_error=True
+            )
+
+        # Return with image data
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="capture_screenshot",
+            content="Screenshot captured - see attached image",
+            image_data=result.image_data
+        )
+
+    def _exec_capture_webcam(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Capture webcam image."""
+        from agency.commands.handlers.visual_handler import WebcamHandler
+
+        handler = WebcamHandler()
+        result = handler.execute("", ctx)
+
+        if result.error:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="capture_webcam",
+                content=result.get_error_message(),
+                is_error=True
+            )
+
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="capture_webcam",
+            content="Webcam image captured - see attached image",
+            image_data=result.image_data
+        )
+
+    # =========================================================================
+    # ACTIVE THOUGHTS TOOL
+    # =========================================================================
+
+    def _exec_set_active_thoughts(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Update active thoughts."""
+        import json
+        from agency.commands.handlers.active_thoughts_handler import SetThoughtsHandler
+
+        handler = SetThoughtsHandler()
+
+        # The handler expects a JSON array string
+        thoughts = input.get("thoughts", [])
+        query = json.dumps(thoughts)
+
+        result = handler.execute(query, ctx)
+
+        if result.error:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="set_active_thoughts",
+                content=result.get_error_message(),
+                is_error=True
+            )
+
+        count = len(thoughts)
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="set_active_thoughts",
+            content=f"Active thoughts updated: {count} item{'s' if count != 1 else ''}"
+        )
+
+
+# Global instance
+_tool_executor: Optional[ToolExecutor] = None
+
+
+def get_tool_executor() -> ToolExecutor:
+    """Get the global tool executor instance."""
+    global _tool_executor
+    if _tool_executor is None:
+        _tool_executor = ToolExecutor()
+    return _tool_executor

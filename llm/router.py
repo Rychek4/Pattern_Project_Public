@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from core.logger import log_info, log_warning, log_error, log_success
 from core.prompt_logger import log_api_request
 from llm.kobold_client import KoboldClient, KoboldResponse, get_kobold_client
-from llm.anthropic_client import AnthropicClient, AnthropicResponse, get_anthropic_client
+from llm.anthropic_client import AnthropicClient, AnthropicResponse, ToolCall, get_anthropic_client
 
 
 class LLMProvider(Enum):
@@ -39,10 +39,22 @@ class LLMResponse:
     # Web search fields
     web_searches_used: int = 0
     citations: List[Any] = None  # List of WebSearchCitation
+    # Native tool use fields
+    stop_reason: Optional[str] = None
+    tool_calls: List[ToolCall] = None
+    raw_content: List[Any] = None  # Original content blocks for continuation
 
     def __post_init__(self):
         if self.citations is None:
             self.citations = []
+        if self.tool_calls is None:
+            self.tool_calls = []
+        if self.raw_content is None:
+            self.raw_content = []
+
+    def has_tool_calls(self) -> bool:
+        """Check if response contains tool calls (excluding web_search)."""
+        return len(self.tool_calls) > 0
 
 
 class LLMRouter:
@@ -148,7 +160,8 @@ class LLMRouter:
         task_type: TaskType = TaskType.CONVERSATION,
         max_tokens: Optional[int] = None,
         temperature: float = 0.7,
-        force_provider: Optional[LLMProvider] = None
+        force_provider: Optional[LLMProvider] = None,
+        tools: Optional[List[Dict[str, Any]]] = None
     ) -> LLMResponse:
         """
         Send a chat request, routing to appropriate provider.
@@ -163,9 +176,10 @@ class LLMRouter:
             max_tokens: Maximum tokens to generate
             temperature: Sampling temperature
             force_provider: Force a specific provider (bypass routing)
+            tools: Optional list of tool definitions for native tool use (Anthropic only)
 
         Returns:
-            LLMResponse with generated text
+            LLMResponse with generated text and any tool calls
         """
         # Determine provider
         if force_provider:
@@ -197,7 +211,8 @@ class LLMRouter:
             max_tokens=max_tokens,
             temperature=temperature,
             enable_web_search=enable_web_search,
-            web_search_max_uses=web_search_max_uses
+            web_search_max_uses=web_search_max_uses,
+            tools=tools
         )
 
         # Record web search usage if any were used
@@ -280,7 +295,8 @@ class LLMRouter:
         max_tokens: Optional[int],
         temperature: float,
         enable_web_search: bool = False,
-        web_search_max_uses: Optional[int] = None
+        web_search_max_uses: Optional[int] = None,
+        tools: Optional[List[Dict[str, Any]]] = None
     ) -> LLMResponse:
         """Send request to a specific provider."""
         try:
@@ -292,7 +308,8 @@ class LLMRouter:
                     max_tokens=max_tokens,
                     temperature=temperature,
                     enable_web_search=enable_web_search,
-                    web_search_max_uses=web_search_max_uses
+                    web_search_max_uses=web_search_max_uses,
+                    tools=tools
                 )
 
                 llm_response = LLMResponse(
@@ -303,7 +320,10 @@ class LLMRouter:
                     tokens_out=response.output_tokens,
                     error=response.error,
                     web_searches_used=response.web_searches_used,
-                    citations=response.citations
+                    citations=response.citations,
+                    stop_reason=response.stop_reason,
+                    tool_calls=response.tool_calls,
+                    raw_content=response.raw_content
                 )
 
                 # Log the API request/response
