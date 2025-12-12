@@ -684,6 +684,10 @@ class ChatWindow(QMainWindow):
             self._system_pulse_timer.reset()
             self._system_pulse_timer.pause()
 
+        # Pause Telegram listener during processing to prevent message loss
+        if self._telegram_listener:
+            self._telegram_listener.pause()
+
         # Add user message to display immediately
         timestamp = self._get_timestamp()
         self.signals.new_message.emit("user", text, timestamp)
@@ -1364,6 +1368,10 @@ class ChatWindow(QMainWindow):
                 self._system_pulse_timer.pause()
                 log_info("PULSE DEBUG: Timer paused", prefix="🔍")
 
+            # Pause Telegram listener during processing to prevent message loss
+            if self._telegram_listener:
+                self._telegram_listener.pause()
+
             # Update UI status
             self.signals.update_status.emit("System pulse...")
 
@@ -1546,6 +1554,10 @@ class ChatWindow(QMainWindow):
             # Pause idle timer during processing (so we don't double-fire)
             if self._system_pulse_timer:
                 self._system_pulse_timer.pause()
+
+            # Pause Telegram listener during processing to prevent message loss
+            if self._telegram_listener:
+                self._telegram_listener.pause()
 
             # Update UI status
             self.signals.update_status.emit("Reminder triggered...")
