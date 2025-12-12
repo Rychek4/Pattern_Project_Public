@@ -819,14 +819,6 @@ class ChatWindow(QMainWindow):
         import time
 
         try:
-            # Store user message
-            if self._conversation_mgr:
-                self._conversation_mgr.add_turn(
-                    role="user",
-                    content=user_input,
-                    input_type="text"
-                )
-
             # Build prompt (no base prompt - emergent personality from context)
             # Pass is_session_start flag to trigger next_session reminders on first message
             assembled = self._prompt_builder.build(
@@ -851,8 +843,17 @@ class ChatWindow(QMainWindow):
                 total_tokens = len(assembled.full_system_prompt) // 4  # Rough estimate
                 emit_prompt_assembly(blocks_data, total_tokens)
 
-            # Get conversation history
+            # Get conversation history BEFORE storing the new turn
+            # This prevents duplication when we append the user message below
             history = self._conversation_mgr.get_recent_history(limit=30)
+
+            # Store user message for persistence (after getting history)
+            if self._conversation_mgr:
+                self._conversation_mgr.add_turn(
+                    role="user",
+                    content=user_input,
+                    input_type="text"
+                )
 
             # Capture visuals and build multimodal message if in auto mode
             # This adds the current user input with any captured images

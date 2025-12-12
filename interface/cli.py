@@ -171,7 +171,8 @@ class ChatCLI:
                 # Callback for pulse interval changes
                 def on_pulse_change(interval: int):
                     if self._system_pulse_timer:
-                        self._system_pulse_timer.set_interval(interval)
+                        self._system_pulse_timer.pulse_interval = interval
+                        self._system_pulse_timer.reset()
                         log_info(f"Pulse interval changed to {interval}s", prefix="⏱️")
 
                 # Show thinking indicator
@@ -553,7 +554,8 @@ class ChatCLI:
             # Callback for pulse interval changes
             def on_pulse_change(interval: int):
                 if self._system_pulse_timer:
-                    self._system_pulse_timer.set_interval(interval)
+                    self._system_pulse_timer.pulse_interval = interval
+                    self._system_pulse_timer.reset()
                     log_info(f"Pulse interval changed to {interval}s", prefix="⏱️")
 
             # Show thinking indicator
@@ -670,7 +672,8 @@ class ChatCLI:
             # Callback for pulse interval changes
             def on_pulse_change(interval: int):
                 if self._system_pulse_timer:
-                    self._system_pulse_timer.set_interval(interval)
+                    self._system_pulse_timer.pulse_interval = interval
+                    self._system_pulse_timer.reset()
                     log_info(f"Pulse interval changed to {interval}s", prefix="⏱️")
 
             # Show thinking indicator
@@ -785,7 +788,8 @@ class ChatCLI:
             # Callback for pulse interval changes
             def on_pulse_change(interval: int):
                 if self._system_pulse_timer:
-                    self._system_pulse_timer.set_interval(interval)
+                    self._system_pulse_timer.pulse_interval = interval
+                    self._system_pulse_timer.reset()
                     log_info(f"Pulse interval changed to {interval}s", prefix="⏱️")
 
             # Show thinking indicator
