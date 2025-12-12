@@ -18,6 +18,14 @@ class WebSearchCitation:
 
 
 @dataclass
+class ToolCall:
+    """A tool call from Claude's response."""
+    id: str
+    name: str
+    input: Dict[str, Any]
+
+
+@dataclass
 class AnthropicResponse:
     """Response from Anthropic API."""
     text: str
@@ -29,6 +37,13 @@ class AnthropicResponse:
     # Web search fields
     web_searches_used: int = 0
     citations: List[WebSearchCitation] = field(default_factory=list)
+    # Native tool use fields
+    tool_calls: List[ToolCall] = field(default_factory=list)
+    raw_content: List[Any] = field(default_factory=list)  # Original content blocks for continuation
+
+    def has_tool_calls(self) -> bool:
+        """Check if response contains tool calls (excluding web_search)."""
+        return len(self.tool_calls) > 0
 
 
 class AnthropicClient:
@@ -93,7 +108,8 @@ class AnthropicClient:
         temperature: float = 0.7,
         stop_sequences: Optional[List[str]] = None,
         enable_web_search: bool = False,
-        web_search_max_uses: Optional[int] = None
+        web_search_max_uses: Optional[int] = None,
+        tools: Optional[List[Dict[str, Any]]] = None
     ) -> AnthropicResponse:
         """
         Send a chat completion request.
@@ -120,9 +136,10 @@ class AnthropicClient:
             stop_sequences: Optional list of stop sequences
             enable_web_search: Whether to enable Claude's web search tool
             web_search_max_uses: Max searches per request (None = no limit)
+            tools: Optional list of tool definitions for native tool use
 
         Returns:
-            AnthropicResponse with generated text
+            AnthropicResponse with generated text and any tool calls
         """
         if max_tokens is None:
             max_tokens = self.max_tokens
@@ -144,6 +161,13 @@ class AnthropicClient:
             if stop_sequences:
                 request_params["stop_sequences"] = stop_sequences
 
+            # Build tools list (combine native tools with web search if both enabled)
+            all_tools = []
+
+            # Add native tools if provided
+            if tools:
+                all_tools.extend(tools)
+
             # Add web search tool if enabled
             if enable_web_search:
                 web_search_tool = {
@@ -152,7 +176,10 @@ class AnthropicClient:
                 }
                 if web_search_max_uses is not None:
                     web_search_tool["max_uses"] = web_search_max_uses
-                request_params["tools"] = [web_search_tool]
+                all_tools.append(web_search_tool)
+
+            if all_tools:
+                request_params["tools"] = all_tools
 
             # Make the request
             response = client.messages.create(**request_params)
@@ -163,6 +190,7 @@ class AnthropicClient:
             text = ""
             web_searches_used = 0
             citations: List[WebSearchCitation] = []
+            tool_calls: List[ToolCall] = []
 
             # Safely iterate over response content blocks
             content_blocks = getattr(response, "content", None) or []
@@ -172,11 +200,20 @@ class AnthropicClient:
                     block_text = getattr(block, "text", None)
                     if block_text:
                         text += block_text
-                elif hasattr(block, "type"):
-                    if block.type == "tool_use" and getattr(block, "name", None) == "web_search":
-                        # Claude invoked web search
+                elif hasattr(block, "type") and block.type == "tool_use":
+                    tool_name = getattr(block, "name", None)
+                    if tool_name == "web_search":
+                        # Claude invoked web search (built-in tool)
                         web_searches_used += 1
                         log_info(f"Web search invoked ({web_searches_used})", prefix="🔍")
+                    else:
+                        # Native tool call - capture it
+                        tool_calls.append(ToolCall(
+                            id=getattr(block, "id", ""),
+                            name=tool_name or "",
+                            input=getattr(block, "input", {}) or {}
+                        ))
+                        log_info(f"Tool call: {tool_name}", prefix="🔧")
 
             # Extract citations from the response if present
             # Citations appear in server_tool_use blocks or as part of the response metadata
@@ -204,6 +241,20 @@ class AnthropicClient:
                         url=getattr(citation, "url", "")
                     ))
 
+            # Build raw_content for continuation (serialize content blocks)
+            # This preserves the original structure for tool_result messages
+            raw_content_list = []
+            for block in content_blocks:
+                if hasattr(block, "text"):
+                    raw_content_list.append({"type": "text", "text": getattr(block, "text", "")})
+                elif hasattr(block, "type") and block.type == "tool_use":
+                    raw_content_list.append({
+                        "type": "tool_use",
+                        "id": getattr(block, "id", ""),
+                        "name": getattr(block, "name", ""),
+                        "input": getattr(block, "input", {})
+                    })
+
             return AnthropicResponse(
                 text=text,
                 input_tokens=response.usage.input_tokens,
@@ -211,7 +262,9 @@ class AnthropicClient:
                 success=True,
                 stop_reason=response.stop_reason,
                 web_searches_used=web_searches_used,
-                citations=citations
+                citations=citations,
+                tool_calls=tool_calls,
+                raw_content=raw_content_list
             )
 
         except Exception as e:
