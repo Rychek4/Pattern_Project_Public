@@ -265,7 +265,7 @@ INTENTION_COMPLETED_TO_MEMORY = True        # Create memories from completed int
 # Simple file read/write tools for AI to store and retrieve text files.
 # Files are sandboxed to a specific directory for security.
 FILE_STORAGE_DIR = DATA_DIR / "files"       # Sandboxed directory for AI file operations
-FILE_MAX_SIZE_BYTES = 102400                # 100KB max file size
+FILE_MAX_SIZE_BYTES = 31457280              # 30MB max file size
 FILE_ALLOWED_EXTENSIONS = {".txt", ".md", ".json", ".csv"}  # Whitelist of allowed extensions
 
 # =============================================================================

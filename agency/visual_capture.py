@@ -33,6 +33,141 @@ except ImportError:
 
 
 # =============================================================================
+# PERSISTENT WEBCAM MANAGER
+# =============================================================================
+
+class WebcamManager:
+    """
+    Persistent webcam device manager to avoid open/close latency.
+
+    Opening a webcam device (cv2.VideoCapture) typically takes 500-2000ms.
+    By keeping the device open between captures, we reduce this to ~10-50ms
+    per frame capture.
+
+    Thread-safe singleton pattern ensures only one instance manages the device.
+    """
+
+    _instance = None
+    _lock = threading.Lock()
+
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
+        return cls._instance
+
+    def __init__(self):
+        if self._initialized:
+            return
+        self._initialized = True
+        self._cap = None
+        self._device_lock = threading.Lock()
+        self._is_open = False
+
+    def _open_device(self) -> bool:
+        """Open the webcam device if not already open."""
+        if self._cap is not None and self._cap.isOpened():
+            return True
+
+        try:
+            self._cap = cv2.VideoCapture(0)
+            if self._cap.isOpened():
+                self._is_open = True
+                log_info("Webcam device opened (persistent)", prefix="📷")
+                return True
+            else:
+                log_warning("Could not open webcam (device 0)")
+                self._cap = None
+                return False
+        except Exception as e:
+            log_error(f"Failed to open webcam device: {e}")
+            self._cap = None
+            return False
+
+    def capture_frame(self) -> Optional[bytes]:
+        """
+        Capture a frame from the webcam.
+
+        Opens the device on first call and keeps it open for subsequent captures.
+
+        Returns:
+            JPEG image bytes, or None if capture fails
+        """
+        with self._device_lock:
+            if not self._open_device():
+                return None
+
+            try:
+                ret, frame = self._cap.read()
+                if not ret or frame is None:
+                    log_warning("Failed to read webcam frame")
+                    # Device may have disconnected, try to reopen next time
+                    self._close_device_internal()
+                    return None
+
+                # Resize for efficient transmission
+                frame = cv2.resize(frame, (640, 480))
+
+                # Convert to JPEG bytes
+                _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                image_bytes = buffer.tobytes()
+
+                log_info(f"Webcam captured: {len(image_bytes)} bytes", prefix="📷")
+                return image_bytes
+
+            except Exception as e:
+                log_error(f"Webcam capture failed: {e}")
+                self._close_device_internal()
+                return None
+
+    def _close_device_internal(self):
+        """Internal close without lock (called from within locked sections)."""
+        if self._cap is not None:
+            try:
+                self._cap.release()
+            except Exception:
+                pass
+            self._cap = None
+            self._is_open = False
+
+    def release(self):
+        """Release the webcam device. Call on application shutdown."""
+        with self._device_lock:
+            if self._cap is not None:
+                self._close_device_internal()
+                log_info("Webcam device released", prefix="📷")
+
+    @property
+    def is_open(self) -> bool:
+        """Check if the webcam device is currently open."""
+        return self._is_open
+
+
+# Global webcam manager instance
+_webcam_manager: Optional[WebcamManager] = None
+
+
+def get_webcam_manager() -> Optional[WebcamManager]:
+    """Get or create the global webcam manager instance."""
+    global _webcam_manager
+    if not CV2_AVAILABLE:
+        return None
+    if _webcam_manager is None:
+        _webcam_manager = WebcamManager()
+    return _webcam_manager
+
+
+def release_webcam():
+    """Release the persistent webcam device. Call on application shutdown."""
+    global _webcam_manager
+    if _webcam_manager is not None:
+        _webcam_manager.release()
+        _webcam_manager = None
+
+
+# =============================================================================
 # IMAGE CONTENT DATA STRUCTURES
 # =============================================================================
 
@@ -110,8 +245,8 @@ def capture_webcam_bytes() -> Optional[bytes]:
     """
     Capture a webcam frame and return as JPEG bytes.
 
-    Opens the default webcam (device 0), captures a single frame,
-    resizes to 640x480, and returns as JPEG.
+    Uses the persistent WebcamManager to avoid device open/close latency.
+    The device is opened on first use and kept open for subsequent captures.
 
     Returns:
         JPEG image bytes, or None if capture fails
@@ -120,36 +255,11 @@ def capture_webcam_bytes() -> Optional[bytes]:
         log_warning("Webcam capture unavailable - OpenCV not installed")
         return None
 
-    try:
-        # Open webcam
-        cap = cv2.VideoCapture(0)
-        if not cap.isOpened():
-            log_warning("Could not open webcam (device 0)")
-            return None
-
-        try:
-            # Capture a frame
-            ret, frame = cap.read()
-            if not ret or frame is None:
-                log_warning("Failed to read webcam frame")
-                return None
-
-            # Resize for efficient transmission
-            frame = cv2.resize(frame, (640, 480))
-
-            # Convert to JPEG bytes
-            _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-            image_bytes = buffer.tobytes()
-
-            log_info(f"Webcam captured: {len(image_bytes)} bytes", prefix="📷")
-            return image_bytes
-
-        finally:
-            cap.release()
-
-    except Exception as e:
-        log_error(f"Webcam capture failed: {e}")
+    manager = get_webcam_manager()
+    if manager is None:
         return None
+
+    return manager.capture_frame()
 
 
 # =============================================================================
