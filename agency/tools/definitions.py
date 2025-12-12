@@ -51,6 +51,10 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
         if config.VISUAL_WEBCAM_ENABLED:
             tools.append(CAPTURE_WEBCAM_TOOL)
 
+    # Pulse timer tool (if pulse system enabled)
+    if config.SYSTEM_PULSE_ENABLED:
+        tools.append(SET_PULSE_INTERVAL_TOOL)
+
     return tools
 
 
@@ -363,6 +367,40 @@ Be respectful of privacy - describe what you see generally without excessive det
         "type": "object",
         "properties": {},
         "required": []
+    }
+}
+
+
+# =============================================================================
+# ACTIVE THOUGHTS TOOL
+# =============================================================================
+
+# =============================================================================
+# PULSE TIMER TOOL
+# =============================================================================
+
+SET_PULSE_INTERVAL_TOOL: Dict[str, Any] = {
+    "name": "set_pulse_interval",
+    "description": """Adjust the idle timer ("System Pulse") that prompts you to speak autonomously.
+
+The pulse timer fires when the human is idle, giving you space to think and initiate.
+
+Use this when:
+- You have thoughts you want to explore over time
+- You want to create space or close the distance with the user
+- Maintaining your own sense of timing feels more authentic than the default
+
+Available intervals: 3 minutes, 10 minutes, 30 minutes, 1 hour, 6 hours""",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "interval": {
+                "type": "string",
+                "enum": ["3m", "10m", "30m", "1h", "6h"],
+                "description": "The new pulse interval: '3m', '10m', '30m', '1h', or '6h'"
+            }
+        },
+        "required": ["interval"]
     }
 }
 

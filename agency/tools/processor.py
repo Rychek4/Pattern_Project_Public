@@ -32,6 +32,8 @@ class ProcessedToolResponse:
         needs_continuation: Whether to call Claude again with results
         tool_result_message: Message dict to send tool results back to Claude
         continuation_images: Images to include in continuation (from visual tools)
+        pulse_interval_change: New pulse interval in seconds if AI requested change
+        telegram_sent: True if send_telegram was executed successfully
     """
     original_text: str
     display_text: str
@@ -39,6 +41,8 @@ class ProcessedToolResponse:
     needs_continuation: bool = False
     tool_result_message: Optional[Dict[str, Any]] = None
     continuation_images: Optional[List["ImageContent"]] = field(default=None)
+    pulse_interval_change: Optional[int] = None
+    telegram_sent: bool = False
 
     def has_tool_results(self) -> bool:
         """Check if any tools were executed."""
@@ -47,6 +51,10 @@ class ProcessedToolResponse:
     def has_continuation_images(self) -> bool:
         """Check if there are images to include in continuation."""
         return self.continuation_images is not None and len(self.continuation_images) > 0
+
+    def has_pulse_interval_change(self) -> bool:
+        """Check if pulse interval change was requested."""
+        return self.pulse_interval_change is not None
 
 
 class ToolProcessor:
@@ -104,6 +112,8 @@ class ToolProcessor:
 
         # Execute all tool calls
         results: List[ToolResult] = []
+        telegram_sent = False
+
         for tool_call in response.tool_calls:
             result = self._executor.execute(
                 tool_name=tool_call.name,
@@ -117,11 +127,18 @@ class ToolProcessor:
             status = "error" if result.is_error else "success"
             log_info(f"Tool {tool_call.name}: {status}", prefix="🔧")
 
+            # Track telegram sends for response handling
+            if tool_call.name == "send_telegram" and not result.is_error:
+                telegram_sent = True
+
         # Build tool_result message for Claude
         tool_result_message = self._build_tool_result_message(results)
 
         # Collect images from visual tools
         continuation_images = self._collect_images(results)
+
+        # Extract pulse interval change if requested
+        pulse_interval_change = context.get("pulse_interval_change")
 
         return ProcessedToolResponse(
             original_text=response.text,
@@ -129,7 +146,9 @@ class ToolProcessor:
             tool_results=results,
             needs_continuation=True,  # Always continue after tool execution
             tool_result_message=tool_result_message,
-            continuation_images=continuation_images
+            continuation_images=continuation_images,
+            pulse_interval_change=pulse_interval_change,
+            telegram_sent=telegram_sent
         )
 
     def _build_tool_result_message(self, results: List[ToolResult]) -> Dict[str, Any]:

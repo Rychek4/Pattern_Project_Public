@@ -1,6 +1,10 @@
 """
 Pattern Project - System Pulse Source
-Provides AI with awareness and control of the pulse timer
+Provides AI with awareness of the pulse timer.
+
+NOTE: The pulse timer is controlled via the native `set_pulse_interval` tool.
+This source provides context about the current timer setting, but the AI
+adjusts it using the tool, not embedded commands.
 """
 
 from typing import Optional, Dict, Any
@@ -18,7 +22,7 @@ PULSE_INTERVAL_OPTIONS = {
     21600: "6 hours",
 }
 
-# Reverse mapping for command parsing
+# Mapping for tool input validation (used by ToolExecutor)
 PULSE_COMMAND_TO_SECONDS = {
     "3m": 180,
     "10m": 600,
@@ -35,13 +39,15 @@ def get_interval_label(seconds: float) -> str:
 
 class SystemPulseSource(ContextSource):
     """
-    Provides context about the system pulse timer and how to control it.
+    Provides context about the system pulse timer.
 
     This gives the AI awareness of:
     - What the pulse timer is
     - Current timer setting
-    - How to adjust it via [[PULSE:Xm]] commands
-    - When/why it might want to adjust timing
+    - The set_pulse_interval tool can be used to adjust it
+
+    The AI controls the pulse timer via the `set_pulse_interval` native tool,
+    not via embedded commands.
     """
 
     @property
@@ -57,7 +63,7 @@ class SystemPulseSource(ContextSource):
         user_input: str,
         session_context: Dict[str, Any]
     ) -> Optional[ContextBlock]:
-        """Get system pulse control context for prompt injection."""
+        """Get system pulse context for prompt injection."""
         from agency.system_pulse import get_system_pulse_timer
         import config
 
@@ -70,27 +76,13 @@ class SystemPulseSource(ContextSource):
         current_interval = timer.pulse_interval
         current_label = get_interval_label(current_interval)
 
-        # Build the context block
+        # Build a minimal context block - tool description provides the rest
+        # We only need to inform the AI of the current setting
         lines = [
-            "<system_pulse_control>",
-            "The conversation has an idle timer (\"System Pulse\") that prompts you to speak",
-            "autonomously when the human is idle.",
-            "",
-            f"Current setting: {current_label}",
-            "Available options: 3 minutes, 10 minutes, 30 minutes, 1 hour, 6 hours",
-            "",
-            "You can adjust this timer by including a command anywhere in your response:",
-            "  [[PULSE:3m]]  - Set to 3 minutes",
-            "  [[PULSE:10m]] - Set to 10 minutes",
-            "  [[PULSE:30m]] - Set to 30 minutes",
-            "  [[PULSE:1h]]  - Set to 1 hour",
-            "  [[PULSE:6h]]  - Set to 6 hours",
-            "",
-            "Use this when:",
-            "- You have thoughts you want to explore over time",
-            "- You exercise your discretion to create space or close the distance",
-            "- Maintaining your own sense of timing feels more authentic than the default",
-            "</system_pulse_control>",
+            "<system_pulse_info>",
+            f"Pulse timer is currently set to: {current_label}",
+            "(Use the set_pulse_interval tool to adjust)",
+            "</system_pulse_info>",
         ]
 
         # Store current setting in session context for other sources

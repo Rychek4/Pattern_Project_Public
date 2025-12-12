@@ -1,0 +1,299 @@
+"""
+Pattern Project - Tool Response Processing Helper
+Shared helper for processing LLM responses with native tool use.
+
+This module provides a unified approach for processing tool-based responses
+across all entry points (GUI, CLI, pulse, telegram, etc.). It handles:
+- Multi-pass tool execution
+- Continuation message building
+- Pulse interval change detection
+- Telegram send tracking
+
+Usage:
+    from agency.tools.response_helper import ToolResponseHelper
+
+    helper = ToolResponseHelper(
+        llm_router=router,
+        system_prompt=system_prompt,
+        tools=get_tool_definitions()
+    )
+
+    result = helper.process_response(
+        response=initial_response,
+        history=conversation_history,
+        max_passes=5,
+        pulse_callback=lambda interval: signals.pulse_interval_change.emit(interval)
+    )
+
+    final_text = result.final_text
+    telegram_sent = result.telegram_sent
+"""
+
+import time
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+
+from agency.tools import get_tool_definitions, get_tool_processor
+from agency.tools.processor import ProcessedToolResponse
+from core.logger import log_info, log_warning
+
+if TYPE_CHECKING:
+    from llm.anthropic_client import AnthropicResponse
+
+
+@dataclass
+class ToolProcessingResult:
+    """
+    Result from complete tool response processing (all passes).
+
+    Attributes:
+        final_text: The final response text after all processing
+        final_provider: The provider that generated the final response
+        passes_executed: Number of API calls made
+        telegram_sent: True if send_telegram was executed successfully (any pass)
+        pulse_interval_changed: True if pulse interval was changed (any pass)
+        total_duration_ms: Total processing time in milliseconds
+    """
+    final_text: str
+    final_provider: str
+    passes_executed: int = 1
+    telegram_sent: bool = False
+    pulse_interval_changed: bool = False
+    total_duration_ms: float = 0.0
+
+
+class ToolResponseHelper:
+    """
+    Helper class for processing LLM responses with native tool use.
+
+    This consolidates the multi-pass tool execution logic that was duplicated
+    across GUI and CLI interfaces. It provides a single, tested implementation
+    for all message entry points (user input, pulse, telegram, reminders).
+
+    The helper handles:
+    1. Processing initial response for tool calls
+    2. Building continuation messages with tool results
+    3. Making continuation API calls with tools enabled
+    4. Tracking pulse interval changes across all passes
+    5. Tracking telegram sends to avoid duplicates
+    6. Dev window event emission (if enabled)
+    """
+
+    def __init__(
+        self,
+        llm_router,
+        system_prompt: str,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        task_type=None
+    ):
+        """
+        Initialize the helper.
+
+        Args:
+            llm_router: The LLM router instance for making API calls
+            system_prompt: System prompt for all API calls
+            tools: Tool definitions (defaults to get_tool_definitions())
+            task_type: Task type for router calls (defaults to CONVERSATION)
+        """
+        self._router = llm_router
+        self._system_prompt = system_prompt
+        self._tools = tools if tools is not None else get_tool_definitions()
+        self._task_type = task_type
+        self._processor = get_tool_processor()
+
+    def process_response(
+        self,
+        response: "AnthropicResponse",
+        history: List[Dict[str, Any]],
+        max_passes: int = 5,
+        pulse_callback: Optional[Callable[[int], None]] = None,
+        dev_mode_callbacks: Optional[Dict[str, Callable]] = None,
+        pass1_duration: float = 0.0
+    ) -> ToolProcessingResult:
+        """
+        Process a response through multi-pass tool execution.
+
+        Args:
+            response: Initial AnthropicResponse from the API
+            history: Conversation history (will be copied, not modified)
+            max_passes: Maximum number of tool execution passes
+            pulse_callback: Optional callback for pulse interval changes.
+                            Called with interval in seconds when AI changes pulse.
+            dev_mode_callbacks: Optional dict of callbacks for dev window:
+                - emit_response_pass: (pass_num, provider, text, tokens_in, tokens_out, duration_ms, tools, ...) -> None
+                - emit_command_executed: (name, query, result, error, needs_continuation) -> None
+            pass1_duration: Duration of first API call in ms (for dev window)
+
+        Returns:
+            ToolProcessingResult with final text and metadata
+        """
+        import config
+        from llm.router import TaskType
+
+        task_type = self._task_type or TaskType.CONVERSATION
+        current_response = response
+        current_history = history.copy()
+        current_duration = pass1_duration
+
+        # Track across all passes
+        telegram_sent = False
+        pulse_interval_changed = False
+        start_time = time.time()
+
+        for pass_num in range(1, max_passes + 1):
+            # Create fresh context for each pass to avoid cross-contamination
+            context = {}
+
+            # Process response for tool calls
+            processed = self._processor.process(current_response, context=context)
+
+            # Emit to dev window if enabled
+            if dev_mode_callbacks and config.DEV_MODE_ENABLED:
+                self._emit_dev_events(
+                    dev_mode_callbacks,
+                    pass_num,
+                    current_response,
+                    processed,
+                    current_duration
+                )
+
+            # Handle pulse interval change from this pass
+            if processed.has_pulse_interval_change():
+                pulse_interval_changed = True
+                if pulse_callback:
+                    pulse_callback(processed.pulse_interval_change)
+
+            # Track telegram sends across all passes
+            if processed.telegram_sent:
+                telegram_sent = True
+
+            # If no continuation needed (no tool calls or stop_reason != "tool_use")
+            if not processed.needs_continuation:
+                return ToolProcessingResult(
+                    final_text=processed.display_text,
+                    final_provider=current_response.provider.value if hasattr(current_response.provider, 'value') else str(current_response.provider),
+                    passes_executed=pass_num,
+                    telegram_sent=telegram_sent,
+                    pulse_interval_changed=pulse_interval_changed,
+                    total_duration_ms=(time.time() - start_time) * 1000
+                )
+
+            # Build continuation: add assistant message with raw content blocks
+            current_history.append({
+                "role": "assistant",
+                "content": current_response.raw_content
+            })
+
+            # Add tool results message
+            current_history.append(processed.tool_result_message)
+
+            # Get next response with tools
+            cont_start = time.time()
+            continuation = self._router.chat(
+                messages=current_history,
+                system_prompt=self._system_prompt,
+                task_type=task_type,
+                temperature=0.7,
+                tools=self._tools
+            )
+            current_duration = (time.time() - cont_start) * 1000
+
+            if not continuation.success:
+                # On failure, return last successful text
+                log_warning(f"Continuation failed on pass {pass_num + 1}: {continuation.error}")
+                return ToolProcessingResult(
+                    final_text=processed.display_text,
+                    final_provider=current_response.provider.value if hasattr(current_response.provider, 'value') else str(current_response.provider),
+                    passes_executed=pass_num,
+                    telegram_sent=telegram_sent,
+                    pulse_interval_changed=pulse_interval_changed,
+                    total_duration_ms=(time.time() - start_time) * 1000
+                )
+
+            current_response = continuation
+
+        # Hit max passes - return final response
+        log_info(f"Reached max passes ({max_passes}), returning final response", prefix="🔧")
+        return ToolProcessingResult(
+            final_text=current_response.text,
+            final_provider=current_response.provider.value if hasattr(current_response.provider, 'value') else str(current_response.provider),
+            passes_executed=max_passes,
+            telegram_sent=telegram_sent,
+            pulse_interval_changed=pulse_interval_changed,
+            total_duration_ms=(time.time() - start_time) * 1000
+        )
+
+    def _emit_dev_events(
+        self,
+        callbacks: Dict[str, Callable],
+        pass_num: int,
+        response: "AnthropicResponse",
+        processed: ProcessedToolResponse,
+        duration_ms: float
+    ):
+        """Emit events to dev window if callbacks provided."""
+        emit_pass = callbacks.get("emit_response_pass")
+        emit_cmd = callbacks.get("emit_command_executed")
+
+        if emit_pass:
+            tool_names = [tc.name for tc in response.tool_calls] if response.has_tool_calls() else []
+            emit_pass(
+                pass_number=pass_num,
+                provider=response.provider.value if pass_num == 1 else "continuation",
+                response_text=response.text,
+                tokens_in=getattr(response, 'tokens_in', 0) if pass_num == 1 else 0,
+                tokens_out=getattr(response, 'tokens_out', 0) if pass_num == 1 else 0,
+                duration_ms=duration_ms,
+                commands_detected=tool_names,
+                web_searches_used=getattr(response, 'web_searches_used', 0) if pass_num == 1 else 0,
+                citations=getattr(response, 'citations', []) if pass_num == 1 else []
+            )
+
+        if emit_cmd:
+            for result in processed.tool_results:
+                emit_cmd(
+                    command_name=result.tool_name,
+                    query=str(result.content)[:100] if result.content else "",
+                    result_data=result.content,
+                    error=str(result.content) if result.is_error else None,
+                    needs_continuation=True
+                )
+
+
+def process_with_tools(
+    llm_router,
+    response: "AnthropicResponse",
+    history: List[Dict[str, Any]],
+    system_prompt: str,
+    max_passes: int = 5,
+    pulse_callback: Optional[Callable[[int], None]] = None,
+    tools: Optional[List[Dict[str, Any]]] = None
+) -> ToolProcessingResult:
+    """
+    Convenience function for processing a response with native tools.
+
+    This is a simpler interface for cases where you don't need to reuse the helper.
+
+    Args:
+        llm_router: The LLM router instance
+        response: Initial AnthropicResponse
+        history: Conversation history
+        system_prompt: System prompt
+        max_passes: Maximum tool execution passes
+        pulse_callback: Optional callback for pulse interval changes
+        tools: Optional tool definitions
+
+    Returns:
+        ToolProcessingResult with final text and metadata
+    """
+    helper = ToolResponseHelper(
+        llm_router=llm_router,
+        system_prompt=system_prompt,
+        tools=tools
+    )
+    return helper.process_response(
+        response=response,
+        history=history,
+        max_passes=max_passes,
+        pulse_callback=pulse_callback
+    )

@@ -251,20 +251,21 @@ COMMAND_SEARCH_LIMIT = 10       # Default memory search result count
 COMMAND_SEARCH_MIN_SCORE = 0.3  # Minimum relevance score for search results
 
 # =============================================================================
-# NATIVE TOOL USE CONFIGURATION
+# NATIVE TOOL USE CONFIGURATION (DEPRECATED)
 # =============================================================================
-# When enabled, uses Claude's native tool use instead of [[COMMAND]] patterns.
-# Native tools provide:
-#   - Structured JSON arguments (no regex parsing)
-#   - Parallel tool execution
-#   - Typed error handling
-#   - Reduced prompt size (no command documentation needed)
+# Native tool use is now the ONLY supported mode. The legacy [[COMMAND]] pattern
+# system has been deprecated and removed.
 #
-# Set to True to enable native tools (default).
-# Set to False to use legacy [[COMMAND]] syntax (backwards compatible).
+# This flag is kept for backwards compatibility but has no effect.
+# It will be removed in a future version.
 #
-# Both systems use the same underlying handlers - only the invocation changes.
-USE_NATIVE_TOOLS = os.getenv("USE_NATIVE_TOOLS", "true").lower() == "true"
+# MIGRATION NOTE (December 2025):
+# - All message entry points (user input, pulse, telegram, reminder) now use
+#   native tool use exclusively
+# - The [[COMMAND: arg]] syntax is no longer parsed or supported
+# - Tool definitions in agency/tools/definitions.py define all available tools
+# - The legacy command processor in agency/commands/ is deprecated
+USE_NATIVE_TOOLS = True  # Always True - legacy mode no longer available
 
 # =============================================================================
 # INTENTION SYSTEM CONFIGURATION

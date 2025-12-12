@@ -164,17 +164,21 @@ class ChatCLI:
                 # Get conversation history for LLM
                 history = conversation_mgr.get_recent_history(limit=30)
 
-                # Get tool definitions if using native tools
-                tools = None
-                if config.USE_NATIVE_TOOLS:
-                    from agency.tools import get_tool_definitions
-                    tools = get_tool_definitions()
+                # Get tool definitions for native tool use
+                from agency.tools import get_tool_definitions, process_with_tools
+                tools = get_tool_definitions()
+
+                # Callback for pulse interval changes
+                def on_pulse_change(interval: int):
+                    if self._system_pulse_timer:
+                        self._system_pulse_timer.set_interval(interval)
+                        log_info(f"Pulse interval changed to {interval}s", prefix="⏱️")
 
                 # Show thinking indicator
                 import time
                 start_time = time.time()
                 with self.console.status("[bold blue]Thinking...[/bold blue]", spinner="dots"):
-                    # Get response from LLM with full context
+                    # Get response from LLM with full context and native tools
                     response = router.chat(
                         messages=history,
                         system_prompt=assembled.full_system_prompt,
@@ -187,17 +191,19 @@ class ChatCLI:
                 if response.success:
                     max_passes = getattr(config, 'COMMAND_MAX_PASSES', 3)
 
-                    # Branch based on native tools mode
-                    if config.USE_NATIVE_TOOLS:
-                        final_text, final_provider = self._process_native_tools_response_cli(
-                            response, history, assembled.full_system_prompt,
-                            tools, max_passes, pass1_duration, router
-                        )
-                    else:
-                        final_text, final_provider = self._process_legacy_commands_response_cli(
-                            response, history, assembled.full_system_prompt,
-                            max_passes, pass1_duration, router
-                        )
+                    # Use shared helper to process response with native tools
+                    result = process_with_tools(
+                        llm_router=router,
+                        response=response,
+                        history=history,
+                        system_prompt=assembled.full_system_prompt,
+                        max_passes=max_passes,
+                        pulse_callback=on_pulse_change,
+                        tools=tools
+                    )
+
+                    final_text = result.final_text
+                    final_provider = result.final_provider
 
                     # Store final response
                     conversation_mgr.add_turn(
@@ -312,6 +318,11 @@ class ChatCLI:
         """
         Process response using native tool use (CLI version).
 
+        DEPRECATED (December 2025): This method is no longer called.
+        Use `process_with_tools` from agency.tools instead.
+        The shared helper provides consistent processing across all entry points.
+        Kept for reference during migration period.
+
         Returns:
             Tuple of (final_text, final_provider)
         """
@@ -396,6 +407,11 @@ class ChatCLI:
     ) -> tuple:
         """
         Process response using legacy [[COMMAND]] pattern (CLI version).
+
+        DEPRECATED (December 2025): This method is no longer called.
+        The legacy [[COMMAND]] syntax has been replaced by native tool use.
+        Use `process_with_tools` from agency.tools instead.
+        Kept for reference during migration period.
 
         Returns:
             Tuple of (final_text, final_provider)
@@ -494,8 +510,9 @@ class ChatCLI:
             pass
 
     def _process_pulse(self) -> None:
-        """Process a system pulse."""
+        """Process a system pulse using native tools."""
         from agency.system_pulse import PULSE_PROMPT, PULSE_STORED_MESSAGE
+        from agency.tools import get_tool_definitions, process_with_tools
 
         conversation_mgr = get_conversation_manager()
         router = get_llm_router()
@@ -530,45 +547,39 @@ class ChatCLI:
             # (role="user" is an API constraint, but content clarifies it's automated)
             history.append({"role": "user", "content": PULSE_PROMPT})
 
+            # Get tool definitions for native tool use
+            tools = get_tool_definitions()
+
+            # Callback for pulse interval changes
+            def on_pulse_change(interval: int):
+                if self._system_pulse_timer:
+                    self._system_pulse_timer.set_interval(interval)
+                    log_info(f"Pulse interval changed to {interval}s", prefix="⏱️")
+
             # Show thinking indicator
             with self.console.status("[bold magenta]Pulse thinking...[/bold magenta]", spinner="dots"):
                 response = router.chat(
                     messages=history,
                     system_prompt=assembled.full_system_prompt,
                     task_type=TaskType.CONVERSATION,
-                    temperature=0.7
+                    temperature=0.7,
+                    tools=tools  # Enable native tools for pulse responses
                 )
 
             if response.success:
-                from agency.commands import get_command_processor
+                # Use shared helper to process response with native tools
+                result = process_with_tools(
+                    llm_router=router,
+                    response=response,
+                    history=history,
+                    system_prompt=assembled.full_system_prompt,
+                    max_passes=5,
+                    pulse_callback=on_pulse_change,
+                    tools=tools
+                )
 
-                # Process response for AI commands
-                processor = get_command_processor()
-                processed = processor.process(response.text)
-
-                # Handle continuation if commands need results
-                final_text = processed.display_text
-                final_provider = response.provider.value
-
-                if processed.needs_continuation:
-                    self.console.print("[dim]  ↳ Executing command...[/dim]")
-
-                    # Build continuation
-                    continuation_history = history.copy()
-                    continuation_history.append({"role": "assistant", "content": response.text})
-                    continuation_history.append({"role": "user", "content": processed.continuation_prompt})
-
-                    with self.console.status("[bold magenta]Continuing...[/bold magenta]", spinner="dots"):
-                        continuation = router.chat(
-                            messages=continuation_history,
-                            system_prompt=assembled.full_system_prompt,
-                            task_type=TaskType.CONVERSATION,
-                            temperature=0.7
-                        )
-
-                    if continuation.success:
-                        final_text = continuation.text
-                        final_provider = continuation.provider.value
+                final_text = result.final_text
+                final_provider = result.final_provider
 
                 # Store response
                 conversation_mgr.add_turn(
@@ -615,8 +626,9 @@ class ChatCLI:
             pass
 
     def _process_reminder(self, triggered_intentions) -> None:
-        """Process a reminder pulse."""
+        """Process a reminder pulse using native tools."""
         from agency.intentions import get_reminder_pulse_prompt
+        from agency.tools import get_tool_definitions, process_with_tools
 
         conversation_mgr = get_conversation_manager()
         router = get_llm_router()
@@ -652,43 +664,39 @@ class ChatCLI:
             history = conversation_mgr.get_recent_history(limit=30)
             history.append({"role": "user", "content": reminder_prompt})
 
+            # Get tool definitions for native tool use
+            tools = get_tool_definitions()
+
+            # Callback for pulse interval changes
+            def on_pulse_change(interval: int):
+                if self._system_pulse_timer:
+                    self._system_pulse_timer.set_interval(interval)
+                    log_info(f"Pulse interval changed to {interval}s", prefix="⏱️")
+
             # Show thinking indicator
             with self.console.status("[bold yellow]Reminder thinking...[/bold yellow]", spinner="dots"):
                 response = router.chat(
                     messages=history,
                     system_prompt=assembled.full_system_prompt,
                     task_type=TaskType.CONVERSATION,
-                    temperature=0.7
+                    temperature=0.7,
+                    tools=tools  # Enable native tools for reminder responses
                 )
 
             if response.success:
-                from agency.commands import get_command_processor
+                # Use shared helper to process response with native tools
+                result = process_with_tools(
+                    llm_router=router,
+                    response=response,
+                    history=history,
+                    system_prompt=assembled.full_system_prompt,
+                    max_passes=5,
+                    pulse_callback=on_pulse_change,
+                    tools=tools
+                )
 
-                # Process response for AI commands
-                processor = get_command_processor()
-                processed = processor.process(response.text)
-
-                final_text = processed.display_text
-                final_provider = response.provider.value
-
-                if processed.needs_continuation:
-                    self.console.print("[dim]  ↳ Executing command...[/dim]")
-
-                    continuation_history = history.copy()
-                    continuation_history.append({"role": "assistant", "content": response.text})
-                    continuation_history.append({"role": "user", "content": processed.continuation_prompt})
-
-                    with self.console.status("[bold yellow]Continuing...[/bold yellow]", spinner="dots"):
-                        continuation = router.chat(
-                            messages=continuation_history,
-                            system_prompt=assembled.full_system_prompt,
-                            task_type=TaskType.CONVERSATION,
-                            temperature=0.7
-                        )
-
-                    if continuation.success:
-                        final_text = continuation.text
-                        final_provider = continuation.provider.value
+                final_text = result.final_text
+                final_provider = result.final_provider
 
                 # Store response
                 conversation_mgr.add_turn(
@@ -735,7 +743,9 @@ class ChatCLI:
             pass
 
     def _process_telegram_message(self, message) -> None:
-        """Process an inbound Telegram message and generate AI response."""
+        """Process an inbound Telegram message and generate AI response using native tools."""
+        from agency.tools import get_tool_definitions, process_with_tools
+
         conversation_mgr = get_conversation_manager()
         router = get_llm_router()
         prompt_builder = get_prompt_builder()
@@ -769,43 +779,40 @@ class ChatCLI:
             # Get conversation history
             history = conversation_mgr.get_recent_history(limit=30)
 
+            # Get tool definitions for native tool use
+            tools = get_tool_definitions()
+
+            # Callback for pulse interval changes
+            def on_pulse_change(interval: int):
+                if self._system_pulse_timer:
+                    self._system_pulse_timer.set_interval(interval)
+                    log_info(f"Pulse interval changed to {interval}s", prefix="⏱️")
+
             # Show thinking indicator
             with self.console.status("[bold cyan]Responding to Telegram...[/bold cyan]", spinner="dots"):
                 response = router.chat(
                     messages=history,
                     system_prompt=assembled.full_system_prompt,
                     task_type=TaskType.CONVERSATION,
-                    temperature=0.7
+                    temperature=0.7,
+                    tools=tools  # Enable native tools for telegram responses
                 )
 
             if response.success:
-                from agency.commands import get_command_processor
+                # Use shared helper to process response with native tools
+                result = process_with_tools(
+                    llm_router=router,
+                    response=response,
+                    history=history,
+                    system_prompt=assembled.full_system_prompt,
+                    max_passes=5,
+                    pulse_callback=on_pulse_change,
+                    tools=tools
+                )
 
-                # Process response for AI commands
-                processor = get_command_processor()
-                processed = processor.process(response.text)
-
-                final_text = processed.display_text
-                final_provider = response.provider.value
-
-                if processed.needs_continuation:
-                    self.console.print("[dim]  ↳ Executing command...[/dim]")
-
-                    continuation_history = history.copy()
-                    continuation_history.append({"role": "assistant", "content": response.text})
-                    continuation_history.append({"role": "user", "content": processed.continuation_prompt})
-
-                    with self.console.status("[bold cyan]Continuing...[/bold cyan]", spinner="dots"):
-                        continuation = router.chat(
-                            messages=continuation_history,
-                            system_prompt=assembled.full_system_prompt,
-                            task_type=TaskType.CONVERSATION,
-                            temperature=0.7
-                        )
-
-                    if continuation.success:
-                        final_text = continuation.text
-                        final_provider = continuation.provider.value
+                final_text = result.final_text
+                final_provider = result.final_provider
+                telegram_sent = result.telegram_sent
 
                 # Store response
                 conversation_mgr.add_turn(
@@ -825,8 +832,8 @@ class ChatCLI:
                 self.console.print(panel)
                 self.console.print()
 
-                # Also send response back to Telegram
-                if config.TELEGRAM_ENABLED:
+                # Also send response back to Telegram (only if not already sent via tool)
+                if config.TELEGRAM_ENABLED and not telegram_sent:
                     try:
                         from communication.telegram_gateway import get_telegram_gateway
                         gateway = get_telegram_gateway()
