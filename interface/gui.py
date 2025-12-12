@@ -168,6 +168,7 @@ class ChatWindow(QMainWindow):
         """Create the UI layout."""
         self.setWindowTitle("Pattern Project")
         self.setMinimumSize(700, 500)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
 
         # Central widget
         central = QWidget()
