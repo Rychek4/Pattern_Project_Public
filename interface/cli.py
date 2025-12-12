@@ -192,6 +192,15 @@ class ChatCLI:
                 if response.success:
                     max_passes = getattr(config, 'COMMAND_MAX_PASSES', 3)
 
+                    # Set up dev window callbacks for tool/response tracking
+                    dev_callbacks = None
+                    if config.DEV_MODE_ENABLED:
+                        from interface.dev_window import emit_response_pass, emit_command_executed
+                        dev_callbacks = {
+                            "emit_response_pass": emit_response_pass,
+                            "emit_command_executed": emit_command_executed
+                        }
+
                     # Use shared helper to process response with native tools
                     result = process_with_tools(
                         llm_router=router,
@@ -200,7 +209,8 @@ class ChatCLI:
                         system_prompt=assembled.full_system_prompt,
                         max_passes=max_passes,
                         pulse_callback=on_pulse_change,
-                        tools=tools
+                        tools=tools,
+                        dev_mode_callbacks=dev_callbacks
                     )
 
                     final_text = result.final_text
@@ -569,6 +579,15 @@ class ChatCLI:
                 )
 
             if response.success:
+                # Set up dev window callbacks for tool/response tracking
+                dev_callbacks = None
+                if config.DEV_MODE_ENABLED:
+                    from interface.dev_window import emit_response_pass, emit_command_executed
+                    dev_callbacks = {
+                        "emit_response_pass": emit_response_pass,
+                        "emit_command_executed": emit_command_executed
+                    }
+
                 # Use shared helper to process response with native tools
                 result = process_with_tools(
                     llm_router=router,
@@ -577,7 +596,8 @@ class ChatCLI:
                     system_prompt=assembled.full_system_prompt,
                     max_passes=5,
                     pulse_callback=on_pulse_change,
-                    tools=tools
+                    tools=tools,
+                    dev_mode_callbacks=dev_callbacks
                 )
 
                 final_text = result.final_text
@@ -687,6 +707,15 @@ class ChatCLI:
                 )
 
             if response.success:
+                # Set up dev window callbacks for tool/response tracking
+                dev_callbacks = None
+                if config.DEV_MODE_ENABLED:
+                    from interface.dev_window import emit_response_pass, emit_command_executed
+                    dev_callbacks = {
+                        "emit_response_pass": emit_response_pass,
+                        "emit_command_executed": emit_command_executed
+                    }
+
                 # Use shared helper to process response with native tools
                 result = process_with_tools(
                     llm_router=router,
@@ -695,7 +724,8 @@ class ChatCLI:
                     system_prompt=assembled.full_system_prompt,
                     max_passes=5,
                     pulse_callback=on_pulse_change,
-                    tools=tools
+                    tools=tools,
+                    dev_mode_callbacks=dev_callbacks
                 )
 
                 final_text = result.final_text
@@ -803,6 +833,15 @@ class ChatCLI:
                 )
 
             if response.success:
+                # Set up dev window callbacks for tool/response tracking
+                dev_callbacks = None
+                if config.DEV_MODE_ENABLED:
+                    from interface.dev_window import emit_response_pass, emit_command_executed
+                    dev_callbacks = {
+                        "emit_response_pass": emit_response_pass,
+                        "emit_command_executed": emit_command_executed
+                    }
+
                 # Use shared helper to process response with native tools
                 result = process_with_tools(
                     llm_router=router,
@@ -811,7 +850,8 @@ class ChatCLI:
                     system_prompt=assembled.full_system_prompt,
                     max_passes=5,
                     pulse_callback=on_pulse_change,
-                    tools=tools
+                    tools=tools,
+                    dev_mode_callbacks=dev_callbacks
                 )
 
                 final_text = result.final_text
