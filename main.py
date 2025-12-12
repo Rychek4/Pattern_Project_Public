@@ -47,7 +47,7 @@ from agency.proactive import init_proactive_agent, get_proactive_agent
 # Visual capture is now stateless - no init/start/stop lifecycle needed.
 # Capture happens on-demand via capture_all_visuals() in gui.py.
 # Import availability checker for startup logging only.
-from agency.visual_capture import is_visual_capture_available
+from agency.visual_capture import is_visual_capture_available, release_webcam
 from agency.system_pulse import init_system_pulse_timer, get_system_pulse_timer
 from agency.intentions import init_reminder_scheduler, get_reminder_scheduler
 from subprocess_mgmt.manager import init_subprocess_manager, get_subprocess_manager
@@ -363,8 +363,12 @@ def stop_background_services() -> None:
     except Exception as e:
         log_error(f"Error stopping reminder scheduler: {e}")
 
-    # Visual capture is stateless - no background service to stop.
-    # Nothing to clean up here.
+    # Release webcam device if it was opened
+    try:
+        release_webcam()
+        log_subsection("Webcam device released")
+    except Exception as e:
+        log_error(f"Error releasing webcam: {e}")
 
     # Stop subprocesses
     try:

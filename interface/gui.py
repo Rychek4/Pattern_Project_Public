@@ -1714,6 +1714,10 @@ def run_gui():
         telegram_listener.stop()
         log_info("Telegram listener stopped", prefix="📱")
 
+    # Release webcam device if it was opened
+    from agency.visual_capture import release_webcam
+    release_webcam()
+
     return exit_code
 
 
