@@ -129,19 +129,40 @@ class ActiveThoughtsManager:
             now = datetime.now().isoformat()
 
             with db.get_connection() as conn:
-                # Get existing thoughts to preserve created_at for unchanged items
+                # Get existing thoughts to preserve created_at and updated_at
+                # for items whose content hasn't changed
                 existing = {}
-                cursor = conn.execute("SELECT slug, created_at FROM active_thoughts")
+                cursor = conn.execute(
+                    "SELECT slug, topic, elaboration, created_at, updated_at FROM active_thoughts"
+                )
                 for row in cursor.fetchall():
-                    existing[row["slug"]] = row["created_at"]
+                    existing[row["slug"]] = {
+                        "topic": row["topic"],
+                        "elaboration": row["elaboration"],
+                        "created_at": row["created_at"],
+                        "updated_at": row["updated_at"]
+                    }
 
                 # Clear existing thoughts
                 conn.execute("DELETE FROM active_thoughts")
 
                 # Insert new thoughts
                 for thought in thoughts:
-                    # Preserve created_at if slug existed before
-                    created_at = existing.get(thought["slug"], now)
+                    # Check if this thought existed before and if content changed
+                    if thought["slug"] in existing:
+                        existing_thought = existing[thought["slug"]]
+                        created_at = existing_thought["created_at"]
+
+                        # Only update updated_at if content actually changed
+                        content_changed = (
+                            existing_thought["topic"] != thought["topic"] or
+                            existing_thought["elaboration"] != thought["elaboration"]
+                        )
+                        updated_at = now if content_changed else existing_thought["updated_at"]
+                    else:
+                        # New thought
+                        created_at = now
+                        updated_at = now
 
                     conn.execute(
                         """
@@ -155,7 +176,7 @@ class ActiveThoughtsManager:
                             thought["topic"],
                             thought["elaboration"],
                             created_at,
-                            now
+                            updated_at
                         )
                     )
 

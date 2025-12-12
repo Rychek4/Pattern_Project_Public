@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from core.logger import log_info, log_success, log_error, log_config, log_section
 
 # Schema version for migrations
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 # SQL schema definition
 SCHEMA_SQL = """
@@ -146,7 +146,7 @@ CREATE TABLE IF NOT EXISTS communication_log (
 CREATE TABLE IF NOT EXISTS active_thoughts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     rank INTEGER NOT NULL UNIQUE CHECK(rank >= 1 AND rank <= 10),
-    slug TEXT NOT NULL,
+    slug TEXT NOT NULL UNIQUE,
     topic TEXT NOT NULL,
     elaboration TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -530,6 +530,47 @@ ALTER TABLE memories ADD COLUMN memory_category TEXT DEFAULT 'episodic'
 CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(memory_category);
 """
 
+# Migration SQL for v12 -> v13 (add UNIQUE constraint on active_thoughts.slug)
+MIGRATION_V13_SQL = """
+-- Add UNIQUE constraint on active_thoughts.slug column
+-- This enforces at the database level what the Python code already validates:
+-- each slug must be unique within the active thoughts list.
+--
+-- SQLite doesn't support adding constraints to existing columns, so we need
+-- to recreate the table.
+
+-- Disable foreign keys during migration
+PRAGMA foreign_keys=OFF;
+
+-- Create new table with UNIQUE constraint on slug
+CREATE TABLE active_thoughts_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rank INTEGER NOT NULL UNIQUE CHECK(rank >= 1 AND rank <= 10),
+    slug TEXT NOT NULL UNIQUE,
+    topic TEXT NOT NULL,
+    elaboration TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Copy existing data
+INSERT INTO active_thoughts_new (id, rank, slug, topic, elaboration, created_at, updated_at)
+SELECT id, rank, slug, topic, elaboration, created_at, updated_at
+FROM active_thoughts;
+
+-- Drop old table
+DROP TABLE active_thoughts;
+
+-- Rename new table
+ALTER TABLE active_thoughts_new RENAME TO active_thoughts;
+
+-- Recreate index
+CREATE INDEX IF NOT EXISTS idx_active_thoughts_rank ON active_thoughts(rank);
+
+-- Re-enable foreign keys
+PRAGMA foreign_keys=ON;
+"""
+
 
 class Database:
     """SQLite database manager with WAL mode and thread-safe connections."""
@@ -691,6 +732,10 @@ class Database:
             if from_version < 12:
                 log_config("Applying migration", "v11 → v12 (add memory_category for dual-track extraction)", indent=1)
                 conn.executescript(MIGRATION_V12_SQL)
+
+            if from_version < 13:
+                log_config("Applying migration", "v12 → v13 (add UNIQUE constraint on active_thoughts.slug)", indent=1)
+                conn.executescript(MIGRATION_V13_SQL)
 
             # Record new version
             conn.execute(

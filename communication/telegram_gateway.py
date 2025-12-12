@@ -240,24 +240,33 @@ class TelegramGateway:
 
         # Fallback: create a temporary event loop with proper cleanup
         # This handles the case where the listener isn't running yet
-
-        # CRITICAL: Clear any existing bot to ensure we create a fresh one
-        # for this event loop. Using a bot from a different loop causes
-        # "Event loop is closed" errors.
-        self._bot = None
+        #
+        # CRITICAL: Use a local Bot instance to avoid race conditions.
+        # Multiple threads could enter this fallback simultaneously, and
+        # sharing self._bot would cause them to clobber each other's instances.
 
         loop = asyncio.new_event_loop()
+        local_bot = None
         try:
             asyncio.set_event_loop(loop)
-            result = loop.run_until_complete(self._send_async(message, parse_mode))
 
-            # Properly shut down the bot to avoid "Event loop is closed" errors
-            if self._bot:
+            # Create a local Bot instance for this event loop only
+            local_bot = Bot(token=self.bot_token)
+
+            # Use asyncio.wait_for to enforce a timeout and prevent indefinite blocking
+            result = loop.run_until_complete(
+                asyncio.wait_for(
+                    self._send_async(message, parse_mode, bot=local_bot),
+                    timeout=30.0
+                )
+            )
+
+            # Properly shut down the local bot to avoid "Event loop is closed" errors
+            if local_bot:
                 try:
-                    loop.run_until_complete(self._bot.shutdown())
+                    loop.run_until_complete(local_bot.shutdown())
                 except Exception:
                     pass  # Ignore shutdown errors
-                self._bot = None  # Clear so next send creates fresh instance
 
             return result
         finally:
