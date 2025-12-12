@@ -600,6 +600,11 @@ class ChatWindow(QMainWindow):
     def _parse_pulse_command(self, text: str) -> Optional[int]:
         """Parse [[PULSE:Xm]] command from response text.
 
+        DEPRECATED (December 2025): This method is no longer used.
+        Pulse interval changes are now handled via the native `set_pulse_interval`
+        tool in the shared response helper. Kept for backwards compatibility
+        with any code that might still reference it.
+
         Args:
             text: The AI response text
 
@@ -620,6 +625,10 @@ class ChatWindow(QMainWindow):
 
     def _format_pulse_command(self, content: str) -> str:
         """Format [[PULSE:Xm]] commands with purple color and emoji.
+
+        NOTE: This is kept for display formatting of any legacy [[PULSE:Xm]]
+        text that might appear in conversation history. The native tool
+        doesn't produce this syntax.
 
         Args:
             content: HTML content (already escaped)
@@ -850,14 +859,11 @@ class ChatWindow(QMainWindow):
             user_message = self._capture_visuals_for_message(user_input)
             history.append(user_message)
 
-            # Get LLM response
+            # Get LLM response with native tool use
             from llm.router import TaskType
+            from agency.tools import get_tool_definitions, process_with_tools
 
-            # Get tool definitions if using native tools
-            tools = None
-            if config.USE_NATIVE_TOOLS:
-                from agency.tools import get_tool_definitions
-                tools = get_tool_definitions()
+            tools = get_tool_definitions()
 
             start_time = time.time()
             response = self._llm_router.chat(
@@ -870,26 +876,20 @@ class ChatWindow(QMainWindow):
             pass1_duration = (time.time() - start_time) * 1000
 
             if response.success:
-                # Check initial response for pulse timer command
-                pulse_interval = self._parse_pulse_command(response.text)
-                if pulse_interval is not None:
-                    self.signals.pulse_interval_change.emit(pulse_interval)
-
                 max_passes = getattr(config, 'COMMAND_MAX_PASSES', 3)
 
-                # Branch based on native tools mode
-                if config.USE_NATIVE_TOOLS:
-                    # Native tool use path
-                    final_text = self._process_native_tools_response(
-                        response, history, assembled.full_system_prompt,
-                        tools, max_passes, pass1_duration
-                    )
-                else:
-                    # Legacy [[COMMAND]] path
-                    final_text = self._process_legacy_commands_response(
-                        response, history, assembled.full_system_prompt,
-                        max_passes, pass1_duration
-                    )
+                # Use shared helper to process response with native tools
+                result = process_with_tools(
+                    llm_router=self._llm_router,
+                    response=response,
+                    history=history,
+                    system_prompt=assembled.full_system_prompt,
+                    max_passes=max_passes,
+                    pulse_callback=lambda interval: self.signals.pulse_interval_change.emit(interval),
+                    tools=tools
+                )
+
+                final_text = result.final_text
 
                 # Store response
                 self._conversation_mgr.add_turn(
@@ -925,6 +925,11 @@ class ChatWindow(QMainWindow):
     ) -> str:
         """
         Process response using native tool use.
+
+        DEPRECATED (December 2025): This method is no longer called.
+        Use `process_with_tools` from agency.tools instead.
+        The shared helper provides consistent processing across all entry points.
+        Kept for reference during migration period.
 
         Args:
             response: Initial LLMResponse
@@ -1030,6 +1035,11 @@ class ChatWindow(QMainWindow):
     ) -> str:
         """
         Process response using legacy [[COMMAND]] pattern.
+
+        DEPRECATED (December 2025): This method is no longer called.
+        The legacy [[COMMAND]] syntax has been replaced by native tool use.
+        Use `process_with_tools` from agency.tools instead.
+        Kept for reference during migration period.
 
         Args:
             response: Initial LLMResponse
@@ -1177,7 +1187,7 @@ class ChatWindow(QMainWindow):
 
     def _process_telegram_message(self, message):
         """
-        Process an inbound Telegram message and generate AI response.
+        Process an inbound Telegram message and generate AI response using native tools.
 
         IMPORTANT: Visual capture (screenshot/webcam) is intentionally NOT used
         for Telegram messages. The user is interacting remotely, so capturing
@@ -1187,9 +1197,8 @@ class ChatWindow(QMainWindow):
         Telegram as attachments. These are handled by the InboundMessage.image
         field populated by the telegram_listener.
         """
-        import time
         from llm.router import TaskType
-        from agency.commands import get_command_processor
+        from agency.tools import get_tool_definitions, process_with_tools
         import config
 
         self._is_processing = True
@@ -1240,56 +1249,34 @@ class ChatWindow(QMainWindow):
 
             history.append(user_message)
 
-            # Get response from LLM
+            # Get tool definitions for native tool use
+            tools = get_tool_definitions()
+
+            # Get response from LLM WITH tools enabled
             self.signals.update_status.emit("Responding to Telegram...")
             response = self._llm_router.chat(
                 messages=history,
                 system_prompt=assembled.full_system_prompt,
                 task_type=TaskType.CONVERSATION,
-                temperature=0.7
+                temperature=0.7,
+                tools=tools  # Enable native tools for Telegram responses
             )
 
             if response.success:
-                # Process response for AI commands
-                processor = get_command_processor()
-                processed = processor.process(response.text)
-                final_text = processed.display_text
-
-                # Track if SEND_TELEGRAM was already executed (to avoid duplicate sends)
-                telegram_sent = any(
-                    cmd.command_name == "SEND_TELEGRAM" and cmd.error is None
-                    for cmd in processed.commands_executed
+                # Use shared helper to process response with native tools
+                # The helper tracks telegram_sent to avoid duplicate sends
+                result = process_with_tools(
+                    llm_router=self._llm_router,
+                    response=response,
+                    history=history,
+                    system_prompt=assembled.full_system_prompt,
+                    max_passes=5,
+                    pulse_callback=lambda interval: self.signals.pulse_interval_change.emit(interval),
+                    tools=tools
                 )
 
-                # Handle continuation if needed (simplified - single pass)
-                if processed.needs_continuation:
-                    continuation_history = history.copy()
-                    continuation_history.append({"role": "assistant", "content": response.text})
-
-                    # Build continuation message (may include images from visual commands)
-                    continuation_msg = self._build_continuation_message(
-                        processed.continuation_prompt,
-                        processed.continuation_images
-                    )
-                    continuation_history.append(continuation_msg)
-
-                    continuation = self._llm_router.chat(
-                        messages=continuation_history,
-                        system_prompt=assembled.full_system_prompt,
-                        task_type=TaskType.CONVERSATION,
-                        temperature=0.7
-                    )
-
-                    if continuation.success:
-                        processed = processor.process(continuation.text)
-                        final_text = processed.display_text
-
-                        # Check if continuation also executed SEND_TELEGRAM
-                        if any(
-                            cmd.command_name == "SEND_TELEGRAM" and cmd.error is None
-                            for cmd in processed.commands_executed
-                        ):
-                            telegram_sent = True
+                final_text = result.final_text
+                telegram_sent = result.telegram_sent
 
                 # Store response
                 self._conversation_mgr.add_turn(
@@ -1302,7 +1289,7 @@ class ChatWindow(QMainWindow):
                 timestamp = self._get_timestamp()
                 self.signals.new_message.emit("assistant", f"📱 {final_text}", timestamp)
 
-                # Send response back to Telegram (only if not already sent via command)
+                # Send response back to Telegram (only if not already sent via tool)
                 if config.TELEGRAM_ENABLED and not telegram_sent:
                     try:
                         from communication.telegram_gateway import get_telegram_gateway
@@ -1348,8 +1335,9 @@ class ChatWindow(QMainWindow):
         log_info(f"PULSE DEBUG: Pulse thread started (thread={thread.name})", prefix="🔍")
 
     def _process_pulse(self):
-        """Process a system pulse in background thread."""
+        """Process a system pulse in background thread using native tools."""
         from agency.system_pulse import get_pulse_prompt, PULSE_STORED_MESSAGE
+        from agency.tools import get_tool_definitions, process_with_tools
         from prompt_builder.sources.system_pulse import get_interval_label
 
         # Get dynamic pulse prompt with current interval
@@ -1357,16 +1345,14 @@ class ChatWindow(QMainWindow):
         interval_label = get_interval_label(current_interval)
         pulse_prompt = get_pulse_prompt(interval_label)
 
-        log_info("=== PULSE DEBUG: Starting _process_pulse() ===", prefix="🔍")
+        log_info("=== PULSE: Starting _process_pulse() ===", prefix="⏱️")
 
         try:
             self._is_processing = True
-            log_info("PULSE DEBUG: Set _is_processing = True", prefix="🔍")
 
             # Pause timer during processing
             if self._system_pulse_timer:
                 self._system_pulse_timer.pause()
-                log_info("PULSE DEBUG: Timer paused", prefix="🔍")
 
             # Pause Telegram listener during processing to prevent message loss
             if self._telegram_listener:
@@ -1378,7 +1364,6 @@ class ChatWindow(QMainWindow):
             # Show system message in chat
             timestamp = self._get_timestamp()
             self.signals.new_message.emit("system", PULSE_STORED_MESSAGE, timestamp)
-            log_info("PULSE DEBUG: Emitted [System Pulse] to chat", prefix="🔍")
 
             # Store abbreviated pulse message in conversation history
             if self._conversation_mgr:
@@ -1387,97 +1372,55 @@ class ChatWindow(QMainWindow):
                     content=PULSE_STORED_MESSAGE,
                     input_type="system"
                 )
-                log_info("PULSE DEBUG: Added pulse turn to conversation", prefix="🔍")
             else:
-                log_error("PULSE DEBUG: _conversation_mgr is None!")
+                log_error("PULSE: _conversation_mgr is None!")
 
             # Build prompt with full pulse message
-            log_info("PULSE DEBUG: Building prompt...", prefix="🔍")
             assembled = self._prompt_builder.build(
                 user_input=pulse_prompt,
                 system_prompt=""
             )
-            log_info(f"PULSE DEBUG: Prompt built, system_prompt length: {len(assembled.full_system_prompt)}", prefix="🔍")
 
             # Get conversation history
-            log_info("PULSE DEBUG: Getting conversation history...", prefix="🔍")
             history = self._conversation_mgr.get_recent_history(limit=30)
-            log_info(f"PULSE DEBUG: Got {len(history)} messages in history", prefix="🔍")
-
-            # Log history details for debugging
-            if history:
-                for i, msg in enumerate(history[-3:]):  # Last 3 messages
-                    role = msg.get('role', 'unknown')
-                    content_preview = msg.get('content', '')[:50]
-                    log_info(f"PULSE DEBUG: History[-{len(history)-i}]: {role}: {content_preview}...", prefix="🔍")
 
             # Add the pulse prompt as the message to respond to
             # (role="user" is an API constraint, but content clarifies it's automated)
             # Capture visuals for the pulse message (same as user messages in auto mode)
             pulse_message = self._capture_visuals_for_message(pulse_prompt)
             history.append(pulse_message)
-            log_info(f"PULSE DEBUG: Added pulse_prompt to history, now {len(history)} messages", prefix="🔍")
 
-            # Get LLM response
-            log_info("PULSE DEBUG: About to call _llm_router.chat()...", prefix="🔍")
+            # Get tool definitions for native tool use
+            tools = get_tool_definitions()
+
+            # Get LLM response WITH tools enabled
             from llm.router import TaskType
-
-            log_info(f"PULSE DEBUG: Router type: {type(self._llm_router)}", prefix="🔍")
-            log_info(f"PULSE DEBUG: TaskType: {TaskType.CONVERSATION}", prefix="🔍")
 
             response = self._llm_router.chat(
                 messages=history,
                 system_prompt=assembled.full_system_prompt,
                 task_type=TaskType.CONVERSATION,
-                temperature=0.7
+                temperature=0.7,
+                tools=tools  # Enable native tools for pulse responses
             )
 
-            log_info(f"PULSE DEBUG: Router returned! success={response.success}, provider={response.provider}", prefix="🔍")
+            log_info(f"PULSE: Router returned, success={response.success}", prefix="⏱️")
 
             if response.success:
-                from agency.commands import get_command_processor
+                # Use shared helper to process response with native tools
+                # The helper handles multi-pass tool execution and pulse interval changes
+                result = process_with_tools(
+                    llm_router=self._llm_router,
+                    response=response,
+                    history=history,
+                    system_prompt=assembled.full_system_prompt,
+                    max_passes=5,
+                    pulse_callback=lambda interval: self.signals.pulse_interval_change.emit(interval),
+                    tools=tools
+                )
 
-                log_info(f"PULSE DEBUG: Response successful, text length: {len(response.text)}", prefix="🔍")
-
-                # Check for pulse timer command in response
-                pulse_interval = self._parse_pulse_command(response.text)
-                if pulse_interval is not None:
-                    self.signals.pulse_interval_change.emit(pulse_interval)
-
-                # Process response for AI commands
-                processor = get_command_processor()
-                processed = processor.process(response.text)
-
-                # Handle continuation if commands need results
-                final_text = processed.display_text
-
-                if processed.needs_continuation:
-                    self.signals.update_status.emit("Executing command...")
-
-                    # Build continuation with potential images from commands
-                    continuation_history = history.copy()
-                    continuation_history.append({"role": "assistant", "content": response.text})
-
-                    # Build continuation message (may include images from visual commands)
-                    continuation_msg = self._build_continuation_message(
-                        processed.continuation_prompt,
-                        processed.continuation_images
-                    )
-                    continuation_history.append(continuation_msg)
-
-                    continuation = self._llm_router.chat(
-                        messages=continuation_history,
-                        system_prompt=assembled.full_system_prompt,
-                        task_type=TaskType.CONVERSATION,
-                        temperature=0.7
-                    )
-
-                    if continuation.success:
-                        # Check continuation for pulse commands too
-                        pulse_interval = self._parse_pulse_command(continuation.text)
-                        if pulse_interval is not None:
-                            self.signals.pulse_interval_change.emit(pulse_interval)
-                        final_text = continuation.text
+                final_text = result.final_text
+                log_info(f"PULSE: Processed in {result.passes_executed} pass(es)", prefix="⏱️")
 
                 # Store response
                 self._conversation_mgr.add_turn(
@@ -1489,10 +1432,9 @@ class ChatWindow(QMainWindow):
                 # Emit to GUI
                 timestamp = self._get_timestamp()
                 self.signals.new_message.emit("assistant", final_text, timestamp)
-                log_info("PULSE DEBUG: Emitted assistant response to chat", prefix="🔍")
             else:
                 error_msg = f"Pulse API error: {response.error}"
-                log_error(f"PULSE DEBUG: API call failed - {error_msg}")
+                log_error(f"PULSE: API call failed - {error_msg}")
 
                 # Show error in CHAT (not just status bar) so it's visible
                 timestamp = self._get_timestamp()
@@ -1502,9 +1444,8 @@ class ChatWindow(QMainWindow):
         except Exception as e:
             error_msg = f"Pulse exception: {str(e)}"
             tb = traceback.format_exc()
-            log_error(f"PULSE DEBUG: Exception caught!")
-            log_error(f"PULSE DEBUG: {error_msg}")
-            log_error(f"PULSE DEBUG: Traceback:\n{tb}")
+            log_error(f"PULSE: Exception - {error_msg}")
+            log_error(f"PULSE: Traceback:\n{tb}")
 
             # Show error in CHAT (not just status bar) so it's visible
             timestamp = self._get_timestamp()
@@ -1512,7 +1453,7 @@ class ChatWindow(QMainWindow):
             self.signals.update_status.emit(error_msg)
 
         finally:
-            log_info("=== PULSE DEBUG: _process_pulse() completing ===", prefix="🔍")
+            log_info("=== PULSE: _process_pulse() completing ===", prefix="⏱️")
             self.signals.response_complete.emit()
 
     def _on_reminder_fired(self, triggered_intentions):
@@ -1536,9 +1477,9 @@ class ChatWindow(QMainWindow):
         thread.start()
 
     def _process_reminder_pulse(self, triggered_intentions):
-        """Process a reminder pulse in background thread."""
+        """Process a reminder pulse in background thread using native tools."""
         from agency.intentions import get_reminder_pulse_prompt
-        from agency.system_pulse import PULSE_STORED_MESSAGE
+        from agency.tools import get_tool_definitions, process_with_tools
 
         # Generate reminder-specific pulse prompt
         reminder_prompt = get_reminder_pulse_prompt(triggered_intentions)
@@ -1546,7 +1487,7 @@ class ChatWindow(QMainWindow):
         # Format stored message to indicate it's a reminder pulse
         stored_message = "[Reminder Pulse]"
 
-        log_info("=== REMINDER DEBUG: Starting _process_reminder_pulse() ===", prefix="⏰")
+        log_info("=== REMINDER: Starting _process_reminder_pulse() ===", prefix="⏰")
 
         try:
             self._is_processing = True
@@ -1586,50 +1527,34 @@ class ChatWindow(QMainWindow):
             # Add the reminder prompt as the message to respond to
             history.append({"role": "user", "content": reminder_prompt})
 
-            # Get LLM response
+            # Get tool definitions for native tool use
+            tools = get_tool_definitions()
+
+            # Get LLM response WITH tools enabled
             from llm.router import TaskType
 
             response = self._llm_router.chat(
                 messages=history,
                 system_prompt=assembled.full_system_prompt,
                 task_type=TaskType.CONVERSATION,
-                temperature=0.7
+                temperature=0.7,
+                tools=tools  # Enable native tools for reminder responses
             )
 
             if response.success:
-                from agency.commands import get_command_processor
+                # Use shared helper to process response with native tools
+                result = process_with_tools(
+                    llm_router=self._llm_router,
+                    response=response,
+                    history=history,
+                    system_prompt=assembled.full_system_prompt,
+                    max_passes=5,
+                    pulse_callback=lambda interval: self.signals.pulse_interval_change.emit(interval),
+                    tools=tools
+                )
 
-                # Check for pulse timer command in response
-                pulse_interval = self._parse_pulse_command(response.text)
-                if pulse_interval is not None:
-                    self.signals.pulse_interval_change.emit(pulse_interval)
-
-                # Process response for AI commands
-                processor = get_command_processor()
-                processed = processor.process(response.text)
-
-                # Handle continuation if commands need results
-                final_text = processed.display_text
-
-                if processed.needs_continuation:
-                    self.signals.update_status.emit("Executing command...")
-
-                    continuation_history = history.copy()
-                    continuation_history.append({"role": "assistant", "content": response.text})
-                    continuation_history.append({"role": "user", "content": processed.continuation_prompt})
-
-                    continuation = self._llm_router.chat(
-                        messages=continuation_history,
-                        system_prompt=assembled.full_system_prompt,
-                        task_type=TaskType.CONVERSATION,
-                        temperature=0.7
-                    )
-
-                    if continuation.success:
-                        pulse_interval = self._parse_pulse_command(continuation.text)
-                        if pulse_interval is not None:
-                            self.signals.pulse_interval_change.emit(pulse_interval)
-                        final_text = continuation.text
+                final_text = result.final_text
+                log_info(f"REMINDER: Processed in {result.passes_executed} pass(es)", prefix="⏰")
 
                 # Store response
                 self._conversation_mgr.add_turn(
@@ -1641,10 +1566,9 @@ class ChatWindow(QMainWindow):
                 # Emit to GUI
                 timestamp = self._get_timestamp()
                 self.signals.new_message.emit("assistant", final_text, timestamp)
-                log_info("REMINDER DEBUG: Emitted assistant response to chat", prefix="⏰")
             else:
                 error_msg = f"Reminder pulse API error: {response.error}"
-                log_error(f"REMINDER DEBUG: API call failed - {error_msg}")
+                log_error(f"REMINDER: API call failed - {error_msg}")
                 timestamp = self._get_timestamp()
                 self.signals.new_message.emit("system", f"[Reminder Pulse Error: {response.error}]", timestamp)
                 self.signals.update_status.emit(error_msg)
@@ -1652,15 +1576,14 @@ class ChatWindow(QMainWindow):
         except Exception as e:
             error_msg = f"Reminder pulse exception: {str(e)}"
             tb = traceback.format_exc()
-            log_error(f"REMINDER DEBUG: Exception caught!")
-            log_error(f"REMINDER DEBUG: {error_msg}")
-            log_error(f"REMINDER DEBUG: Traceback:\n{tb}")
+            log_error(f"REMINDER: Exception - {error_msg}")
+            log_error(f"REMINDER: Traceback:\n{tb}")
             timestamp = self._get_timestamp()
             self.signals.new_message.emit("system", f"[Reminder Pulse Exception: {str(e)}]", timestamp)
             self.signals.update_status.emit(error_msg)
 
         finally:
-            log_info("=== REMINDER DEBUG: _process_reminder_pulse() completing ===", prefix="⏰")
+            log_info("=== REMINDER: _process_reminder_pulse() completing ===", prefix="⏰")
             self.signals.response_complete.emit()
 
     def _update_status(self, status: str):

@@ -56,6 +56,7 @@ class ToolExecutor:
             "capture_screenshot": self._exec_capture_screenshot,
             "capture_webcam": self._exec_capture_webcam,
             "set_active_thoughts": self._exec_set_active_thoughts,
+            "set_pulse_interval": self._exec_set_pulse_interval,
         }
 
     def execute(
@@ -522,6 +523,60 @@ class ToolExecutor:
             tool_use_id=id,
             tool_name="set_active_thoughts",
             content=f"Active thoughts updated: {count} item{'s' if count != 1 else ''}"
+        )
+
+    # =========================================================================
+    # PULSE TIMER TOOL
+    # =========================================================================
+
+    def _exec_set_pulse_interval(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """
+        Set the pulse timer interval.
+
+        This tool stores the requested interval in the context for the caller
+        to pick up and signal to the UI. The actual timer adjustment happens
+        in the interface layer (GUI/CLI) which has access to the timer.
+
+        The interval is validated here but applied by the caller.
+        """
+        from prompt_builder.sources.system_pulse import PULSE_COMMAND_TO_SECONDS
+
+        interval_str = input.get("interval", "")
+
+        # Validate the interval
+        if interval_str not in PULSE_COMMAND_TO_SECONDS:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="set_pulse_interval",
+                content=f"Invalid interval '{interval_str}'. Valid options: 3m, 10m, 30m, 1h, 6h",
+                is_error=True
+            )
+
+        # Get interval in seconds
+        interval_seconds = PULSE_COMMAND_TO_SECONDS[interval_str]
+
+        # Store in context for caller to handle UI signaling
+        # The caller (response processor) will check for this and emit the signal
+        ctx["pulse_interval_change"] = interval_seconds
+
+        # Human-readable label
+        interval_labels = {
+            "3m": "3 minutes",
+            "10m": "10 minutes",
+            "30m": "30 minutes",
+            "1h": "1 hour",
+            "6h": "6 hours",
+        }
+        label = interval_labels.get(interval_str, interval_str)
+
+        log_info(f"Pulse interval change requested: {label}", prefix="⏱️")
+
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="set_pulse_interval",
+            content=f"Pulse timer set to {label}"
         )
 
 

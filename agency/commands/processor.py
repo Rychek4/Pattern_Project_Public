@@ -1,6 +1,20 @@
 """
-Pattern Project - Command Processor
-Core two-pass engine for AI command execution
+Pattern Project - Command Processor (DEPRECATED)
+
+DEPRECATION NOTICE (December 2025):
+This module implements the legacy [[COMMAND: arg]] pattern processor.
+It has been superseded by the native tool use system in agency/tools/.
+
+The CommandProcessor uses regex pattern matching to find [[COMMAND: arg]]
+patterns in AI responses, which is fragile and requires extensive prompt
+documentation. The native tool system uses structured API calls instead.
+
+For new code, use agency/tools/processor.py and agency/tools/executor.py.
+
+This module is kept for:
+1. Backwards compatibility during transition
+2. Reference implementation
+3. The handlers it uses are still active (via ToolExecutor)
 """
 
 import re

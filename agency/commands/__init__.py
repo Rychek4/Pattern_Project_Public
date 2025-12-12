@@ -1,6 +1,26 @@
 """
-Pattern Project - AI Command System
-Enables AI-initiated information retrieval via embedded commands
+Pattern Project - AI Command System (DEPRECATED)
+
+DEPRECATION NOTICE (December 2025):
+This module implements the legacy [[COMMAND: arg]] pattern system.
+It has been superseded by the native tool use system in agency/tools/.
+
+The native tool system provides:
+- Structured JSON arguments (no regex parsing)
+- Parallel tool execution
+- Typed error handling
+- Reduced prompt size (no command documentation needed)
+
+This module is kept for:
+1. Backwards compatibility during transition
+2. Reference implementation for handlers (still used by ToolExecutor)
+3. Historical context
+
+For new code, use agency/tools/ instead:
+    from agency.tools import get_tool_definitions, process_with_tools
+
+The underlying handlers in agency/commands/handlers/ are still actively used
+by the ToolExecutor - only the pattern-matching processor is deprecated.
 """
 
 from typing import Optional

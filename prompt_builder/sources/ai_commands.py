@@ -1,6 +1,9 @@
 """
-Pattern Project - AI Commands Context Source
-Injects available command instructions into the system prompt
+Pattern Project - AI Capabilities Context Source
+Provides information about web search and other AI capabilities.
+
+NOTE: Tool instructions are provided via native tool schemas in the API call.
+This source no longer injects legacy [[COMMAND]] syntax instructions.
 """
 
 from typing import Optional, Dict, Any
@@ -12,11 +15,13 @@ import config
 
 class AICommandsSource(ContextSource):
     """
-    Injects available AI command instructions into the system prompt.
+    Provides AI capability information in the system prompt.
 
-    This source provides the AI with knowledge of available commands
-    (like [[SEARCH: query]]) and instructions on when/how to use them.
-    Also includes web search capability status.
+    This source includes:
+    - Web search capability status
+
+    NOTE: Tool instructions are provided via native tool schemas in the API call.
+    The legacy [[COMMAND]] syntax is no longer supported (December 2025).
     """
 
     @property
@@ -60,35 +65,23 @@ Today's budget: {remaining} searches remaining ({used}/{total} used)
         session_context: Dict[str, Any]
     ) -> Optional[ContextBlock]:
         """
-        Get command instructions for prompt injection.
+        Get AI capability context for prompt injection.
 
-        When USE_NATIVE_TOOLS is enabled, command instructions are skipped
-        because tool schemas provide this information. Only web search
-        status is included.
+        Tool instructions are provided via native tool schemas in the API call,
+        so this source only provides web search status.
 
         Args:
             user_input: The user's current message
             session_context: Shared context dict
 
         Returns:
-            ContextBlock with command instructions, or None if no commands registered
+            ContextBlock with capability info, or None if no info to add
         """
         content_parts = []
 
-        # Only add command instructions if NOT using native tools
-        # Native tools get their instructions from tool schemas in the API call
-        if not config.USE_NATIVE_TOOLS:
-            from agency.commands import get_command_processor
-
-            processor = get_command_processor()
-
-            # Add command instructions if any handlers registered
-            if processor.has_handlers():
-                instructions = processor.get_all_instructions()
-                if instructions:
-                    content_parts.append(f"""<ai_commands>
-{instructions}
-</ai_commands>""")
+        # NOTE: Tool instructions are provided via native tool schemas.
+        # The legacy [[COMMAND]] syntax is no longer supported.
+        # Only web search status is included here.
 
         # Add web search status if enabled and available
         web_search_status = self._get_web_search_status()
@@ -101,15 +94,9 @@ Today's budget: {remaining} searches remaining ({used}/{total} used)
         content = "\n\n".join(content_parts)
 
         # Build metadata
-        metadata = {}
-        if config.USE_NATIVE_TOOLS:
-            metadata["native_tools_mode"] = True
-        else:
-            from agency.commands import get_command_processor
-            processor = get_command_processor()
-            if processor.has_handlers():
-                metadata["handler_count"] = len(processor.list_handlers())
-                metadata["handlers"] = processor.list_handlers()
+        metadata = {
+            "native_tools_mode": True,  # Always true now
+        }
         if web_search_status:
             metadata["web_search_enabled"] = True
 
