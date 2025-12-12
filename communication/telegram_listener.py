@@ -199,10 +199,15 @@ class TelegramListener:
             RuntimeError: If the listener is not running
             TimeoutError: If the operation times out
         """
-        if not self._loop or not self._running:
-            raise RuntimeError("Telegram listener is not running")
+        # Use lock to avoid TOCTOU race condition between check and use
+        with self._lock:
+            if not self._loop or not self._running:
+                raise RuntimeError("Telegram listener is not running")
+            # Snapshot the loop reference while holding the lock
+            loop = self._loop
 
-        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        # Schedule the coroutine on the snapshotted loop reference
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
         return future.result(timeout=timeout)
 
     def set_callback(self, callback: Callable[[InboundMessage], None]) -> None:
