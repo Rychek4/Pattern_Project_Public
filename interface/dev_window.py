@@ -223,12 +223,12 @@ class DevWindow(QMainWindow):
         self.tabs.addTab(tab, "Prompt Assembly")
 
     def _create_commands_tab(self):
-        """Create the Commands tab."""
+        """Create the Tools tab (native tool use)."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
         # Info label
-        info = QLabel("Shows tool/command execution details")
+        info = QLabel("Shows native tool execution details")
         info.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 11px;")
         layout.addWidget(info)
 
@@ -238,7 +238,7 @@ class DevWindow(QMainWindow):
         self.commands_display.setOpenExternalLinks(False)
         layout.addWidget(self.commands_display)
 
-        self.tabs.addTab(tab, "Commands")
+        self.tabs.addTab(tab, "Tools")
 
     def _create_response_tab(self):
         """Create the Response Pipeline tab."""
@@ -361,7 +361,7 @@ class DevWindow(QMainWindow):
             self.commands_display.verticalScrollBar().setValue(
                 self.commands_display.verticalScrollBar().maximum()
             )
-        self._update_status(f"Command executed: [[{data.command_name}]]")
+        self._update_status(f"Tool executed: {data.command_name}")
 
     def _on_response_pass(self, data: ResponsePassData):
         """Handle response pass data."""
@@ -454,14 +454,19 @@ class DevWindow(QMainWindow):
         return ''.join(lines)
 
     def _format_command_execution(self, data: CommandExecutionData) -> str:
-        """Format command execution data as HTML."""
+        """Format tool execution data as HTML."""
         status_color = COLORS["success"] if not data.error else COLORS["error"]
         status_text = "Success" if not data.error else f"Error: {data.error}"
+
+        # Format query preview
+        query_preview = data.query[:80] if data.query else "(no input)"
+        if len(data.query) > 80:
+            query_preview += "..."
 
         lines = [
             f'<div style="margin-bottom: 15px; padding: 10px; background-color: {COLORS["surface_alt"]}; border-radius: 5px;">',
             f'<div style="color: {COLORS["warning"]}; font-weight: bold; margin-bottom: 8px;">'
-            f'[[{data.command_name}: {data.query}]]</div>',
+            f'🔧 {data.command_name}</div>',
             f'<div style="color: {COLORS["text_dim"]}; margin-bottom: 5px;">{data.timestamp}</div>',
             f'<div style="color: {status_color}; margin-bottom: 5px;">{status_text}</div>',
         ]
@@ -504,7 +509,7 @@ class DevWindow(QMainWindow):
             cmd_list = ", ".join(data.commands_detected)
             lines.append(
                 f'<div style="color: {COLORS["warning"]}; margin-bottom: 5px;">'
-                f'Commands detected: {cmd_list}</div>'
+                f'🔧 Tools used: {cmd_list}</div>'
             )
 
         # Show web search info if any
@@ -653,7 +658,41 @@ def init_dev_window(parent=None) -> DevWindow:
     """Initialize and return the dev window."""
     global _dev_window
     _dev_window = DevWindow(parent)
+    # Load initial state for tabs that need it
+    load_initial_active_thoughts()
     return _dev_window
+
+
+def load_initial_active_thoughts():
+    """Load current active thoughts into the dev window on startup."""
+    if not _dev_window or not config.DEV_MODE_ENABLED:
+        return
+
+    try:
+        from agency.active_thoughts import get_active_thoughts_manager
+        manager = get_active_thoughts_manager()
+        thoughts = manager.get_all()
+
+        if thoughts:
+            # Convert ActiveThought dataclass objects to dicts
+            thought_dicts = []
+            for t in thoughts:
+                thought_dicts.append({
+                    "rank": t.rank,
+                    "slug": t.slug,
+                    "topic": t.topic,
+                    "elaboration": t.elaboration
+                })
+
+            # Emit to the dev window with special timestamp
+            data = ActiveThoughtsData(
+                thoughts=thought_dicts,
+                timestamp="(initial load)"
+            )
+            _dev_window.signals.active_thoughts_updated.emit(data)
+    except Exception:
+        # Don't fail dev window initialization if this fails
+        pass
 
 
 def emit_prompt_assembly(context_blocks: List[Dict[str, Any]], total_tokens: int = 0):

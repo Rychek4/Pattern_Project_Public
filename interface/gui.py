@@ -879,6 +879,15 @@ class ChatWindow(QMainWindow):
             if response.success:
                 max_passes = getattr(config, 'COMMAND_MAX_PASSES', 3)
 
+                # Set up dev window callbacks for tool/response tracking
+                dev_callbacks = None
+                if config.DEV_MODE_ENABLED:
+                    from interface.dev_window import emit_response_pass, emit_command_executed
+                    dev_callbacks = {
+                        "emit_response_pass": emit_response_pass,
+                        "emit_command_executed": emit_command_executed
+                    }
+
                 # Use shared helper to process response with native tools
                 result = process_with_tools(
                     llm_router=self._llm_router,
@@ -887,7 +896,8 @@ class ChatWindow(QMainWindow):
                     system_prompt=assembled.full_system_prompt,
                     max_passes=max_passes,
                     pulse_callback=lambda interval: self.signals.pulse_interval_change.emit(interval),
-                    tools=tools
+                    tools=tools,
+                    dev_mode_callbacks=dev_callbacks
                 )
 
                 final_text = result.final_text
@@ -1264,6 +1274,15 @@ class ChatWindow(QMainWindow):
             )
 
             if response.success:
+                # Set up dev window callbacks for tool/response tracking
+                dev_callbacks = None
+                if config.DEV_MODE_ENABLED:
+                    from interface.dev_window import emit_response_pass, emit_command_executed
+                    dev_callbacks = {
+                        "emit_response_pass": emit_response_pass,
+                        "emit_command_executed": emit_command_executed
+                    }
+
                 # Use shared helper to process response with native tools
                 # The helper tracks telegram_sent to avoid duplicate sends
                 result = process_with_tools(
@@ -1273,7 +1292,8 @@ class ChatWindow(QMainWindow):
                     system_prompt=assembled.full_system_prompt,
                     max_passes=5,
                     pulse_callback=lambda interval: self.signals.pulse_interval_change.emit(interval),
-                    tools=tools
+                    tools=tools,
+                    dev_mode_callbacks=dev_callbacks
                 )
 
                 final_text = result.final_text
@@ -1408,6 +1428,15 @@ class ChatWindow(QMainWindow):
             log_info(f"PULSE: Router returned, success={response.success}", prefix="⏱️")
 
             if response.success:
+                # Set up dev window callbacks for tool/response tracking
+                dev_callbacks = None
+                if config.DEV_MODE_ENABLED:
+                    from interface.dev_window import emit_response_pass, emit_command_executed
+                    dev_callbacks = {
+                        "emit_response_pass": emit_response_pass,
+                        "emit_command_executed": emit_command_executed
+                    }
+
                 # Use shared helper to process response with native tools
                 # The helper handles multi-pass tool execution and pulse interval changes
                 result = process_with_tools(
@@ -1417,7 +1446,8 @@ class ChatWindow(QMainWindow):
                     system_prompt=assembled.full_system_prompt,
                     max_passes=5,
                     pulse_callback=lambda interval: self.signals.pulse_interval_change.emit(interval),
-                    tools=tools
+                    tools=tools,
+                    dev_mode_callbacks=dev_callbacks
                 )
 
                 final_text = result.final_text
@@ -1543,6 +1573,15 @@ class ChatWindow(QMainWindow):
             )
 
             if response.success:
+                # Set up dev window callbacks for tool/response tracking
+                dev_callbacks = None
+                if config.DEV_MODE_ENABLED:
+                    from interface.dev_window import emit_response_pass, emit_command_executed
+                    dev_callbacks = {
+                        "emit_response_pass": emit_response_pass,
+                        "emit_command_executed": emit_command_executed
+                    }
+
                 # Use shared helper to process response with native tools
                 result = process_with_tools(
                     llm_router=self._llm_router,
@@ -1551,7 +1590,8 @@ class ChatWindow(QMainWindow):
                     system_prompt=assembled.full_system_prompt,
                     max_passes=5,
                     pulse_callback=lambda interval: self.signals.pulse_interval_change.emit(interval),
-                    tools=tools
+                    tools=tools,
+                    dev_mode_callbacks=dev_callbacks
                 )
 
                 final_text = result.final_text

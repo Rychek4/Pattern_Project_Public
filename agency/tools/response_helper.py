@@ -267,7 +267,8 @@ def process_with_tools(
     system_prompt: str,
     max_passes: int = 5,
     pulse_callback: Optional[Callable[[int], None]] = None,
-    tools: Optional[List[Dict[str, Any]]] = None
+    tools: Optional[List[Dict[str, Any]]] = None,
+    dev_mode_callbacks: Optional[Dict[str, Callable]] = None
 ) -> ToolProcessingResult:
     """
     Convenience function for processing a response with native tools.
@@ -282,6 +283,9 @@ def process_with_tools(
         max_passes: Maximum tool execution passes
         pulse_callback: Optional callback for pulse interval changes
         tools: Optional tool definitions
+        dev_mode_callbacks: Optional dict of callbacks for dev window:
+            - emit_response_pass: For Response Pipeline tab
+            - emit_command_executed: For Tools tab
 
     Returns:
         ToolProcessingResult with final text and metadata
@@ -295,5 +299,6 @@ def process_with_tools(
         response=response,
         history=history,
         max_passes=max_passes,
-        pulse_callback=pulse_callback
+        pulse_callback=pulse_callback,
+        dev_mode_callbacks=dev_mode_callbacks
     )
