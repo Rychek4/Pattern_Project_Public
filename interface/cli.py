@@ -546,9 +546,11 @@ class ChatCLI:
             )
 
             # Build prompt with full pulse message
+            # Mark as pulse so CuriositySource can provide directive context
             assembled = prompt_builder.build(
                 user_input=PULSE_PROMPT,
-                system_prompt=""
+                system_prompt="",
+                additional_context={"is_pulse": True}
             )
 
             # Get conversation history

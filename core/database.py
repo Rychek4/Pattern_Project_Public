@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from core.logger import log_info, log_success, log_error, log_config, log_section
 
 # Schema version for migrations
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 # SQL schema definition
 SCHEMA_SQL = """
@@ -153,6 +153,20 @@ CREATE TABLE IF NOT EXISTS active_thoughts (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Curiosity goals: AI's current and historical curiosity-driven exploration targets
+CREATE TABLE IF NOT EXISTS curiosity_goals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content TEXT NOT NULL,
+    category TEXT NOT NULL CHECK (category IN ('dormant_revival', 'depth_seeking')),
+    context TEXT,
+    source_memory_id INTEGER REFERENCES memories(id),
+    status TEXT DEFAULT 'active' CHECK (status IN ('active', 'explored', 'deferred', 'declined')),
+    activated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    resolved_at TIMESTAMP,
+    outcome_notes TEXT,
+    cooldown_until TIMESTAMP
+);
+
 -- Indexes for efficient queries
 CREATE INDEX IF NOT EXISTS idx_conversations_session ON conversations(session_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_unprocessed ON conversations(processed_for_memory) WHERE processed_for_memory = FALSE;
@@ -170,6 +184,9 @@ CREATE INDEX IF NOT EXISTS idx_intentions_type ON intentions(type);
 CREATE INDEX IF NOT EXISTS idx_communication_log_type ON communication_log(type);
 CREATE INDEX IF NOT EXISTS idx_communication_log_created ON communication_log(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_active_thoughts_rank ON active_thoughts(rank);
+CREATE INDEX IF NOT EXISTS idx_curiosity_status ON curiosity_goals(status);
+CREATE INDEX IF NOT EXISTS idx_curiosity_cooldown ON curiosity_goals(cooldown_until);
+CREATE INDEX IF NOT EXISTS idx_curiosity_source ON curiosity_goals(source_memory_id);
 """
 
 # Migration SQL for v1 -> v2
@@ -571,6 +588,30 @@ CREATE INDEX IF NOT EXISTS idx_active_thoughts_rank ON active_thoughts(rank);
 PRAGMA foreign_keys=ON;
 """
 
+# Migration SQL for v13 -> v14 (add curiosity_goals table)
+MIGRATION_V14_SQL = """
+-- Curiosity goals: AI's current and historical curiosity-driven exploration targets
+-- This table tracks the AI's curiosity system - what topics it wants to explore,
+-- what it has explored, and cooldowns before revisiting topics.
+CREATE TABLE IF NOT EXISTS curiosity_goals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content TEXT NOT NULL,
+    category TEXT NOT NULL CHECK (category IN ('dormant_revival', 'depth_seeking')),
+    context TEXT,
+    source_memory_id INTEGER REFERENCES memories(id),
+    status TEXT DEFAULT 'active' CHECK (status IN ('active', 'explored', 'deferred', 'declined')),
+    activated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    resolved_at TIMESTAMP,
+    outcome_notes TEXT,
+    cooldown_until TIMESTAMP
+);
+
+-- Indexes for efficient queries
+CREATE INDEX IF NOT EXISTS idx_curiosity_status ON curiosity_goals(status);
+CREATE INDEX IF NOT EXISTS idx_curiosity_cooldown ON curiosity_goals(cooldown_until);
+CREATE INDEX IF NOT EXISTS idx_curiosity_source ON curiosity_goals(source_memory_id);
+"""
+
 
 class Database:
     """SQLite database manager with WAL mode and thread-safe connections."""
@@ -736,6 +777,10 @@ class Database:
             if from_version < 13:
                 log_config("Applying migration", "v12 → v13 (add UNIQUE constraint on active_thoughts.slug)", indent=1)
                 conn.executescript(MIGRATION_V13_SQL)
+
+            if from_version < 14:
+                log_config("Applying migration", "v13 → v14 (add curiosity_goals table)", indent=1)
+                conn.executescript(MIGRATION_V14_SQL)
 
             # Record new version
             conn.execute(

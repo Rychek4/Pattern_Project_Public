@@ -94,6 +94,16 @@ class ActiveThoughtsData:
     timestamp: str = ""
 
 
+@dataclass
+class CuriosityData:
+    """Data about curiosity engine state."""
+    current_goal: Optional[Dict[str, Any]] = None  # id, content, category, context, activated_at
+    history: List[Dict[str, Any]] = field(default_factory=list)  # Recent resolved goals
+    cooldowns: List[Dict[str, Any]] = field(default_factory=list)  # Memories in cooldown
+    timestamp: str = ""
+    event: str = ""  # "initial", "resolved", "activated"
+
+
 class DevWindowSignals(QObject):
     """Signals for updating the dev window from other threads."""
     prompt_assembly = pyqtSignal(object)  # PromptAssemblyData
@@ -101,6 +111,7 @@ class DevWindowSignals(QObject):
     response_pass = pyqtSignal(object)  # ResponsePassData
     memory_recall = pyqtSignal(object)  # MemoryRecallData
     active_thoughts_updated = pyqtSignal(object)  # ActiveThoughtsData
+    curiosity_updated = pyqtSignal(object)  # CuriosityData
     clear_all = pyqtSignal()
 
 
@@ -129,6 +140,7 @@ class DevWindow(QMainWindow):
         self.signals.response_pass.connect(self._on_response_pass)
         self.signals.memory_recall.connect(self._on_memory_recall)
         self.signals.active_thoughts_updated.connect(self._on_active_thoughts_updated)
+        self.signals.curiosity_updated.connect(self._on_curiosity_updated)
         self.signals.clear_all.connect(self._clear_all)
 
     def _setup_ui(self):
@@ -158,6 +170,7 @@ class DevWindow(QMainWindow):
         self._create_response_tab()
         self._create_memory_tab()
         self._create_active_thoughts_tab()
+        self._create_curiosity_tab()
 
         # Status bar
         self.status_label = QLabel("Dev mode active")
@@ -294,6 +307,24 @@ class DevWindow(QMainWindow):
 
         self.tabs.addTab(tab, "Active Thoughts")
 
+    def _create_curiosity_tab(self):
+        """Create the Curiosity tab."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # Info label
+        info = QLabel("Shows the AI's current curiosity goal and history")
+        info.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 11px;")
+        layout.addWidget(info)
+
+        # Content area
+        self.curiosity_display = QTextBrowser()
+        self.curiosity_display.setFont(QFont("Consolas", 10))
+        self.curiosity_display.setOpenExternalLinks(False)
+        layout.addWidget(self.curiosity_display)
+
+        self.tabs.addTab(tab, "Curiosity")
+
     def _apply_style(self):
         """Apply dark theme styling."""
         self.setStyleSheet(f"""
@@ -393,6 +424,17 @@ class DevWindow(QMainWindow):
             )
         self._update_status(f"Active thoughts updated: {len(data.thoughts)} items")
 
+    def _on_curiosity_updated(self, data: CuriosityData):
+        """Handle curiosity update."""
+        html = self._format_curiosity(data)
+        self.curiosity_display.append(html)
+        if self.auto_scroll_check.isChecked():
+            self.curiosity_display.verticalScrollBar().setValue(
+                self.curiosity_display.verticalScrollBar().maximum()
+            )
+        goal_desc = data.current_goal.get("content", "none")[:40] if data.current_goal else "none"
+        self._update_status(f"Curiosity {data.event}: {goal_desc}")
+
     def _clear_all(self):
         """Clear all displays."""
         self.prompt_display.clear()
@@ -400,6 +442,7 @@ class DevWindow(QMainWindow):
         self.response_display.clear()
         self.memory_display.clear()
         self.active_thoughts_display.clear()
+        self.curiosity_display.clear()
         self._update_status("Cleared all")
 
     def _update_status(self, message: str):
@@ -690,6 +733,101 @@ class DevWindow(QMainWindow):
         lines.append('</div>')
         return ''.join(lines)
 
+    def _format_curiosity(self, data: CuriosityData) -> str:
+        """Format curiosity data as HTML."""
+        # Determine event color
+        event_colors = {
+            "initial": COLORS["info"],
+            "activated": COLORS["success"],
+            "resolved": COLORS["warning"],
+        }
+        event_color = event_colors.get(data.event, COLORS["text_dim"])
+
+        lines = [
+            f'<div style="margin-bottom: 15px; padding: 10px; background-color: {COLORS["surface_alt"]}; border-radius: 5px;">',
+            f'<div style="color: {event_color}; font-weight: bold; margin-bottom: 8px;">'
+            f'Curiosity {data.event.title()} - {data.timestamp}</div>',
+        ]
+
+        # Current goal section
+        if data.current_goal:
+            goal = data.current_goal
+            content = goal.get("content", "").replace("<", "&lt;").replace(">", "&gt;")
+            category = goal.get("category", "unknown")
+            context = goal.get("context", "")[:200].replace("<", "&lt;").replace(">", "&gt;")
+            activated = goal.get("activated_at", "")
+            goal_id = goal.get("id", "?")
+
+            lines.append(
+                f'<div style="margin: 10px 0; padding: 10px; border-left: 3px solid {COLORS["success"]}; '
+                f'background-color: {COLORS["surface"]};">'
+                f'<div style="color: {COLORS["success"]}; font-weight: bold; margin-bottom: 5px;">'
+                f'Current Goal (ID: {goal_id})</div>'
+                f'<div style="color: {COLORS["text"]}; margin-bottom: 5px;">{content}</div>'
+                f'<div style="color: {COLORS["text_dim"]}; font-size: 11px;">Category: {category}</div>'
+            )
+            if context:
+                lines.append(
+                    f'<div style="color: {COLORS["text_dim"]}; font-size: 11px; font-style: italic; margin-top: 5px;">'
+                    f'Context: {context}{"..." if len(goal.get("context", "")) > 200 else ""}</div>'
+                )
+            if activated:
+                lines.append(
+                    f'<div style="color: {COLORS["text_dim"]}; font-size: 10px; margin-top: 5px;">'
+                    f'Activated: {activated}</div>'
+                )
+            lines.append('</div>')
+        else:
+            lines.append(
+                f'<div style="color: {COLORS["error"]}; font-style: italic;">No active goal (this should not happen)</div>'
+            )
+
+        # History section (last 5)
+        if data.history:
+            lines.append(
+                f'<div style="margin-top: 10px; color: {COLORS["text_dim"]}; font-weight: bold;">Recent History:</div>'
+            )
+            for h in data.history[:5]:
+                status = h.get("status", "unknown")
+                status_colors = {
+                    "explored": COLORS["success"],
+                    "deferred": COLORS["warning"],
+                    "declined": COLORS["error"],
+                }
+                status_color = status_colors.get(status, COLORS["text_dim"])
+                h_content = h.get("content", "")[:60].replace("<", "&lt;").replace(">", "&gt;")
+                resolved_at = h.get("resolved_at", "")
+
+                lines.append(
+                    f'<div style="margin: 5px 0; padding: 5px; border-left: 2px solid {status_color};">'
+                    f'<span style="color: {status_color}; font-weight: bold;">[{status}]</span> '
+                    f'<span style="color: {COLORS["text"]};">{h_content}{"..." if len(h.get("content", "")) > 60 else ""}</span>'
+                    f'<div style="color: {COLORS["text_dim"]}; font-size: 10px;">{resolved_at}</div>'
+                    f'</div>'
+                )
+
+        # Cooldowns section
+        if data.cooldowns:
+            lines.append(
+                f'<div style="margin-top: 10px; color: {COLORS["text_dim"]}; font-weight: bold;">'
+                f'Memories in Cooldown ({len(data.cooldowns)}):</div>'
+            )
+            for c in data.cooldowns[:5]:
+                memory_id = c.get("memory_id", "?")
+                expires = c.get("expires_at", "")
+                lines.append(
+                    f'<div style="color: {COLORS["text_dim"]}; font-size: 11px; margin-left: 10px;">'
+                    f'Memory #{memory_id} - expires: {expires}</div>'
+                )
+            if len(data.cooldowns) > 5:
+                lines.append(
+                    f'<div style="color: {COLORS["text_dim"]}; font-size: 11px; margin-left: 10px;">'
+                    f'...and {len(data.cooldowns) - 5} more</div>'
+                )
+
+        lines.append('</div>')
+        return ''.join(lines)
+
 
 # Global instance
 _dev_window: Optional[DevWindow] = None
@@ -706,6 +844,7 @@ def init_dev_window(parent=None) -> DevWindow:
     _dev_window = DevWindow(parent)
     # Load initial state for tabs that need it
     load_initial_active_thoughts()
+    load_initial_curiosity()
     return _dev_window
 
 
@@ -736,6 +875,54 @@ def load_initial_active_thoughts():
                 timestamp="(initial load)"
             )
             _dev_window.signals.active_thoughts_updated.emit(data)
+    except Exception:
+        # Don't fail dev window initialization if this fails
+        pass
+
+
+def load_initial_curiosity():
+    """Load current curiosity state into the dev window on startup."""
+    if not _dev_window or not config.DEV_MODE_ENABLED:
+        return
+
+    try:
+        from agency.curiosity import is_curiosity_enabled, get_curiosity_engine
+
+        if not is_curiosity_enabled():
+            return
+
+        engine = get_curiosity_engine()
+        goal = engine.get_current_goal()
+        history = engine.get_goal_history(limit=5)
+
+        # Convert goal to dict
+        goal_dict = {
+            "id": goal.id,
+            "content": goal.content,
+            "category": goal.category,
+            "context": goal.context,
+            "activated_at": goal.activated_at.isoformat() if goal.activated_at else ""
+        }
+
+        # Convert history to list of dicts
+        history_dicts = []
+        for h in history:
+            if h.status.value != "active":  # Skip active goal
+                history_dicts.append({
+                    "id": h.id,
+                    "content": h.content,
+                    "status": h.status.value,
+                    "resolved_at": h.resolved_at.isoformat() if h.resolved_at else ""
+                })
+
+        data = CuriosityData(
+            current_goal=goal_dict,
+            history=history_dicts,
+            cooldowns=[],  # Don't need cooldowns on initial load
+            timestamp="(initial load)",
+            event="initial"
+        )
+        _dev_window.signals.curiosity_updated.emit(data)
     except Exception:
         # Don't fail dev window initialization if this fails
         pass
@@ -829,3 +1016,21 @@ def emit_active_thoughts_update(thoughts: List[Dict[str, Any]]):
             timestamp=datetime.now().strftime("%H:%M:%S.%f")[:-3]
         )
         _dev_window.signals.active_thoughts_updated.emit(data)
+
+
+def emit_curiosity_update(
+    current_goal: Optional[Dict[str, Any]],
+    history: Optional[List[Dict[str, Any]]] = None,
+    cooldowns: Optional[List[Dict[str, Any]]] = None,
+    event: str = "updated"
+):
+    """Emit curiosity update to dev window if active."""
+    if _dev_window and config.DEV_MODE_ENABLED:
+        data = CuriosityData(
+            current_goal=current_goal,
+            history=history or [],
+            cooldowns=cooldowns or [],
+            timestamp=datetime.now().strftime("%H:%M:%S.%f")[:-3],
+            event=event
+        )
+        _dev_window.signals.curiosity_updated.emit(data)

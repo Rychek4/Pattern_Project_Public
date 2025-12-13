@@ -57,6 +57,7 @@ class ToolExecutor:
             "capture_webcam": self._exec_capture_webcam,
             "set_active_thoughts": self._exec_set_active_thoughts,
             "set_pulse_interval": self._exec_set_pulse_interval,
+            "resolve_curiosity": self._exec_resolve_curiosity,
         }
 
     def execute(
@@ -578,6 +579,70 @@ class ToolExecutor:
             tool_name="set_pulse_interval",
             content=f"Pulse timer set to {label}"
         )
+
+    # =========================================================================
+    # CURIOSITY TOOL
+    # =========================================================================
+
+    def _exec_resolve_curiosity(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """
+        Resolve the current curiosity goal and select a new one.
+
+        This records the outcome of the AI's curiosity exploration and
+        automatically rotates to a new curiosity topic.
+        """
+        from agency.curiosity import get_curiosity_engine, is_curiosity_enabled
+        from agency.curiosity.ledger import GoalStatus
+
+        if not is_curiosity_enabled():
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="resolve_curiosity",
+                content="Curiosity system is disabled",
+                is_error=True
+            )
+
+        outcome_str = input.get("outcome", "")
+        notes = input.get("notes", "")
+
+        # Map string to GoalStatus enum
+        status_map = {
+            "explored": GoalStatus.EXPLORED,
+            "deferred": GoalStatus.DEFERRED,
+            "declined": GoalStatus.DECLINED,
+        }
+
+        if outcome_str not in status_map:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="resolve_curiosity",
+                content=f"Invalid outcome '{outcome_str}'. Valid options: explored, deferred, declined",
+                is_error=True
+            )
+
+        status = status_map[outcome_str]
+
+        try:
+            engine = get_curiosity_engine()
+            new_goal = engine.resolve_current_goal(status, notes)
+
+            # Return confirmation with new goal preview
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="resolve_curiosity",
+                content=f"Curiosity resolved as '{outcome_str}'. New curiosity: {new_goal.content[:80]}..."
+            )
+
+        except Exception as e:
+            log_error(f"Error resolving curiosity: {e}")
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="resolve_curiosity",
+                content=f"Error resolving curiosity: {str(e)}",
+                is_error=True
+            )
 
 
 # Global instance

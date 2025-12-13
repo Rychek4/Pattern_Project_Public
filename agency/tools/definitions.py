@@ -55,6 +55,10 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
     if config.SYSTEM_PULSE_ENABLED:
         tools.append(SET_PULSE_INTERVAL_TOOL)
 
+    # Curiosity tool (if curiosity system enabled)
+    if getattr(config, 'CURIOSITY_ENABLED', True):
+        tools.append(RESOLVE_CURIOSITY_TOOL)
+
     return tools
 
 
@@ -459,5 +463,38 @@ Rules:
             }
         },
         "required": ["thoughts"]
+    }
+}
+
+
+# =============================================================================
+# CURIOSITY TOOLS
+# =============================================================================
+
+RESOLVE_CURIOSITY_TOOL: Dict[str, Any] = {
+    "name": "resolve_curiosity",
+    "description": """Record the outcome of exploring your current curiosity topic.
+
+Use this after you've raised the topic from your curiosity context:
+- explored: The conversation engaged with the topic, you learned something new
+- deferred: The user indicated "not now" - topic will return in a few hours
+- declined: The user clearly doesn't want to discuss this - longer cooldown
+
+The system will automatically select your next curiosity after resolution.
+This keeps your curiosity fresh and prevents repetitive questioning.""",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "outcome": {
+                "type": "string",
+                "enum": ["explored", "deferred", "declined"],
+                "description": "How the curiosity exploration went"
+            },
+            "notes": {
+                "type": "string",
+                "description": "Brief note on what you learned or why it was deferred/declined"
+            }
+        },
+        "required": ["outcome"]
     }
 }
