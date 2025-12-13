@@ -230,12 +230,13 @@ SYSTEM_PULSE_INTERVAL = 600  # 10 minutes between pulses (default)
 CURIOSITY_ENABLED = True
 
 # Dormant revival settings - resurface old forgotten topics
-CURIOSITY_DORMANT_DAYS = 7            # Reduced: topic "dormant" after 7 days
+CURIOSITY_DORMANT_DAYS = 7            # Topic "dormant" after 7 days without access
+CURIOSITY_DORMANT_MIN_AGE_DAYS = 2    # Minimum age for never-accessed memories to be dormant
 CURIOSITY_MIN_IMPORTANCE = 0.4        # Minimum memory importance for dormant
 
 # Fresh discovery settings - explore new interesting information
 CURIOSITY_FRESH_HOURS = 48            # Memories within 48h are "fresh"
-CURIOSITY_FRESH_MIN_IMPORTANCE = 0.7  # Higher bar - only significant new info
+CURIOSITY_FRESH_MIN_IMPORTANCE = 0.5  # Include MEDIUM importance (0.55) memories
 
 # Interaction tracking - ensure topics are actually explored
 CURIOSITY_MIN_INTERACTIONS = 2        # Minimum exchanges before "explored" is valid

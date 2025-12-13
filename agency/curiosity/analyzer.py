@@ -96,6 +96,13 @@ class CuriosityAnalyzer:
         """
         Get candidates from dormant (old, unaccessed) memories.
 
+        Dormant eligibility:
+        - Previously accessed but not in the last N days, OR
+        - Never accessed and created at least M days ago
+
+        This avoids a "dead zone" where memories are too old for fresh
+        but too new for dormant.
+
         Args:
             excluded_memory_ids: Memory IDs to exclude (in cooldown)
             limit: Maximum candidates to return
@@ -104,15 +111,22 @@ class CuriosityAnalyzer:
             List of dormant revival candidates
         """
         dormant_days = getattr(config, 'CURIOSITY_DORMANT_DAYS', 7)
+        min_age_days = getattr(config, 'CURIOSITY_DORMANT_MIN_AGE_DAYS', 2)
         min_importance = getattr(config, 'CURIOSITY_MIN_IMPORTANCE', 0.4)
 
-        # Calculate the dormancy threshold date
-        threshold_date = datetime.now() - timedelta(days=dormant_days)
+        # Two thresholds:
+        # - dormant_threshold: for memories that HAVE been accessed (not in last N days)
+        # - min_age_threshold: for memories NEVER accessed (at least M days old)
+        dormant_threshold = datetime.now() - timedelta(days=dormant_days)
+        min_age_threshold = datetime.now() - timedelta(days=min_age_days)
 
         with self._lock_manager.acquire("database"):
             db = get_database()
 
             # Query for dormant, important memories
+            # Two paths to eligibility:
+            # 1. Previously accessed, but not recently (> dormant_days)
+            # 2. Never accessed, but old enough (> min_age_days)
             result = db.execute(
                 """
                 SELECT
@@ -127,14 +141,14 @@ class CuriosityAnalyzer:
                 FROM memories
                 WHERE importance >= ?
                 AND (
-                    last_accessed_at IS NULL
-                    OR last_accessed_at < ?
+                    (last_accessed_at IS NOT NULL AND last_accessed_at < ?)
+                    OR
+                    (last_accessed_at IS NULL AND created_at < ?)
                 )
-                AND created_at < ?
                 ORDER BY importance DESC, created_at DESC
                 LIMIT ?
                 """,
-                (min_importance, threshold_date.isoformat(), threshold_date.isoformat(), limit * 2),
+                (min_importance, dormant_threshold.isoformat(), min_age_threshold.isoformat(), limit * 2),
                 fetch=True
             )
 
