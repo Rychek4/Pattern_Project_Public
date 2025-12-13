@@ -153,7 +153,7 @@ class CuriosityEngine:
 
             # Get cooldowns
             excluded = self._ledger.get_excluded_memory_ids()
-            cooldown_dicts = [{"memory_id": mid, "expires_at": "in cooldown"} for mid in excluded[:10]]
+            cooldown_dicts = [{"memory_id": mid, "expires_at": "in cooldown"} for mid in list(excluded)[:10]]
 
             emit_curiosity_update(
                 current_goal=goal_dict,

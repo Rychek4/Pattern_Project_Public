@@ -55,8 +55,9 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
     if config.SYSTEM_PULSE_ENABLED:
         tools.append(SET_PULSE_INTERVAL_TOOL)
 
-    # Curiosity tool (if curiosity system enabled)
+    # Curiosity tools (if curiosity system enabled)
     if getattr(config, 'CURIOSITY_ENABLED', True):
+        tools.append(ADVANCE_CURIOSITY_TOOL)
         tools.append(RESOLVE_CURIOSITY_TOOL)
 
     return tools
@@ -471,24 +472,52 @@ Rules:
 # CURIOSITY TOOLS
 # =============================================================================
 
+ADVANCE_CURIOSITY_TOOL: Dict[str, Any] = {
+    "name": "advance_curiosity",
+    "description": """Record progress on your current curiosity topic.
+
+Call this each time you have a meaningful exchange about your curiosity topic.
+This tracks interaction depth and determines cooldown duration when resolved.
+
+You must have at least 2 interactions before marking a topic as "explored".
+Use this to track your progress toward that minimum.""",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "note": {
+                "type": "string",
+                "description": "Brief note on what was discussed or learned in this exchange"
+            }
+        },
+        "required": []
+    }
+}
+
 RESOLVE_CURIOSITY_TOOL: Dict[str, Any] = {
     "name": "resolve_curiosity",
-    "description": """Record the outcome of exploring your current curiosity topic.
+    "description": """Conclude your current curiosity topic and move to a new one.
 
-Use this after you've raised the topic from your curiosity context:
-- explored: The conversation engaged with the topic, you learned something new
-- deferred: The user indicated "not now" - topic will return in a few hours
-- declined: The user clearly doesn't want to discuss this - longer cooldown
+IMPORTANT: You must have at least 2 interactions (via advance_curiosity) before
+using "explored". The system will reject premature resolution.
 
-The system will automatically select your next curiosity after resolution.
-This keeps your curiosity fresh and prevents repetitive questioning.""",
+Outcomes:
+- explored: Topic was meaningfully discussed (requires 2+ interactions)
+- deferred: User said "not now" - short 2-hour cooldown
+- declined: User rejected the topic - 3-day cooldown
+
+Cooldown for "explored" scales with interaction depth:
+- 2 interactions: ~20 hour cooldown
+- 3 interactions: ~28 hour cooldown
+- 5+ interactions: ~48 hour cooldown (max)
+
+The system will automatically select your next curiosity after resolution.""",
     "input_schema": {
         "type": "object",
         "properties": {
             "outcome": {
                 "type": "string",
                 "enum": ["explored", "deferred", "declined"],
-                "description": "How the curiosity exploration went"
+                "description": "How the curiosity exploration concluded"
             },
             "notes": {
                 "type": "string",

@@ -33,7 +33,7 @@ class CuriosityGoal:
     Attributes:
         id: Database primary key
         content: The topic/question being explored
-        category: Type of curiosity (dormant_revival, depth_seeking)
+        category: Type of curiosity (dormant_revival, depth_seeking, fresh_discovery)
         context: Supporting context for natural bridging
         source_memory_id: Memory that spawned this goal
         status: Current lifecycle status
@@ -41,6 +41,7 @@ class CuriosityGoal:
         resolved_at: When this goal was resolved (if resolved)
         outcome_notes: Notes about what happened
         cooldown_until: When this topic can be revisited
+        interaction_count: Number of exchanges on this topic
     """
     id: int
     content: str
@@ -52,6 +53,7 @@ class CuriosityGoal:
     resolved_at: Optional[datetime]
     outcome_notes: Optional[str]
     cooldown_until: Optional[datetime]
+    interaction_count: int = 0
 
 
 class CuriosityLedger:
@@ -163,12 +165,22 @@ class CuriosityLedger:
         if status == GoalStatus.ACTIVE:
             raise ValueError("Cannot resolve a goal to 'active' status")
 
-        cooldown_hours = self._get_cooldown_hours(status)
-        cooldown_until = datetime.now() + timedelta(hours=cooldown_hours)
         now = datetime.now()
 
         with self._lock_manager.acquire("database"):
             db = get_database()
+
+            # Get current interaction count for scaled cooldown
+            result = db.execute(
+                "SELECT interaction_count FROM curiosity_goals WHERE id = ?",
+                (goal_id,),
+                fetch=True
+            )
+            interaction_count = result[0]["interaction_count"] if result else 0
+
+            cooldown_hours = self._get_cooldown_hours(status, interaction_count)
+            cooldown_until = now + timedelta(hours=cooldown_hours)
+
             db.execute(
                 """
                 UPDATE curiosity_goals
@@ -189,9 +201,59 @@ class CuriosityLedger:
 
             log_info(
                 f"Resolved curiosity goal [{goal_id}] as {status.value} "
-                f"(cooldown: {cooldown_hours}h)",
+                f"(cooldown: {cooldown_hours}h, interactions: {interaction_count})",
                 prefix="🔍"
             )
+
+    @db_retry()
+    def increment_interaction(self, goal_id: int) -> int:
+        """
+        Increment the interaction count for a goal.
+
+        Called when an exchange occurs on the current curiosity topic.
+
+        Args:
+            goal_id: The goal to increment
+
+        Returns:
+            The new interaction count
+        """
+        with self._lock_manager.acquire("database"):
+            db = get_database()
+            db.execute(
+                """
+                UPDATE curiosity_goals
+                SET interaction_count = interaction_count + 1
+                WHERE id = ?
+                """,
+                (goal_id,)
+            )
+
+            result = db.execute(
+                "SELECT interaction_count FROM curiosity_goals WHERE id = ?",
+                (goal_id,),
+                fetch=True
+            )
+            return result[0]["interaction_count"] if result else 0
+
+    def get_interaction_count(self, goal_id: int) -> int:
+        """
+        Get the current interaction count for a goal.
+
+        Args:
+            goal_id: The goal to check
+
+        Returns:
+            The current interaction count
+        """
+        with self._lock_manager.acquire("database"):
+            db = get_database()
+            result = db.execute(
+                "SELECT interaction_count FROM curiosity_goals WHERE id = ?",
+                (goal_id,),
+                fetch=True
+            )
+            return result[0]["interaction_count"] if result else 0
 
     @db_retry()
     def get_excluded_memory_ids(self) -> Set[int]:
@@ -255,14 +317,33 @@ class CuriosityLedger:
 
             return [self._row_to_goal(row) for row in result]
 
-    def _get_cooldown_hours(self, status: GoalStatus) -> int:
-        """Get default cooldown hours for a status."""
+    def _get_cooldown_hours(self, status: GoalStatus, interaction_count: int = 0) -> int:
+        """
+        Get cooldown hours for a status, scaled by interaction depth.
+
+        For EXPLORED status, cooldown scales with interaction count:
+        - More interactions = longer cooldown (topic was deeply explored)
+        - Fewer interactions = shorter cooldown (barely touched)
+
+        Args:
+            status: Resolution status
+            interaction_count: Number of exchanges on this topic
+
+        Returns:
+            Cooldown hours
+        """
         if status == GoalStatus.EXPLORED:
-            return getattr(config, 'CURIOSITY_COOLDOWN_EXPLORED', 72)  # 3 days
+            # Scaled cooldown based on interaction depth
+            min_cooldown = getattr(config, 'CURIOSITY_COOLDOWN_EXPLORED_MIN', 4)
+            max_cooldown = getattr(config, 'CURIOSITY_COOLDOWN_EXPLORED_MAX', 48)
+            per_interaction = getattr(config, 'CURIOSITY_COOLDOWN_PER_INTERACTION', 8)
+
+            cooldown = min_cooldown + (interaction_count * per_interaction)
+            return min(cooldown, max_cooldown)
         elif status == GoalStatus.DEFERRED:
-            return getattr(config, 'CURIOSITY_COOLDOWN_DEFERRED', 4)   # 4 hours
+            return getattr(config, 'CURIOSITY_COOLDOWN_DEFERRED', 2)
         elif status == GoalStatus.DECLINED:
-            return getattr(config, 'CURIOSITY_COOLDOWN_DECLINED', 168) # 1 week
+            return getattr(config, 'CURIOSITY_COOLDOWN_DECLINED', 72)
         else:
             return 24  # Default fallback
 
@@ -285,7 +366,8 @@ class CuriosityLedger:
             activated_at=parse_datetime(row["activated_at"]) or datetime.now(),
             resolved_at=parse_datetime(row["resolved_at"]),
             outcome_notes=row["outcome_notes"],
-            cooldown_until=parse_datetime(row["cooldown_until"])
+            cooldown_until=parse_datetime(row["cooldown_until"]),
+            interaction_count=row["interaction_count"] if "interaction_count" in row.keys() else 0
         )
 
 
