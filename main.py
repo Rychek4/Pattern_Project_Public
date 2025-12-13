@@ -38,7 +38,7 @@ from core.embeddings import load_embedding_model, get_model_info
 from core.temporal import init_temporal_tracker
 from concurrency.locks import init_lock_manager, get_lock_manager
 from llm.router import init_llm_router, get_llm_router, LLMProvider
-from memory.conversation import init_conversation_manager
+from memory.conversation import init_conversation_manager, get_conversation_manager
 from memory.vector_store import init_vector_store
 from memory.extractor import init_memory_extractor
 from interface.cli import init_cli, get_cli
@@ -112,6 +112,11 @@ def initialize_system() -> bool:
     init_lock_manager()
     init_temporal_tracker()
     init_conversation_manager()
+
+    # Clean up any empty assistant messages from previous sessions
+    # These can cause API errors: "messages must have non-empty content"
+    get_conversation_manager().cleanup_empty_messages()
+
     init_vector_store()
 
     # Initialize LLM router and check providers

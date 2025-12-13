@@ -2134,6 +2134,11 @@ def run_gui():
     init_lock_manager()
     init_temporal_tracker()
     init_conversation_manager()
+
+    # Clean up any empty assistant messages from previous sessions
+    # These can cause API errors: "messages must have non-empty content"
+    get_conversation_manager().cleanup_empty_messages()
+
     init_vector_store()
     init_llm_router(
         primary_provider=config.LLM_PRIMARY_PROVIDER,
