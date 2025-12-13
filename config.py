@@ -228,6 +228,22 @@ SUBPROCESS_HEALTH_CHECK_INTERVAL = 30
 SUBPROCESS_MAX_RESTART_ATTEMPTS = 3
 
 # =============================================================================
+# ELEVENLABS TTS CONFIGURATION
+# =============================================================================
+# ElevenLabs Text-to-Speech integration for GUI voice output.
+# Get your API key from: https://elevenlabs.io/
+#
+# Voice IDs can be found at: https://elevenlabs.io/voice-library
+# Or via API: https://api.elevenlabs.io/v1/voices
+ELEVENLABS_API_KEY = os.getenv("Eleven_Labs_API", "")
+ELEVENLABS_DEFAULT_VOICE_ID = "MKHH3pSZhHPPzypDhMoU"  # Default voice
+ELEVENLABS_MODEL = "eleven_monolingual_v1"  # TTS model
+ELEVENLABS_AUDIO_PORT = 5003  # Port for audio player subprocess
+
+# User settings file for TTS preferences (enabled, voice_id)
+USER_SETTINGS_PATH = DATA_DIR / "user_settings.json"
+
+# =============================================================================
 # LOGGING CONFIGURATION
 # =============================================================================
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")

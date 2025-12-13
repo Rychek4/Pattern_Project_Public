@@ -1,44 +1,54 @@
 """
 Pattern Project - Audio Player Subprocess
-Placeholder for text-to-speech audio playback
+ElevenLabs text-to-speech audio playback via subprocess
 """
 
 from pathlib import Path
 from typing import Optional
 
+import config
 from subprocess_mgmt.manager import ProcessConfig, get_subprocess_manager
-from core.logger import log_info
+from core.logger import log_info, log_warning
 
+
+# Path to the audio player server script
+AUDIO_PLAYER_SCRIPT = Path(__file__).parent / "audio_player_server.py"
 
 # Default configuration
 AUDIO_PLAYER_CONFIG = ProcessConfig(
     name="audio_player",
-    command=["python", "audio_player_server.py"],
-    working_dir=None,
-    health_url="http://127.0.0.1:5003/health",
+    command=["python", str(AUDIO_PLAYER_SCRIPT)],
+    working_dir=Path(__file__).parent,
+    health_url=f"http://127.0.0.1:{config.ELEVENLABS_AUDIO_PORT}/health",
     health_timeout=5.0,
     startup_timeout=30.0,
     max_restart_attempts=3,
-    enabled=False  # Disabled by default until implemented
+    enabled=False  # Enabled dynamically based on user settings
 )
 
 
 def register_audio_player(
     script_path: Optional[Path] = None,
-    port: int = 5003,
+    port: Optional[int] = None,
     enabled: bool = False
 ) -> None:
     """
     Register the audio player subprocess.
 
     Args:
-        script_path: Path to the audio player script
-        port: Port for the audio player HTTP server
+        script_path: Path to the audio player script (defaults to bundled server)
+        port: Port for the audio player HTTP server (defaults to config)
         enabled: Whether to enable the audio player
     """
-    config = ProcessConfig(
+    if port is None:
+        port = config.ELEVENLABS_AUDIO_PORT
+
+    if script_path is None:
+        script_path = AUDIO_PLAYER_SCRIPT
+
+    proc_config = ProcessConfig(
         name="audio_player",
-        command=["python", str(script_path)] if script_path else ["python", "audio_player_server.py"],
+        command=["python", str(script_path)],
         working_dir=script_path.parent if script_path else None,
         health_url=f"http://127.0.0.1:{port}/health",
         health_timeout=5.0,
@@ -48,12 +58,12 @@ def register_audio_player(
     )
 
     manager = get_subprocess_manager()
-    manager.register(config)
+    manager.register(proc_config)
 
     if enabled:
         log_info(f"Audio player registered on port {port}", prefix="🔊")
     else:
-        log_info("Audio player: DISABLED (not configured)", prefix="🔊")
+        log_info("Audio player: DISABLED (TTS not enabled)", prefix="🔊")
 
 
 def start_audio_player() -> bool:
@@ -68,23 +78,38 @@ def stop_audio_player() -> bool:
     return manager.stop("audio_player")
 
 
-# ============================================================================
-# PLACEHOLDER: Audio Player Server
-# ============================================================================
-# When implemented, create a separate file: audio_player_server.py
-#
-# The audio player server should:
-# 1. Run a Flask server on the configured port
-# 2. Accept POST requests to /play_audio with audio data
-# 3. Provide a /health endpoint for health checks
-# 4. Support TTS via Google Cloud, ElevenLabs, or local synthesis
-#
-# Example API:
-#   POST /play_audio
-#   Body: {"text": "Hello world", "voice": "default"}
-#
-#   GET /health
-#   Response: {"status": "healthy"}
-#
-# For implementation reference, see the WoW proxy project's audio_player.py
-# ============================================================================
+def play_tts(text: str, voice_id: Optional[str] = None) -> bool:
+    """
+    Send text to the audio player for TTS playback.
+
+    Args:
+        text: The text to speak
+        voice_id: Optional ElevenLabs voice ID (uses default if not specified)
+
+    Returns:
+        True if request was sent successfully, False otherwise
+    """
+    import requests
+
+    port = config.ELEVENLABS_AUDIO_PORT
+    url = f"http://127.0.0.1:{port}/play_audio"
+
+    payload = {
+        "text": text,
+        "voice_id": voice_id or config.ELEVENLABS_DEFAULT_VOICE_ID,
+        "model": config.ELEVENLABS_MODEL
+    }
+
+    try:
+        response = requests.post(url, json=payload, timeout=5)
+        if response.status_code == 200:
+            return True
+        else:
+            log_warning(f"TTS request failed: {response.text}")
+            return False
+    except requests.exceptions.ConnectionError:
+        log_warning("TTS audio player not running")
+        return False
+    except Exception as e:
+        log_warning(f"TTS request error: {e}")
+        return False
