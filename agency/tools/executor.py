@@ -629,6 +629,9 @@ class ToolExecutor:
 
             log_info(f"Curiosity interaction recorded: {status_msg}", prefix="🔍")
 
+            # Emit DEV window update to show progress
+            self._emit_curiosity_progress(current_goal, new_count, min_interactions, note)
+
             return ToolResult(
                 tool_use_id=id,
                 tool_name="advance_curiosity",
@@ -643,6 +646,33 @@ class ToolExecutor:
                 content=f"Error advancing curiosity: {str(e)}",
                 is_error=True
             )
+
+    def _emit_curiosity_progress(
+        self, goal, interaction_count: int, min_interactions: int, note: str
+    ) -> None:
+        """Emit curiosity progress update to DEV window."""
+        if not config.DEV_MODE_ENABLED:
+            return
+
+        try:
+            from interface.dev_window import emit_curiosity_update
+
+            goal_dict = {
+                "id": goal.id,
+                "content": f"{goal.content} (Progress: {interaction_count}/{min_interactions})",
+                "category": goal.category,
+                "context": f"Last note: {note}" if note else goal.context,
+                "activated_at": goal.activated_at.isoformat() if goal.activated_at else ""
+            }
+
+            emit_curiosity_update(
+                current_goal=goal_dict,
+                history=[],
+                cooldowns=[],
+                event="interaction"
+            )
+        except Exception:
+            pass  # Don't let DEV window issues break tool execution
 
     def _exec_resolve_curiosity(
         self, input: Dict, id: str, ctx: Dict

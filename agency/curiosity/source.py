@@ -72,6 +72,9 @@ class CuriositySource(ContextSource):
             session_context["curiosity_goal_id"] = goal.id
             session_context["curiosity_goal_content"] = goal.content
 
+            # Emit to DEV window so current curiosity is visible during conversations
+            self._emit_dev_update(goal, is_pulse)
+
             return ContextBlock(
                 source_name=self.source_name,
                 content=content,
@@ -87,6 +90,35 @@ class CuriositySource(ContextSource):
         except Exception as e:
             log_info(f"CuriositySource error: {e}", prefix="🔍")
             return None
+
+    def _emit_dev_update(self, goal, is_pulse: bool) -> None:
+        """Emit curiosity state to DEV window during prompt build."""
+        if not config.DEV_MODE_ENABLED:
+            return
+
+        try:
+            from interface.dev_window import emit_curiosity_update
+
+            goal_dict = {
+                "id": goal.id,
+                "content": goal.content,
+                "category": goal.category,
+                "context": goal.context,
+                "activated_at": goal.activated_at.isoformat() if goal.activated_at else ""
+            }
+
+            # Use different event types for pulse vs normal conversation
+            event = "pulse_inject" if is_pulse else "context_inject"
+
+            emit_curiosity_update(
+                current_goal=goal_dict,
+                history=[],  # Don't fetch history on every prompt - too expensive
+                cooldowns=[],
+                event=event
+            )
+        except Exception:
+            # Don't let DEV window issues break prompt building
+            pass
 
     def _format_background_context(self, goal) -> str:
         """
