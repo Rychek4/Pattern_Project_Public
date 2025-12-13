@@ -79,10 +79,21 @@ class CuriosityAnalyzer:
         # Get dormant candidates
         dormant = self._get_dormant_candidates(excluded_memory_ids, limit)
         candidates.extend(dormant)
+        log_info(f"Curiosity analyzer: {len(dormant)} dormant candidates found", prefix="🔍")
 
         # Get fresh discovery candidates
         fresh = self._get_fresh_candidates(excluded_memory_ids, limit)
         candidates.extend(fresh)
+        log_info(f"Curiosity analyzer: {len(fresh)} fresh candidates found", prefix="🔍")
+
+        if not candidates:
+            log_info(
+                f"Curiosity analyzer: No candidates! "
+                f"(excluded={len(excluded_memory_ids)}, "
+                f"dormant_days={getattr(config, 'CURIOSITY_DORMANT_DAYS', 7)}, "
+                f"min_importance={getattr(config, 'CURIOSITY_MIN_IMPORTANCE', 0.4)})",
+                prefix="🔍"
+            )
 
         # Sort by weight descending and limit
         candidates.sort(key=lambda c: c.weight, reverse=True)
@@ -320,6 +331,9 @@ class CuriosityAnalyzer:
         Returns:
             A generic reflection-based curiosity candidate
         """
+        # Log why we're falling back
+        self._log_memory_stats()
+
         return CuriosityCandidate(
             content="Reflect on recent conversations and identify something meaningful to explore",
             source_memory_id=0,  # No source memory
@@ -329,6 +343,60 @@ class CuriosityAnalyzer:
             last_discussed=None,
             importance=0.5
         )
+
+    def _log_memory_stats(self) -> None:
+        """Log memory statistics to help debug why no candidates were found."""
+        try:
+            dormant_days = getattr(config, 'CURIOSITY_DORMANT_DAYS', 7)
+            min_importance = getattr(config, 'CURIOSITY_MIN_IMPORTANCE', 0.4)
+            fresh_hours = getattr(config, 'CURIOSITY_FRESH_HOURS', 48)
+            fresh_min_importance = getattr(config, 'CURIOSITY_FRESH_MIN_IMPORTANCE', 0.7)
+
+            threshold_date = datetime.now() - timedelta(days=dormant_days)
+            fresh_threshold = datetime.now() - timedelta(hours=fresh_hours)
+
+            with self._lock_manager.acquire("database"):
+                db = get_database()
+
+                # Total memories
+                total = db.execute("SELECT COUNT(*) as cnt FROM memories", fetch=True)
+                total_count = total[0]["cnt"] if total else 0
+
+                # Memories with sufficient importance for dormant
+                important = db.execute(
+                    "SELECT COUNT(*) as cnt FROM memories WHERE importance >= ?",
+                    (min_importance,),
+                    fetch=True
+                )
+                important_count = important[0]["cnt"] if important else 0
+
+                # Memories old enough for dormant
+                old_enough = db.execute(
+                    "SELECT COUNT(*) as cnt FROM memories WHERE created_at < ?",
+                    (threshold_date.isoformat(),),
+                    fetch=True
+                )
+                old_count = old_enough[0]["cnt"] if old_enough else 0
+
+                # Fresh high-importance memories
+                fresh = db.execute(
+                    "SELECT COUNT(*) as cnt FROM memories WHERE importance >= ? AND created_at >= ?",
+                    (fresh_min_importance, fresh_threshold.isoformat()),
+                    fetch=True
+                )
+                fresh_count = fresh[0]["cnt"] if fresh else 0
+
+                log_info(
+                    f"Curiosity fallback triggered - Memory stats: "
+                    f"total={total_count}, "
+                    f"importance>={min_importance}: {important_count}, "
+                    f"older than {dormant_days}d: {old_count}, "
+                    f"fresh (importance>={fresh_min_importance}, <{fresh_hours}h): {fresh_count}",
+                    prefix="🔍"
+                )
+
+        except Exception as e:
+            log_info(f"Could not log memory stats: {e}", prefix="🔍")
 
 
 # Global instance
