@@ -22,7 +22,8 @@ class LLMProvider(Enum):
 class TaskType(Enum):
     """Types of LLM tasks."""
     CONVERSATION = "conversation"  # User-facing chat
-    EXTRACTION = "extraction"      # Memory/data extraction
+    EXTRACTION = "extraction"      # Memory/data extraction (local)
+    FACT_EXTRACTION = "fact_extraction"  # Factual extraction (API - higher accuracy)
     ANALYSIS = "analysis"          # Analysis tasks
     SIMPLE = "simple"              # Simple/quick tasks
 
@@ -143,8 +144,13 @@ class LLMRouter:
             The provider to use
         """
         if task_type == TaskType.EXTRACTION:
-            # Always use local for extraction (cost-free, runs continuously)
+            # Use local for general extraction (cost-free, runs continuously)
             return LLMProvider.KOBOLD
+
+        if task_type == TaskType.FACT_EXTRACTION:
+            # Use API for factual extraction (higher accuracy needed)
+            # Attribution errors from local models cause incorrect preference extraction
+            return LLMProvider.ANTHROPIC
 
         if task_type == TaskType.SIMPLE:
             # Use local for simple tasks
