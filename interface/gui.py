@@ -960,6 +960,33 @@ class ChatWindow(QMainWindow):
         self.chat_display.append(msg_html)
         self.chat_display.moveCursor(QTextCursor.End)
 
+        # Trigger TTS for assistant messages if enabled
+        if role == "assistant":
+            self._trigger_tts(content)
+
+    def _trigger_tts(self, text: str):
+        """Trigger text-to-speech for the given text if TTS is enabled."""
+        try:
+            from core.user_settings import is_tts_enabled, get_tts_voice_id
+
+            if not is_tts_enabled():
+                return
+
+            # Run TTS in background thread to not block UI
+            def play_tts_async():
+                try:
+                    from subprocess_mgmt.audio_player import play_tts
+                    voice_id = get_tts_voice_id()
+                    play_tts(text, voice_id)
+                except Exception as e:
+                    log_warning(f"TTS playback error: {e}")
+
+            tts_thread = threading.Thread(target=play_tts_async, daemon=True)
+            tts_thread.start()
+
+        except Exception as e:
+            log_warning(f"TTS trigger error: {e}")
+
     def _send_message(self):
         """Handle sending a message."""
         text = self.input_field.toPlainText().strip()
@@ -2021,39 +2048,117 @@ class ChatWindow(QMainWindow):
 
 
 class SettingsDialog(QDialog):
-    """Settings dialog for font size, etc."""
+    """Settings dialog for font size, TTS, etc."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
-        self.setMinimumWidth(300)
+        self.setMinimumWidth(400)
+
+        # Import user settings
+        from core.user_settings import get_user_settings
+        self._user_settings = get_user_settings()
 
         layout = QVBoxLayout(self)
+
+        # ===== Display Settings =====
+        display_label = QLabel("Display")
+        display_label.setStyleSheet("font-weight: bold; font-size: 14px; margin-top: 10px;")
+        layout.addWidget(display_label)
 
         # Font size
         font_layout = QHBoxLayout()
         font_layout.addWidget(QLabel("Font Size:"))
         self.font_spin = QSpinBox()
         self.font_spin.setRange(8, 24)
-        self.font_spin.setValue(12)
+        self.font_spin.setValue(self._user_settings.font_size)
         font_layout.addWidget(self.font_spin)
         layout.addLayout(font_layout)
 
-        # Apply button
+        # ===== TTS Settings =====
+        tts_label = QLabel("Text-to-Speech (ElevenLabs)")
+        tts_label.setStyleSheet("font-weight: bold; font-size: 14px; margin-top: 20px;")
+        layout.addWidget(tts_label)
+
+        # TTS enabled toggle
+        self.tts_enabled_check = QCheckBox("Enable TTS for assistant responses")
+        self.tts_enabled_check.setChecked(self._user_settings.tts_enabled)
+        layout.addWidget(self.tts_enabled_check)
+
+        # Voice ID input
+        voice_layout = QHBoxLayout()
+        voice_layout.addWidget(QLabel("Voice ID:"))
+        self.voice_id_input = QLineEdit()
+        self.voice_id_input.setPlaceholderText("Leave blank for default voice")
+        # Show current voice ID if custom, otherwise leave blank
+        current_voice = self._user_settings._settings.tts.voice_id
+        if current_voice:
+            self.voice_id_input.setText(current_voice)
+        voice_layout.addWidget(self.voice_id_input)
+        layout.addLayout(voice_layout)
+
+        # Voice ID help text
+        help_label = QLabel("Find voice IDs at elevenlabs.io/voice-library")
+        help_label.setStyleSheet("color: gray; font-size: 11px;")
+        layout.addWidget(help_label)
+
+        # Spacer
+        layout.addSpacing(20)
+
+        # Buttons
+        button_layout = QHBoxLayout()
+
         apply_btn = QPushButton("Apply")
         apply_btn.clicked.connect(self._apply_settings)
-        layout.addWidget(apply_btn)
+        button_layout.addWidget(apply_btn)
 
-        # Close button
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.close)
-        layout.addWidget(close_btn)
+        button_layout.addWidget(close_btn)
+
+        layout.addLayout(button_layout)
 
     def _apply_settings(self):
         """Apply settings."""
+        # Font size
+        font_size = self.font_spin.value()
+        self._user_settings.font_size = font_size
         if self.parent():
-            font_size = self.font_spin.value()
             self.parent().chat_display.setFont(QFont("Consolas", font_size))
+
+        # TTS settings
+        tts_was_enabled = self._user_settings.tts_enabled
+        tts_now_enabled = self.tts_enabled_check.isChecked()
+
+        self._user_settings.tts_enabled = tts_now_enabled
+        self._user_settings.tts_voice_id = self.voice_id_input.text().strip()
+
+        # Start/stop audio player subprocess based on TTS toggle
+        if tts_now_enabled and not tts_was_enabled:
+            self._start_audio_player()
+        elif not tts_now_enabled and tts_was_enabled:
+            self._stop_audio_player()
+
+        log_info(f"Settings applied - TTS: {tts_now_enabled}, Voice: {self._user_settings.tts_voice_id}", prefix="⚙️")
+
+    def _start_audio_player(self):
+        """Start the audio player subprocess."""
+        try:
+            from subprocess_mgmt.audio_player import register_audio_player, start_audio_player
+            register_audio_player(enabled=True)
+            start_audio_player()
+            log_info("Audio player started", prefix="🔊")
+        except Exception as e:
+            log_error(f"Failed to start audio player: {e}")
+
+    def _stop_audio_player(self):
+        """Stop the audio player subprocess."""
+        try:
+            from subprocess_mgmt.audio_player import stop_audio_player
+            stop_audio_player()
+            log_info("Audio player stopped", prefix="🔊")
+        except Exception as e:
+            log_error(f"Failed to stop audio player: {e}")
 
 
 # Global GUI instance
@@ -2201,6 +2306,17 @@ def run_gui():
 
     print("GUI ready!")
 
+    # Initialize TTS audio player if enabled in user settings
+    try:
+        from core.user_settings import is_tts_enabled
+        if is_tts_enabled():
+            from subprocess_mgmt.audio_player import register_audio_player, start_audio_player
+            register_audio_player(enabled=True)
+            start_audio_player()
+            log_info("TTS audio player started (from saved settings)", prefix="🔊")
+    except Exception as e:
+        log_warning(f"Failed to initialize TTS: {e}")
+
     # Run event loop
     exit_code = app.exec_()
 
@@ -2220,6 +2336,13 @@ def run_gui():
     # Release webcam device if it was opened
     from agency.visual_capture import release_webcam
     release_webcam()
+
+    # Stop TTS audio player if running
+    try:
+        from subprocess_mgmt.audio_player import stop_audio_player
+        stop_audio_player()
+    except Exception:
+        pass  # Ignore errors during shutdown
 
     return exit_code
 
