@@ -222,6 +222,27 @@ SYSTEM_PULSE_ENABLED = True
 SYSTEM_PULSE_INTERVAL = 600  # 10 minutes between pulses (default)
 
 # =============================================================================
+# CURIOSITY ENGINE CONFIGURATION
+# =============================================================================
+# The curiosity engine gives the AI topics to explore during idle moments
+# and as background context during conversation. It identifies dormant topics
+# from memory and uses weighted random selection for natural variety.
+CURIOSITY_ENABLED = True
+
+# Analysis settings
+CURIOSITY_DORMANT_DAYS = 14        # Topic considered "dormant" after N days
+CURIOSITY_MIN_IMPORTANCE = 0.4    # Minimum memory importance to consider
+
+# Cooldown periods (hours) - how long before revisiting resolved topics
+CURIOSITY_COOLDOWN_EXPLORED = 72   # 3 days - topic was discussed, give it time
+CURIOSITY_COOLDOWN_DEFERRED = 4    # 4 hours - user said "not now"
+CURIOSITY_COOLDOWN_DECLINED = 168  # 1 week - user rejected the topic
+
+# Selection weights - influence probability of topic selection
+CURIOSITY_WEIGHT_DORMANCY = 1.5    # Weight multiplier for days since last discussed
+CURIOSITY_WEIGHT_IMPORTANCE = 2.0  # Weight multiplier for memory importance score
+
+# =============================================================================
 # HTTP API CONFIGURATION
 # =============================================================================
 HTTP_ENABLED = True

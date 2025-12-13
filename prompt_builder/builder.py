@@ -230,6 +230,12 @@ def create_default_builder() -> PromptBuilder:
         ConversationSource(),
     ]
 
+    # Curiosity source (if enabled) - provides topic exploration context
+    if getattr(config, 'CURIOSITY_ENABLED', True):
+        from agency.curiosity.source import CuriositySource
+        sources.append(CuriositySource())
+        log_info("CuriositySource enabled", prefix="🔍")
+
     # Legacy VisualSource is disabled by default
     # The new visual capture system sends images directly to Claude via multimodal messages
     # VisualSource (which used Gemini for text descriptions) is kept for potential fallback

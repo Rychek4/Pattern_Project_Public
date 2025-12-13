@@ -1806,9 +1806,11 @@ class ChatWindow(QMainWindow):
                 log_error("PULSE: _conversation_mgr is None!")
 
             # Build prompt with full pulse message
+            # Mark as pulse so CuriositySource can provide directive context
             assembled = self._prompt_builder.build(
                 user_input=pulse_prompt,
-                system_prompt=""
+                system_prompt="",
+                additional_context={"is_pulse": True}
             )
 
             # Get conversation history
