@@ -8,12 +8,10 @@ system pulse countdown, and enhanced UX features.
 Features:
 - Light/dark theme support
 - Full markdown rendering
-- Message search
 - Draft persistence
 - Command palette
 - Keyboard shortcuts
 - Toast notifications
-- Quick actions
 - Image paste from clipboard
 """
 
@@ -45,10 +43,10 @@ from interface.gui_components import (
     Theme, DARK_THEME, LIGHT_THEME,
     ThemeManager, get_theme_manager,
     MarkdownRenderer, MessageData,
-    SearchBar, CommandPalette, Command,
+    CommandPalette, Command,
     NotificationManager, DraftManager,
     KeyboardShortcutManager, StatusManager,
-    QuickActionsBar, CancelButton
+    CancelButton
 )
 
 # Legacy color dict for backwards compatibility (maps from theme)
@@ -189,9 +187,7 @@ class ChatWindow(QMainWindow):
     Main chat window with:
     - Header: Session timer, controls, theme toggle
     - Chat display: Rich HTML with timestamps and markdown
-    - Search bar: Find messages in conversation
     - Input: Text entry with send button and image paste
-    - Quick actions: Common operations
     - Command palette: All commands accessible via Ctrl+Shift+P
     - Keyboard shortcuts: Full navigation
     - Notifications: Toast alerts
@@ -218,11 +214,8 @@ class ChatWindow(QMainWindow):
         self._message_queue = queue.Queue()
         self._is_first_message_of_session = True  # Track for next_session reminder triggers
 
-        # Message storage for search/navigation
+        # Message storage for navigation
         self._messages: List[MessageData] = []
-        self._search_results: List[int] = []  # Indices into _messages
-        self._current_search_index = 0
-        self._bookmarked_messages: set = set()  # Set of message IDs
 
         # Backend references (set during initialization)
         self._conversation_mgr = None
@@ -274,13 +267,6 @@ class ChatWindow(QMainWindow):
         header = self._create_header()
         layout.addWidget(header)
 
-        # Search bar (hidden by default)
-        self.search_bar = SearchBar(self._theme, self)
-        self.search_bar.search_requested.connect(self._on_search)
-        self.search_bar.search_closed.connect(self._on_search_closed)
-        self.search_bar.next_result.connect(self._on_search_next)
-        self.search_bar.prev_result.connect(self._on_search_prev)
-        layout.addWidget(self.search_bar)
 
         # Chat display
         self.chat_display = QTextBrowser()
@@ -290,14 +276,6 @@ class ChatWindow(QMainWindow):
         self.chat_display.customContextMenuRequested.connect(self._show_chat_context_menu)
         layout.addWidget(self.chat_display, stretch=1)
 
-        # Quick actions bar
-        self.quick_actions = QuickActionsBar(self._theme, self)
-        self.quick_actions.add_action("new_session", "New Session", "Start a new conversation", "🔄")
-        self.quick_actions.add_action("search", "Search", "Search messages (Ctrl+F)", "🔍")
-        self.quick_actions.add_action("extract", "Extract", "Extract memories now", "🧠")
-        self.quick_actions.add_action("bookmarks", "Bookmarks", "View bookmarked messages", "⭐")
-        self.quick_actions.action_triggered.connect(self._on_quick_action)
-        layout.addWidget(self.quick_actions)
 
         # Input area with cancel button
         input_frame = self._create_input_area()
@@ -340,6 +318,9 @@ class ChatWindow(QMainWindow):
         self.timer_label.setFont(QFont("Consolas", 13, QFont.Bold))
         self.timer_label.setStyleSheet(f"color: {COLORS['text']};")
         layout.addWidget(self.timer_label)
+
+        # Add spacing between session timer and pulse timer
+        layout.addSpacing(30)
 
         # Pulse countdown (only if enabled)
         self.pulse_label = QLabel("Pulse: --:--")
@@ -418,9 +399,6 @@ class ChatWindow(QMainWindow):
         """Setup keyboard shortcuts."""
         self._shortcut_manager = KeyboardShortcutManager(self)
 
-        # Search
-        self._shortcut_manager.register("Ctrl+F", self._activate_search, "Search messages")
-
         # Command palette
         self._shortcut_manager.register("Ctrl+Shift+P", self._show_command_palette, "Command palette")
 
@@ -429,9 +407,6 @@ class ChatWindow(QMainWindow):
 
         # Copy last message
         self._shortcut_manager.register("Ctrl+Shift+C", self._copy_last_message, "Copy last message")
-
-        # New session
-        self._shortcut_manager.register("Ctrl+N", self._start_new_session, "New session")
 
         # Focus input
         self._shortcut_manager.register("Escape", self._focus_input, "Focus input")
@@ -442,20 +417,12 @@ class ChatWindow(QMainWindow):
     def _setup_command_palette(self):
         """Setup command palette with available commands."""
         commands = [
-            Command("search", "Search Messages", "Ctrl+F", self._activate_search,
-                   "Find messages in conversation"),
-            Command("new_session", "New Session", "Ctrl+N", self._start_new_session,
-                   "Start a new conversation"),
             Command("toggle_theme", "Toggle Theme", "Ctrl+T", self._toggle_theme,
                    "Switch between light and dark themes"),
             Command("copy_last", "Copy Last Response", "Ctrl+Shift+C", self._copy_last_message,
                    "Copy the last AI response to clipboard"),
             Command("extract_memories", "Extract Memories", "", self._trigger_extraction,
                    "Force memory extraction now"),
-            Command("show_bookmarks", "Show Bookmarks", "", self._show_bookmarks,
-                   "View bookmarked messages"),
-            Command("clear_chat", "Clear Chat Display", "", self._clear_chat_display,
-                   "Clear the chat display (keeps history)"),
             Command("scroll_bottom", "Scroll to Bottom", "Ctrl+End", self._scroll_to_bottom,
                    "Jump to latest messages"),
             Command("focus_input", "Focus Input", "Escape", self._focus_input,
@@ -502,99 +469,11 @@ class ChatWindow(QMainWindow):
         self._apply_style()
 
         # Update component themes
-        self.search_bar.update_theme(theme)
-        self.quick_actions.update_theme(theme)
         self.cancel_btn.update_theme(theme)
         self._command_palette.update_theme(theme)
 
         # Notify user
         self._notification_manager.info(f"Switched to {theme.name} theme")
-
-    # =========================================================================
-    # SEARCH HANDLING
-    # =========================================================================
-
-    def _activate_search(self):
-        """Activate the search bar."""
-        self.search_bar.activate()
-
-    def _on_search(self, query: str):
-        """Handle search query."""
-        query_lower = query.lower()
-        self._search_results = []
-
-        for i, msg in enumerate(self._messages):
-            if query_lower in msg.content.lower():
-                self._search_results.append(i)
-
-        if self._search_results:
-            self._current_search_index = 0
-            self._highlight_search_result()
-        else:
-            self._current_search_index = 0
-
-        self.search_bar.show_results(
-            self._current_search_index + 1 if self._search_results else 0,
-            len(self._search_results)
-        )
-
-    def _on_search_closed(self):
-        """Handle search bar closed."""
-        self._search_results = []
-        self._current_search_index = 0
-        # Clear any highlighting
-        self._focus_input()
-
-    def _on_search_next(self):
-        """Navigate to next search result."""
-        if not self._search_results:
-            return
-        self._current_search_index = (self._current_search_index + 1) % len(self._search_results)
-        self._highlight_search_result()
-        self.search_bar.show_results(self._current_search_index + 1, len(self._search_results))
-
-    def _on_search_prev(self):
-        """Navigate to previous search result."""
-        if not self._search_results:
-            return
-        self._current_search_index = (self._current_search_index - 1) % len(self._search_results)
-        self._highlight_search_result()
-        self.search_bar.show_results(self._current_search_index + 1, len(self._search_results))
-
-    def _highlight_search_result(self):
-        """Scroll to and highlight current search result."""
-        if not self._search_results:
-            return
-
-        msg_index = self._search_results[self._current_search_index]
-        # In a real implementation, we'd scroll to the specific message
-        # For now, we'll just notify which message was found
-        msg = self._messages[msg_index]
-        self._notification_manager.info(f"Found in {msg.role} message at {msg.timestamp}")
-
-    # =========================================================================
-    # QUICK ACTIONS
-    # =========================================================================
-
-    def _on_quick_action(self, action_id: str):
-        """Handle quick action button click."""
-        if action_id == "new_session":
-            self._start_new_session()
-        elif action_id == "search":
-            self._activate_search()
-        elif action_id == "extract":
-            self._trigger_extraction()
-        elif action_id == "bookmarks":
-            self._show_bookmarks()
-
-    def _start_new_session(self):
-        """Start a new session."""
-        if self._temporal_tracker:
-            self._temporal_tracker.end_session()
-            self._temporal_tracker.start_session()
-        self._session_start = datetime.now()
-        self._is_first_message_of_session = True
-        self._notification_manager.success("New session started")
 
     def _trigger_extraction(self):
         """Trigger memory extraction."""
@@ -605,14 +484,6 @@ class ChatWindow(QMainWindow):
             self._notification_manager.success("Memory extraction completed")
         except Exception as e:
             self._notification_manager.error(f"Extraction failed: {e}")
-
-    def _show_bookmarks(self):
-        """Show bookmarked messages."""
-        bookmarked = [m for m in self._messages if m.id in self._bookmarked_messages]
-        if bookmarked:
-            self._notification_manager.info(f"Found {len(bookmarked)} bookmarked message(s)")
-        else:
-            self._notification_manager.info("No bookmarked messages")
 
     # =========================================================================
     # COMMAND PALETTE
@@ -647,20 +518,6 @@ class ChatWindow(QMainWindow):
         copy_last_action.triggered.connect(self._copy_last_message)
         menu.addAction(copy_last_action)
 
-        menu.addSeparator()
-
-        # Bookmark (would need cursor position to determine which message)
-        bookmark_action = QAction("Bookmark Message", self)
-        bookmark_action.triggered.connect(self._bookmark_current_message)
-        menu.addAction(bookmark_action)
-
-        menu.addSeparator()
-
-        # Search
-        search_action = QAction("Search...", self)
-        search_action.triggered.connect(self._activate_search)
-        menu.addAction(search_action)
-
         menu.exec_(self.chat_display.viewport().mapToGlobal(position))
 
     def _copy_selected_text(self):
@@ -680,17 +537,6 @@ class ChatWindow(QMainWindow):
                 return
         self._notification_manager.warning("No AI response to copy")
 
-    def _bookmark_current_message(self):
-        """Bookmark the most recent message."""
-        if self._messages:
-            msg = self._messages[-1]
-            if msg.id in self._bookmarked_messages:
-                self._bookmarked_messages.remove(msg.id)
-                self._notification_manager.info("Bookmark removed")
-            else:
-                self._bookmarked_messages.add(msg.id)
-                self._notification_manager.success("Message bookmarked")
-
     # =========================================================================
     # UTILITY METHODS
     # =========================================================================
@@ -702,11 +548,6 @@ class ChatWindow(QMainWindow):
     def _scroll_to_bottom(self):
         """Scroll chat to bottom."""
         self.chat_display.moveCursor(QTextCursor.End)
-
-    def _clear_chat_display(self):
-        """Clear the chat display."""
-        self.chat_display.clear()
-        self._notification_manager.info("Chat display cleared")
 
     # =========================================================================
     # STATUS AND NOTIFICATION HANDLERS
