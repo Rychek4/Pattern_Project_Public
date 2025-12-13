@@ -14,6 +14,7 @@ from agency.curiosity.ledger import (
     GoalStatus
 )
 from core.logger import log_info, log_error
+import config
 
 
 class CuriosityEngine:
@@ -51,6 +52,7 @@ class CuriosityEngine:
         if goal is None:
             # No active goal - select a new one
             goal = self._select_new_goal()
+            self._emit_dev_update("activated", goal)
 
         return goal
 
@@ -79,7 +81,9 @@ class CuriosityEngine:
             )
 
         # Select and return new goal
-        return self._select_new_goal()
+        new_goal = self._select_new_goal()
+        self._emit_dev_update("resolved", new_goal)
+        return new_goal
 
     def _select_new_goal(self) -> CuriosityGoal:
         """
@@ -117,3 +121,45 @@ class CuriosityEngine:
             List of recent CuriosityGoal objects
         """
         return self._ledger.get_goal_history(limit)
+
+    def _emit_dev_update(self, event: str, goal: CuriosityGoal) -> None:
+        """Emit curiosity update to dev window."""
+        if not config.DEV_MODE_ENABLED:
+            return
+
+        try:
+            from interface.dev_window import emit_curiosity_update
+
+            # Build goal dict
+            goal_dict = {
+                "id": goal.id,
+                "content": goal.content,
+                "category": goal.category,
+                "context": goal.context,
+                "activated_at": goal.activated_at.isoformat() if goal.activated_at else ""
+            }
+
+            # Get recent history
+            history = self._ledger.get_goal_history(limit=5)
+            history_dicts = []
+            for h in history:
+                if h.status.value != "active":
+                    history_dicts.append({
+                        "id": h.id,
+                        "content": h.content,
+                        "status": h.status.value,
+                        "resolved_at": h.resolved_at.isoformat() if h.resolved_at else ""
+                    })
+
+            # Get cooldowns
+            excluded = self._ledger.get_excluded_memory_ids()
+            cooldown_dicts = [{"memory_id": mid, "expires_at": "in cooldown"} for mid in excluded[:10]]
+
+            emit_curiosity_update(
+                current_goal=goal_dict,
+                history=history_dicts,
+                cooldowns=cooldown_dicts,
+                event=event
+            )
+        except Exception as e:
+            log_info(f"Failed to emit dev curiosity update: {e}", prefix="🔍")
