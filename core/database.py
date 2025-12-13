@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from core.logger import log_info, log_success, log_error, log_config, log_section
 
 # Schema version for migrations
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 # SQL schema definition
 SCHEMA_SQL = """
@@ -620,6 +620,57 @@ MIGRATION_V15_SQL = """
 ALTER TABLE curiosity_goals ADD COLUMN interaction_count INTEGER DEFAULT 0;
 """
 
+# Migration SQL for v15 -> v16 (fix CHECK constraint on curiosity_goals.category)
+# The fresh_discovery category was added to SCHEMA_SQL and MIGRATION_V14_SQL after
+# some databases were already created with only 2 categories. SQLite cannot ALTER
+# CHECK constraints, so we must recreate the table.
+MIGRATION_V16_SQL = """
+-- Fix CHECK constraint on curiosity_goals.category to include fresh_discovery
+-- SQLite requires table recreation to modify constraints
+
+-- Disable foreign keys during migration
+PRAGMA foreign_keys=OFF;
+
+-- Create new table with correct CHECK constraint (includes fresh_discovery)
+CREATE TABLE curiosity_goals_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content TEXT NOT NULL,
+    category TEXT NOT NULL CHECK (category IN ('dormant_revival', 'depth_seeking', 'fresh_discovery')),
+    context TEXT,
+    source_memory_id INTEGER REFERENCES memories(id),
+    status TEXT DEFAULT 'active' CHECK (status IN ('active', 'explored', 'deferred', 'declined')),
+    activated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    resolved_at TIMESTAMP,
+    outcome_notes TEXT,
+    cooldown_until TIMESTAMP,
+    interaction_count INTEGER DEFAULT 0
+);
+
+-- Copy existing data
+INSERT INTO curiosity_goals_new (
+    id, content, category, context, source_memory_id, status,
+    activated_at, resolved_at, outcome_notes, cooldown_until, interaction_count
+)
+SELECT
+    id, content, category, context, source_memory_id, status,
+    activated_at, resolved_at, outcome_notes, cooldown_until, interaction_count
+FROM curiosity_goals;
+
+-- Drop old table
+DROP TABLE curiosity_goals;
+
+-- Rename new table
+ALTER TABLE curiosity_goals_new RENAME TO curiosity_goals;
+
+-- Recreate indexes
+CREATE INDEX IF NOT EXISTS idx_curiosity_status ON curiosity_goals(status);
+CREATE INDEX IF NOT EXISTS idx_curiosity_cooldown ON curiosity_goals(cooldown_until);
+CREATE INDEX IF NOT EXISTS idx_curiosity_source ON curiosity_goals(source_memory_id);
+
+-- Re-enable foreign keys
+PRAGMA foreign_keys=ON;
+"""
+
 
 class Database:
     """SQLite database manager with WAL mode and thread-safe connections."""
@@ -793,6 +844,10 @@ class Database:
             if from_version < 15:
                 log_config("Applying migration", "v14 → v15 (add interaction_count to curiosity_goals)", indent=1)
                 conn.executescript(MIGRATION_V15_SQL)
+
+            if from_version < 16:
+                log_config("Applying migration", "v15 → v16 (fix CHECK constraint on curiosity_goals.category)", indent=1)
+                conn.executescript(MIGRATION_V16_SQL)
 
             # Record new version
             conn.execute(
