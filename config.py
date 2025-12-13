@@ -26,6 +26,15 @@ VERSION = "0.1.0"
 PROJECT_NAME = "Pattern Project"
 
 # =============================================================================
+# USER IDENTITY
+# =============================================================================
+# The name used when formatting conversations and extracting memories.
+# This ensures consistent entity naming for better semantic memory retrieval.
+# TODO: Eventually prompt for this at first boot instead of hardcoding.
+USER_NAME = os.getenv("USER_NAME", "Brian")
+AI_NAME = os.getenv("AI_NAME", "Claude")
+
+# =============================================================================
 # LLM CONFIGURATION
 # =============================================================================
 # Anthropic (Claude)

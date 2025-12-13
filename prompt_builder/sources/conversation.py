@@ -24,7 +24,7 @@ from typing import Optional, Dict, Any, List
 from prompt_builder.sources.base import ContextSource, ContextBlock, SourcePriority
 from memory.conversation import get_conversation_manager
 from core.temporal import format_fuzzy_relative_time
-from config import CONTEXT_WINDOW_SIZE
+from config import CONTEXT_WINDOW_SIZE, USER_NAME, AI_NAME
 
 
 class ConversationSource(ContextSource):
@@ -89,8 +89,8 @@ class ConversationSource(ContextSource):
         lines = ["<recent_conversation>"]
 
         for turn in turns:
-            # Use "Claude" for assistant, "Brian" for user
-            name = "Claude" if turn.role == "assistant" else "Brian"
+            # Use configured names for consistent entity naming across the system
+            name = AI_NAME if turn.role == "assistant" else USER_NAME
             timestamp = format_fuzzy_relative_time(turn.created_at)
             lines.append(f"  {name}: {turn.content} ({timestamp})")
 

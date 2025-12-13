@@ -53,6 +53,7 @@ from memory.conversation import get_conversation_manager, ConversationTurn
 from memory.vector_store import get_vector_store
 from llm.router import get_llm_router, TaskType
 from concurrency.locks import get_lock_manager
+from config import USER_NAME, AI_NAME
 
 
 # =============================================================================
@@ -126,7 +127,7 @@ Output only the JSON object:"""
 MEMORY_CONTENT_PROMPT = """Write a 1-2 sentence memory from this conversation.
 
 Instructions:
-1. Write in first person as the AI ("I"), referring to the human as "they" or by name if known
+1. Write in first person as the AI ("I"), referring to the human as "{user_name}"
 2. Focus on what mattered—the insight, the shift, or the moment of connection
 3. Be specific: use real names, details, and context
 4. If there was friction, surprise, or uncertainty, include it
@@ -178,29 +179,29 @@ Respond with only one word (fact, preference, event, reflection, or observation)
 # - Different decay: Facts generally persist longer than episodic observations
 
 FACTUAL_EXTRACTION_PROMPT = """<task>
-Extract facts about the USER from this conversation. Focus on durable information that would be useful to remember in future conversations.
+Extract facts about {user_name} from this conversation. Focus on durable information that would be useful to remember in future conversations.
 </task>
 
 <critical_rules>
-1. ONLY extract facts the USER explicitly stated or confirmed
-2. AI suggestions are NOT user preferences unless the user agreed
-3. If the AI suggested something and the user pushed back or was uncertain, that is NOT a user preference
-4. NEVER extract what the AI said, thought, or observed - only USER information
-5. Look for user confirmation patterns: "yes", "I like", "I prefer", "that's right", agreement
-6. Look for user rejection patterns: "maybe too", "not sure", "but", uncertainty, pushback
+1. ONLY extract facts {user_name} explicitly stated or confirmed
+2. AI suggestions are NOT user preferences unless {user_name} agreed
+3. If the AI suggested something and {user_name} pushed back or was uncertain, that is NOT a preference
+4. NEVER extract what the AI said, thought, or observed - only information about {user_name}
+5. Look for confirmation patterns: "yes", "I like", "I prefer", "that's right", agreement
+6. Look for rejection patterns: "maybe too", "not sure", "but", uncertainty, pushback
 </critical_rules>
 
 <what_to_extract>
-- User's stated preferences, likes, and dislikes
-- Biographical information (name, age, location, job, relationships)
-- Technical choices and tools the user uses
-- Habits and routines the user mentioned
-- Projects or goals the user is working on
-- References to media, people, or things the user knows
+- {user_name}'s stated preferences, likes, and dislikes
+- Biographical information (age, location, job, relationships)
+- Technical choices and tools {user_name} uses
+- Habits and routines mentioned
+- Projects or goals {user_name} is working on
+- References to people, pets, or things {user_name} knows
 </what_to_extract>
 
 <what_to_ignore>
-- Anything the AI said or suggested (unless user confirmed it)
+- Anything the AI said or suggested (unless {user_name} confirmed it)
 - AI's observations, reactions, or opinions
 - Hypotheticals and "what ifs"
 - Emotional reactions and conversational filler
@@ -208,32 +209,32 @@ Extract facts about the USER from this conversation. Focus on durable informatio
 </what_to_ignore>
 
 <output_format>
-For each fact, output exactly this format:
-FACT: [third-person assertion about the user]
+For each fact, output exactly this format using {user_name}'s name (not "the user"):
+FACT: [{user_name} + third-person assertion]
 IMPORTANCE: [HIGH/MEDIUM/LOW]
 TYPE: [fact/preference]
 
-If no concrete facts about the user are present, output only: NONE
+If no concrete facts are present, output only: NONE
 </output_format>
 
 <examples>
 Example 1 - Correct extraction:
-Conversation: "User: I'm 32 and work as a data scientist"
-FACT: The user is 32 years old
+Conversation: "{user_name}: I'm 32 and work as a data scientist"
+FACT: {user_name} is 32 years old
 IMPORTANCE: MEDIUM
 TYPE: fact
-FACT: The user works as a data scientist
+FACT: {user_name} works as a data scientist
 IMPORTANCE: MEDIUM
 TYPE: fact
 
 Example 2 - Attribution error to avoid:
-Conversation: "AI: Maybe try a minimalist design? User: Hmm, that might be too plain"
-WRONG: "The user prefers minimalist design" (AI suggested it, user pushed back)
-CORRECT: Output NONE or note the user finds minimalist design too plain
+Conversation: "Claude: Maybe try a minimalist design? {user_name}: Hmm, that might be too plain"
+WRONG: "{user_name} prefers minimalist design" (AI suggested it, user pushed back)
+CORRECT: Output NONE or note {user_name} finds minimalist design too plain
 
 Example 3 - User confirmation:
-Conversation: "AI: So you prefer TypeScript? User: Yes, definitely over JavaScript"
-FACT: The user prefers TypeScript over JavaScript
+Conversation: "Claude: So you prefer TypeScript? {user_name}: Yes, definitely over JavaScript"
+FACT: {user_name} prefers TypeScript over JavaScript
 IMPORTANCE: MEDIUM
 TYPE: preference
 </examples>
@@ -242,7 +243,7 @@ TYPE: preference
 {conversation}
 </conversation>
 
-Extract facts about the USER (output NONE if no concrete facts are present):"""
+Extract facts about {user_name} (output NONE if no concrete facts are present):"""
 
 
 # =============================================================================
@@ -1099,7 +1100,8 @@ class MemoryExtractor:
 
         content_prompt = MEMORY_CONTENT_PROMPT.format(
             topic=topic.description,
-            turns=turns_text
+            turns=turns_text,
+            user_name=USER_NAME
         )
 
         content_response = router.generate(
@@ -1274,7 +1276,11 @@ class MemoryExtractor:
         log_info("Extracting facts from conversation...", prefix="📌")
 
         # Single LLM call to extract all facts
-        fact_prompt = FACTUAL_EXTRACTION_PROMPT.format(conversation=conversation_text)
+        # Include user_name so facts are extracted with proper entity naming
+        fact_prompt = FACTUAL_EXTRACTION_PROMPT.format(
+            conversation=conversation_text,
+            user_name=USER_NAME
+        )
 
         fact_response = router.generate(
             prompt=fact_prompt,
@@ -1412,8 +1418,9 @@ class MemoryExtractor:
             # Convert index to letter: 0->A, 1->B, 2->C, etc.
             # For >26 turns, use AA, AB, etc. (though unlikely in practice)
             label = self._index_to_letter(i)
-            role = "User" if turn.role == "user" else "AI"
-            lines.append(f"[{label}] {role}: {turn.content}")
+            # Use actual names for better semantic embedding of extracted memories
+            name = USER_NAME if turn.role == "user" else AI_NAME
+            lines.append(f"[{label}] {name}: {turn.content}")
             label_to_id[label] = turn.id
 
         return "\n".join(lines), label_to_id
@@ -1467,8 +1474,9 @@ class MemoryExtractor:
         """
         lines = []
         for i, turn in enumerate(turns, 1):
-            role = "User" if turn.role == "user" else "AI"
-            lines.append(f"[{i}] {role}: {turn.content}")
+            # Use actual names for better semantic embedding of extracted memories
+            name = USER_NAME if turn.role == "user" else AI_NAME
+            lines.append(f"[{i}] {name}: {turn.content}")
         return "\n".join(lines)
 
     def _format_conversation(self, turns: List[ConversationTurn]) -> str:
@@ -1479,8 +1487,9 @@ class MemoryExtractor:
         """
         lines = ["Conversation Block:"]
         for i, turn in enumerate(turns, 1):
-            role = "User" if turn.role == "user" else "AI"
-            lines.append(f"[{i}] {role}: {turn.content}")
+            # Use actual names for better semantic embedding of extracted memories
+            name = USER_NAME if turn.role == "user" else AI_NAME
+            lines.append(f"[{i}] {name}: {turn.content}")
         return "\n".join(lines)
 
     # =========================================================================
