@@ -1158,7 +1158,7 @@ class ChatWindow(QMainWindow):
 
             # Create ImageContent
             img_content = ImageContent(
-                base64_data=base64_data,
+                data=base64_data,
                 media_type="image/jpeg",
                 source_type="clipboard"
             )
