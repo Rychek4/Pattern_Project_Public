@@ -224,23 +224,33 @@ SYSTEM_PULSE_INTERVAL = 600  # 10 minutes between pulses (default)
 # =============================================================================
 # CURIOSITY ENGINE CONFIGURATION
 # =============================================================================
-# The curiosity engine gives the AI topics to explore during idle moments
-# and as background context during conversation. It identifies dormant topics
-# from memory and uses weighted random selection for natural variety.
+# The curiosity engine gives the AI topics to explore during conversation.
+# It identifies both dormant topics from memory AND fresh discoveries,
+# using weighted random selection for natural variety.
 CURIOSITY_ENABLED = True
 
-# Analysis settings
-CURIOSITY_DORMANT_DAYS = 14        # Topic considered "dormant" after N days
-CURIOSITY_MIN_IMPORTANCE = 0.4    # Minimum memory importance to consider
+# Dormant revival settings - resurface old forgotten topics
+CURIOSITY_DORMANT_DAYS = 7            # Reduced: topic "dormant" after 7 days
+CURIOSITY_MIN_IMPORTANCE = 0.4        # Minimum memory importance for dormant
 
-# Cooldown periods (hours) - how long before revisiting resolved topics
-CURIOSITY_COOLDOWN_EXPLORED = 72   # 3 days - topic was discussed, give it time
-CURIOSITY_COOLDOWN_DEFERRED = 4    # 4 hours - user said "not now"
-CURIOSITY_COOLDOWN_DECLINED = 168  # 1 week - user rejected the topic
+# Fresh discovery settings - explore new interesting information
+CURIOSITY_FRESH_HOURS = 48            # Memories within 48h are "fresh"
+CURIOSITY_FRESH_MIN_IMPORTANCE = 0.7  # Higher bar - only significant new info
+
+# Interaction tracking - ensure topics are actually explored
+CURIOSITY_MIN_INTERACTIONS = 2        # Minimum exchanges before "explored" is valid
+
+# Cooldown periods (hours) - scaled based on exploration depth
+CURIOSITY_COOLDOWN_EXPLORED_MIN = 4   # Shallow exploration minimum
+CURIOSITY_COOLDOWN_EXPLORED_MAX = 48  # Deep exploration maximum
+CURIOSITY_COOLDOWN_PER_INTERACTION = 8  # Hours added per interaction
+CURIOSITY_COOLDOWN_DEFERRED = 2       # "not now" - brief cooldown
+CURIOSITY_COOLDOWN_DECLINED = 72      # User rejected - 3 days
 
 # Selection weights - influence probability of topic selection
-CURIOSITY_WEIGHT_DORMANCY = 1.5    # Weight multiplier for days since last discussed
-CURIOSITY_WEIGHT_IMPORTANCE = 2.0  # Weight multiplier for memory importance score
+CURIOSITY_WEIGHT_DORMANCY = 1.5       # Weight multiplier for dormant topics
+CURIOSITY_WEIGHT_FRESHNESS = 1.8      # Weight multiplier for fresh discoveries
+CURIOSITY_WEIGHT_IMPORTANCE = 2.0     # Weight multiplier for memory importance
 
 # =============================================================================
 # HTTP API CONFIGURATION

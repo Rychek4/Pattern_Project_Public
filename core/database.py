@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from core.logger import log_info, log_success, log_error, log_config, log_section
 
 # Schema version for migrations
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 # SQL schema definition
 SCHEMA_SQL = """
@@ -157,14 +157,15 @@ CREATE TABLE IF NOT EXISTS active_thoughts (
 CREATE TABLE IF NOT EXISTS curiosity_goals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     content TEXT NOT NULL,
-    category TEXT NOT NULL CHECK (category IN ('dormant_revival', 'depth_seeking')),
+    category TEXT NOT NULL CHECK (category IN ('dormant_revival', 'depth_seeking', 'fresh_discovery')),
     context TEXT,
     source_memory_id INTEGER REFERENCES memories(id),
     status TEXT DEFAULT 'active' CHECK (status IN ('active', 'explored', 'deferred', 'declined')),
     activated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     resolved_at TIMESTAMP,
     outcome_notes TEXT,
-    cooldown_until TIMESTAMP
+    cooldown_until TIMESTAMP,
+    interaction_count INTEGER DEFAULT 0
 );
 
 -- Indexes for efficient queries
@@ -596,20 +597,27 @@ MIGRATION_V14_SQL = """
 CREATE TABLE IF NOT EXISTS curiosity_goals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     content TEXT NOT NULL,
-    category TEXT NOT NULL CHECK (category IN ('dormant_revival', 'depth_seeking')),
+    category TEXT NOT NULL CHECK (category IN ('dormant_revival', 'depth_seeking', 'fresh_discovery')),
     context TEXT,
     source_memory_id INTEGER REFERENCES memories(id),
     status TEXT DEFAULT 'active' CHECK (status IN ('active', 'explored', 'deferred', 'declined')),
     activated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     resolved_at TIMESTAMP,
     outcome_notes TEXT,
-    cooldown_until TIMESTAMP
+    cooldown_until TIMESTAMP,
+    interaction_count INTEGER DEFAULT 0
 );
 
 -- Indexes for efficient queries
 CREATE INDEX IF NOT EXISTS idx_curiosity_status ON curiosity_goals(status);
 CREATE INDEX IF NOT EXISTS idx_curiosity_cooldown ON curiosity_goals(cooldown_until);
 CREATE INDEX IF NOT EXISTS idx_curiosity_source ON curiosity_goals(source_memory_id);
+"""
+
+# Migration SQL for v14 -> v15 (add interaction_count to curiosity_goals)
+MIGRATION_V15_SQL = """
+-- Add interaction_count column to track conversation depth on curiosity topics
+ALTER TABLE curiosity_goals ADD COLUMN interaction_count INTEGER DEFAULT 0;
 """
 
 
@@ -781,6 +789,10 @@ class Database:
             if from_version < 14:
                 log_config("Applying migration", "v13 → v14 (add curiosity_goals table)", indent=1)
                 conn.executescript(MIGRATION_V14_SQL)
+
+            if from_version < 15:
+                log_config("Applying migration", "v14 → v15 (add interaction_count to curiosity_goals)", indent=1)
+                conn.executescript(MIGRATION_V15_SQL)
 
             # Record new version
             conn.execute(

@@ -57,6 +57,7 @@ class ToolExecutor:
             "capture_webcam": self._exec_capture_webcam,
             "set_active_thoughts": self._exec_set_active_thoughts,
             "set_pulse_interval": self._exec_set_pulse_interval,
+            "advance_curiosity": self._exec_advance_curiosity,
             "resolve_curiosity": self._exec_resolve_curiosity,
         }
 
@@ -581,8 +582,67 @@ class ToolExecutor:
         )
 
     # =========================================================================
-    # CURIOSITY TOOL
+    # CURIOSITY TOOLS
     # =========================================================================
+
+    def _exec_advance_curiosity(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """
+        Record progress on the current curiosity topic.
+
+        Increments the interaction count for the active goal.
+        """
+        from agency.curiosity import is_curiosity_enabled
+        from agency.curiosity.ledger import get_curiosity_ledger
+
+        if not is_curiosity_enabled():
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="advance_curiosity",
+                content="Curiosity system is disabled",
+                is_error=True
+            )
+
+        note = input.get("note", "")
+
+        try:
+            ledger = get_curiosity_ledger()
+            current_goal = ledger.get_active_goal()
+
+            if not current_goal:
+                return ToolResult(
+                    tool_use_id=id,
+                    tool_name="advance_curiosity",
+                    content="No active curiosity goal to advance",
+                    is_error=True
+                )
+
+            # Increment interaction count
+            new_count = ledger.increment_interaction(current_goal.id)
+            min_interactions = getattr(config, 'CURIOSITY_MIN_INTERACTIONS', 2)
+
+            if new_count >= min_interactions:
+                status_msg = f"Ready to resolve as 'explored' ({new_count}/{min_interactions} interactions)"
+            else:
+                status_msg = f"Progress: {new_count}/{min_interactions} interactions needed"
+
+            log_info(f"Curiosity interaction recorded: {status_msg}", prefix="🔍")
+
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="advance_curiosity",
+                content=f"Curiosity progress recorded. {status_msg}"
+            )
+
+        except Exception as e:
+            log_error(f"Error advancing curiosity: {e}")
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="advance_curiosity",
+                content=f"Error advancing curiosity: {str(e)}",
+                is_error=True
+            )
 
     def _exec_resolve_curiosity(
         self, input: Dict, id: str, ctx: Dict
@@ -592,9 +652,12 @@ class ToolExecutor:
 
         This records the outcome of the AI's curiosity exploration and
         automatically rotates to a new curiosity topic.
+
+        For "explored" outcomes, enforces minimum interaction count to
+        ensure topics are actually explored, not just mentioned once.
         """
         from agency.curiosity import get_curiosity_engine, is_curiosity_enabled
-        from agency.curiosity.ledger import GoalStatus
+        from agency.curiosity.ledger import GoalStatus, get_curiosity_ledger
 
         if not is_curiosity_enabled():
             return ToolResult(
@@ -626,6 +689,28 @@ class ToolExecutor:
 
         try:
             engine = get_curiosity_engine()
+            ledger = get_curiosity_ledger()
+
+            # For "explored" outcomes, check minimum interaction requirement
+            if status == GoalStatus.EXPLORED:
+                current_goal = ledger.get_active_goal()
+                if current_goal:
+                    min_interactions = getattr(config, 'CURIOSITY_MIN_INTERACTIONS', 2)
+                    interaction_count = current_goal.interaction_count
+
+                    if interaction_count < min_interactions:
+                        # Not enough interactions - refuse to mark as explored
+                        return ToolResult(
+                            tool_use_id=id,
+                            tool_name="resolve_curiosity",
+                            content=(
+                                f"Cannot mark as 'explored' yet - only {interaction_count} interaction(s) "
+                                f"recorded (minimum: {min_interactions}). Continue exploring this topic, "
+                                f"or use 'deferred' if the user wants to discuss something else."
+                            ),
+                            is_error=True
+                        )
+
             new_goal = engine.resolve_current_goal(status, notes)
 
             # Return confirmation with new goal preview
