@@ -1,9 +1,20 @@
 """
 Pattern Project - PyQt5 Chat GUI
-Version: 0.1.0
+Version: 0.2.0
 
 A visual chat interface with timestamps, session tracking,
-and system pulse countdown.
+system pulse countdown, and enhanced UX features.
+
+Features:
+- Light/dark theme support
+- Full markdown rendering
+- Message search
+- Draft persistence
+- Command palette
+- Keyboard shortcuts
+- Toast notifications
+- Quick actions
+- Image paste from clipboard
 """
 
 import sys
@@ -12,8 +23,10 @@ import html
 import queue
 import threading
 import traceback
+import uuid
 from datetime import datetime, timedelta
-from typing import Optional, Callable
+from typing import Optional, Callable, List, Dict, Any
+from dataclasses import dataclass
 
 import config
 from core.logger import log_info, log_error, log_warning
@@ -21,36 +34,54 @@ from core.logger import log_info, log_error, log_warning
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QTextBrowser, QTextEdit, QVBoxLayout, QHBoxLayout,
     QWidget, QPushButton, QLineEdit, QLabel, QDialog, QSlider, QCheckBox,
-    QSpinBox, QMessageBox, QFrame, QSizePolicy, QComboBox
+    QSpinBox, QMessageBox, QFrame, QSizePolicy, QComboBox, QScrollArea,
+    QShortcut, QMenu, QAction
 )
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject
-from PyQt5.QtGui import QFont, QTextCursor, QColor, QPalette
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject, QMimeData, QEvent
+from PyQt5.QtGui import QFont, QTextCursor, QColor, QPalette, QKeySequence, QClipboard, QImage
 
+# Import new GUI components
+from interface.gui_components import (
+    Theme, DARK_THEME, LIGHT_THEME,
+    ThemeManager, get_theme_manager,
+    MarkdownRenderer, MessageData,
+    SearchBar, CommandPalette, Command,
+    NotificationManager, DraftManager,
+    KeyboardShortcutManager, StatusManager,
+    QuickActionsBar, CancelButton
+)
 
-# Color scheme (dark theme matching the prototype)
-COLORS = {
-    "background": "#1a1a2e",
-    "surface": "#16213e",
-    "primary": "#0f3460",
-    "accent": "#e94560",
-    "text": "#eaeaea",
-    "text_dim": "#888888",
-    "user": "#4ade80",      # Green for user messages
-    "assistant": "#60a5fa", # Blue for AI messages
-    "system": "#f59e0b",    # Amber for system messages
-    "timestamp": "#6b7280", # Gray for timestamps
-    "pulse": "#a855f7",     # Purple for pulse countdown
-    "action": "#c4a7e7",    # Soft purple for AI action text (*action*)
-}
+# Legacy color dict for backwards compatibility (maps from theme)
+def get_colors_from_theme(theme: Theme) -> dict:
+    """Convert theme to legacy COLORS dict."""
+    return {
+        "background": theme.background,
+        "surface": theme.surface,
+        "primary": theme.primary,
+        "accent": theme.accent,
+        "text": theme.text,
+        "text_dim": theme.text_dim,
+        "user": theme.user,
+        "assistant": theme.assistant,
+        "system": theme.system,
+        "timestamp": theme.timestamp,
+        "pulse": theme.pulse,
+        "action": theme.action,
+    }
+
+# Initialize with dark theme
+COLORS = get_colors_from_theme(DARK_THEME)
 
 
 class MessageSignals(QObject):
     """Signals for thread-safe message passing to GUI."""
     new_message = pyqtSignal(str, str, str)  # role, content, timestamp
-    update_status = pyqtSignal(str)
+    update_status = pyqtSignal(str, str)  # status text, status type
     update_timer = pyqtSignal(str, str)  # session_time, total_time
     response_complete = pyqtSignal()
     pulse_interval_change = pyqtSignal(int)  # new interval in seconds
+    show_notification = pyqtSignal(str, str)  # message, level (info/success/warning/error)
+    tool_executing = pyqtSignal(str)  # tool name being executed
 
 
 class ChatInputWidget(QTextEdit):
@@ -61,14 +92,16 @@ class ChatInputWidget(QTextEdit):
     - Enter key sends message (emits send_requested signal)
     - Shift+Enter inserts a newline
     - Plain text only (no rich text)
+    - Image paste from clipboard
     """
 
     send_requested = pyqtSignal()
+    image_pasted = pyqtSignal(QImage)  # Emitted when image is pasted
 
     def __init__(self):
         super().__init__()
         self.setAcceptRichText(False)
-        self.setPlaceholderText("Type a message...")
+        self.setPlaceholderText("Type a message... (Ctrl+V to paste images)")
 
         # Hide scroll bar for single-line mode, show only when needed for multi-line
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
@@ -83,6 +116,9 @@ class ChatInputWidget(QTextEdit):
         # Set initial size
         self.setMinimumHeight(self._single_line_height)
         self.setMaximumHeight(self._single_line_height)
+
+        # Track pasted image
+        self._pending_image: Optional[QImage] = None
 
         # Connect text changes to auto-resize
         self.textChanged.connect(self._auto_resize)
@@ -117,31 +153,76 @@ class ChatInputWidget(QTextEdit):
         else:
             super().keyPressEvent(event)
 
+    def insertFromMimeData(self, source: QMimeData):
+        """Handle paste - check for images."""
+        if source.hasImage():
+            image = source.imageData()
+            if isinstance(image, QImage) and not image.isNull():
+                self._pending_image = image
+                self.image_pasted.emit(image)
+                # Add indicator text
+                cursor = self.textCursor()
+                cursor.insertText("[Image attached] ")
+                return
+        # Fall back to text paste
+        super().insertFromMimeData(source)
+
+    def get_pending_image(self) -> Optional[QImage]:
+        """Get and clear the pending pasted image."""
+        img = self._pending_image
+        self._pending_image = None
+        return img
+
+    def has_pending_image(self) -> bool:
+        """Check if there's a pending pasted image."""
+        return self._pending_image is not None
+
     def clear(self):
         """Clear and reset to single line height."""
         super().clear()
+        self._pending_image = None
         self.setMaximumHeight(self._single_line_height)
 
 
 class ChatWindow(QMainWindow):
     """
     Main chat window with:
-    - Header: Session timer, controls
-    - Chat display: Rich HTML with timestamps and scores
-    - Input: Text entry with send button
+    - Header: Session timer, controls, theme toggle
+    - Chat display: Rich HTML with timestamps and markdown
+    - Search bar: Find messages in conversation
+    - Input: Text entry with send button and image paste
+    - Quick actions: Common operations
+    - Command palette: All commands accessible via Ctrl+Shift+P
+    - Keyboard shortcuts: Full navigation
+    - Notifications: Toast alerts
     """
 
     def __init__(self):
         super().__init__()
         self.signals = MessageSignals()
-        self._setup_signals()
+
+        # Theme management
+        self._theme_manager = get_theme_manager()
+        self._theme = self._theme_manager.current
+        self._markdown_renderer = MarkdownRenderer(self._theme)
+
+        # Status management
+        self._status_manager = StatusManager()
 
         # State
         self._session_start: Optional[datetime] = None
         self._first_session_start: Optional[datetime] = None
         self._is_processing = False
+        self._cancel_requested = False  # Flag to cancel current request
+        self._processing_thread: Optional[threading.Thread] = None
         self._message_queue = queue.Queue()
         self._is_first_message_of_session = True  # Track for next_session reminder triggers
+
+        # Message storage for search/navigation
+        self._messages: List[MessageData] = []
+        self._search_results: List[int] = []  # Indices into _messages
+        self._current_search_index = 0
+        self._bookmarked_messages: set = set()  # Set of message IDs
 
         # Backend references (set during initialization)
         self._conversation_mgr = None
@@ -153,16 +234,28 @@ class ChatWindow(QMainWindow):
         self._telegram_listener = None
 
         self._setup_ui()
+        self._setup_signals()
         self._setup_timers()
+        self._setup_keyboard_shortcuts()
+        self._setup_command_palette()
+        self._setup_draft_manager()
         self._apply_style()
 
     def _setup_signals(self):
         """Connect signals to slots."""
         self.signals.new_message.connect(self._append_message)
-        self.signals.update_status.connect(self._update_status)
+        self.signals.update_status.connect(self._update_status_with_type)
         self.signals.update_timer.connect(self._update_timer_display)
         self.signals.response_complete.connect(self._on_response_complete)
         self.signals.pulse_interval_change.connect(self.set_pulse_interval_by_seconds)
+        self.signals.show_notification.connect(self._show_notification)
+        self.signals.tool_executing.connect(self._on_tool_executing)
+
+        # Theme change signal
+        self._theme_manager.theme_changed.connect(self._on_theme_changed)
+
+        # Status manager signals
+        self._status_manager.status_changed.connect(self._on_status_changed)
 
     def _setup_ui(self):
         """Create the UI layout."""
@@ -181,20 +274,59 @@ class ChatWindow(QMainWindow):
         header = self._create_header()
         layout.addWidget(header)
 
+        # Search bar (hidden by default)
+        self.search_bar = SearchBar(self._theme, self)
+        self.search_bar.search_requested.connect(self._on_search)
+        self.search_bar.search_closed.connect(self._on_search_closed)
+        self.search_bar.next_result.connect(self._on_search_next)
+        self.search_bar.prev_result.connect(self._on_search_prev)
+        layout.addWidget(self.search_bar)
+
         # Chat display
         self.chat_display = QTextBrowser()
-        self.chat_display.setOpenExternalLinks(False)
+        self.chat_display.setOpenExternalLinks(True)  # Enable clicking links
         self.chat_display.setFont(QFont("Consolas", 12))
+        self.chat_display.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.chat_display.customContextMenuRequested.connect(self._show_chat_context_menu)
         layout.addWidget(self.chat_display, stretch=1)
 
-        # Input area
+        # Quick actions bar
+        self.quick_actions = QuickActionsBar(self._theme, self)
+        self.quick_actions.add_action("new_session", "New Session", "Start a new conversation", "🔄")
+        self.quick_actions.add_action("search", "Search", "Search messages (Ctrl+F)", "🔍")
+        self.quick_actions.add_action("extract", "Extract", "Extract memories now", "🧠")
+        self.quick_actions.add_action("bookmarks", "Bookmarks", "View bookmarked messages", "⭐")
+        self.quick_actions.action_triggered.connect(self._on_quick_action)
+        layout.addWidget(self.quick_actions)
+
+        # Input area with cancel button
         input_frame = self._create_input_area()
         layout.addWidget(input_frame)
 
-        # Status bar
+        # Status bar with progress indicator
+        status_frame = QFrame()
+        status_frame.setFrameStyle(QFrame.NoFrame)
+        status_layout = QHBoxLayout(status_frame)
+        status_layout.setContentsMargins(0, 0, 0, 0)
+
         self.status_label = QLabel("Ready")
         self.status_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
-        layout.addWidget(self.status_label)
+        status_layout.addWidget(self.status_label)
+
+        status_layout.addStretch()
+
+        # Cancel button (hidden by default)
+        self.cancel_btn = CancelButton(self._theme, self)
+        self.cancel_btn.clicked.connect(self._on_cancel_clicked)
+        status_layout.addWidget(self.cancel_btn)
+
+        layout.addWidget(status_frame)
+
+        # Notification manager
+        self._notification_manager = NotificationManager(self)
+
+        # Command palette (hidden by default)
+        self._command_palette = CommandPalette(self._theme, self)
 
     def _create_header(self) -> QFrame:
         """Create the header with timer, pulse countdown, and controls."""
@@ -231,6 +363,20 @@ class ChatWindow(QMainWindow):
 
         layout.addStretch()
 
+        # Theme toggle button
+        self.theme_btn = QPushButton("🌙")
+        self.theme_btn.setToolTip("Toggle light/dark theme (Ctrl+T)")
+        self.theme_btn.setMaximumWidth(40)
+        self.theme_btn.clicked.connect(self._toggle_theme)
+        layout.addWidget(self.theme_btn)
+
+        # Command palette button
+        self.palette_btn = QPushButton("⌘")
+        self.palette_btn.setToolTip("Command palette (Ctrl+Shift+P)")
+        self.palette_btn.setMaximumWidth(40)
+        self.palette_btn.clicked.connect(self._show_command_palette)
+        layout.addWidget(self.palette_btn)
+
         self.settings_btn = QPushButton("Settings")
         self.settings_btn.clicked.connect(self._show_settings)
         layout.addWidget(self.settings_btn)
@@ -265,79 +411,361 @@ class ChatWindow(QMainWindow):
         self.timer_update.start(1000)
 
     def _apply_style(self):
-        """Apply dark theme styling."""
-        self.setStyleSheet(f"""
-            QMainWindow {{
-                background-color: {COLORS['background']};
-            }}
-            QFrame {{
-                background-color: {COLORS['surface']};
-                border: 1px solid {COLORS['primary']};
-                border-radius: 5px;
-            }}
-            QTextBrowser {{
-                background-color: {COLORS['surface']};
-                color: {COLORS['text']};
-                border: 1px solid {COLORS['primary']};
-                border-radius: 5px;
-                padding: 10px;
-            }}
-            QLineEdit {{
-                background-color: {COLORS['surface']};
-                color: {COLORS['text']};
-                border: 1px solid {COLORS['primary']};
-                border-radius: 5px;
-                padding: 8px;
-            }}
-            QLineEdit:focus {{
-                border: 1px solid {COLORS['accent']};
-            }}
-            QTextEdit {{
-                background-color: {COLORS['surface']};
-                color: {COLORS['text']};
-                border: 1px solid {COLORS['primary']};
-                border-radius: 5px;
-                padding: 8px;
-            }}
-            QTextEdit:focus {{
-                border: 1px solid {COLORS['accent']};
-            }}
-            QPushButton {{
-                background-color: {COLORS['primary']};
-                color: {COLORS['text']};
-                border: none;
-                border-radius: 5px;
-                padding: 8px 15px;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['accent']};
-            }}
-            QPushButton:checked {{
-                background-color: {COLORS['accent']};
-            }}
-            QLabel {{
-                color: {COLORS['text']};
-            }}
-            QComboBox {{
-                background-color: {COLORS['surface']};
-                color: {COLORS['pulse']};
-                border: 1px solid {COLORS['primary']};
-                border-radius: 5px;
-                padding: 4px 8px;
-                min-width: 80px;
-            }}
-            QComboBox:hover {{
-                border: 1px solid {COLORS['pulse']};
-            }}
-            QComboBox::drop-down {{
-                border: none;
-            }}
-            QComboBox QAbstractItemView {{
-                background-color: {COLORS['surface']};
-                color: {COLORS['text']};
-                selection-background-color: {COLORS['primary']};
-            }}
-        """)
+        """Apply theme styling using theme manager."""
+        self.setStyleSheet(self._theme_manager.get_stylesheet())
+
+    def _setup_keyboard_shortcuts(self):
+        """Setup keyboard shortcuts."""
+        self._shortcut_manager = KeyboardShortcutManager(self)
+
+        # Search
+        self._shortcut_manager.register("Ctrl+F", self._activate_search, "Search messages")
+
+        # Command palette
+        self._shortcut_manager.register("Ctrl+Shift+P", self._show_command_palette, "Command palette")
+
+        # Theme toggle
+        self._shortcut_manager.register("Ctrl+T", self._toggle_theme, "Toggle theme")
+
+        # Copy last message
+        self._shortcut_manager.register("Ctrl+Shift+C", self._copy_last_message, "Copy last message")
+
+        # New session
+        self._shortcut_manager.register("Ctrl+N", self._start_new_session, "New session")
+
+        # Focus input
+        self._shortcut_manager.register("Escape", self._focus_input, "Focus input")
+
+        # Scroll to bottom
+        self._shortcut_manager.register("Ctrl+End", self._scroll_to_bottom, "Scroll to bottom")
+
+    def _setup_command_palette(self):
+        """Setup command palette with available commands."""
+        commands = [
+            Command("search", "Search Messages", "Ctrl+F", self._activate_search,
+                   "Find messages in conversation"),
+            Command("new_session", "New Session", "Ctrl+N", self._start_new_session,
+                   "Start a new conversation"),
+            Command("toggle_theme", "Toggle Theme", "Ctrl+T", self._toggle_theme,
+                   "Switch between light and dark themes"),
+            Command("copy_last", "Copy Last Response", "Ctrl+Shift+C", self._copy_last_message,
+                   "Copy the last AI response to clipboard"),
+            Command("extract_memories", "Extract Memories", "", self._trigger_extraction,
+                   "Force memory extraction now"),
+            Command("show_bookmarks", "Show Bookmarks", "", self._show_bookmarks,
+                   "View bookmarked messages"),
+            Command("clear_chat", "Clear Chat Display", "", self._clear_chat_display,
+                   "Clear the chat display (keeps history)"),
+            Command("scroll_bottom", "Scroll to Bottom", "Ctrl+End", self._scroll_to_bottom,
+                   "Jump to latest messages"),
+            Command("focus_input", "Focus Input", "Escape", self._focus_input,
+                   "Move focus to message input"),
+        ]
+        self._command_palette.set_commands(commands)
+
+    def _setup_draft_manager(self):
+        """Setup draft persistence."""
+        self._draft_manager = DraftManager()
+
+        # Load any existing draft
+        saved_draft = self._draft_manager.load_draft()
+        if saved_draft:
+            self.input_field.setPlainText(saved_draft)
+
+        # Setup auto-save
+        self._draft_manager.setup_auto_save(self.input_field)
+
+    # =========================================================================
+    # THEME HANDLING
+    # =========================================================================
+
+    def _toggle_theme(self):
+        """Toggle between light and dark themes."""
+        self._theme_manager.toggle()
+
+    def _on_theme_changed(self, theme: Theme):
+        """Handle theme change."""
+        global COLORS
+        self._theme = theme
+        COLORS = get_colors_from_theme(theme)
+
+        # Update theme button icon
+        if theme.name == "dark":
+            self.theme_btn.setText("🌙")
+        else:
+            self.theme_btn.setText("☀️")
+
+        # Update markdown renderer
+        self._markdown_renderer.update_theme(theme)
+
+        # Re-apply stylesheet
+        self._apply_style()
+
+        # Update component themes
+        self.search_bar.update_theme(theme)
+        self.quick_actions.update_theme(theme)
+        self.cancel_btn.update_theme(theme)
+        self._command_palette.update_theme(theme)
+
+        # Notify user
+        self._notification_manager.info(f"Switched to {theme.name} theme")
+
+    # =========================================================================
+    # SEARCH HANDLING
+    # =========================================================================
+
+    def _activate_search(self):
+        """Activate the search bar."""
+        self.search_bar.activate()
+
+    def _on_search(self, query: str):
+        """Handle search query."""
+        query_lower = query.lower()
+        self._search_results = []
+
+        for i, msg in enumerate(self._messages):
+            if query_lower in msg.content.lower():
+                self._search_results.append(i)
+
+        if self._search_results:
+            self._current_search_index = 0
+            self._highlight_search_result()
+        else:
+            self._current_search_index = 0
+
+        self.search_bar.show_results(
+            self._current_search_index + 1 if self._search_results else 0,
+            len(self._search_results)
+        )
+
+    def _on_search_closed(self):
+        """Handle search bar closed."""
+        self._search_results = []
+        self._current_search_index = 0
+        # Clear any highlighting
+        self._focus_input()
+
+    def _on_search_next(self):
+        """Navigate to next search result."""
+        if not self._search_results:
+            return
+        self._current_search_index = (self._current_search_index + 1) % len(self._search_results)
+        self._highlight_search_result()
+        self.search_bar.show_results(self._current_search_index + 1, len(self._search_results))
+
+    def _on_search_prev(self):
+        """Navigate to previous search result."""
+        if not self._search_results:
+            return
+        self._current_search_index = (self._current_search_index - 1) % len(self._search_results)
+        self._highlight_search_result()
+        self.search_bar.show_results(self._current_search_index + 1, len(self._search_results))
+
+    def _highlight_search_result(self):
+        """Scroll to and highlight current search result."""
+        if not self._search_results:
+            return
+
+        msg_index = self._search_results[self._current_search_index]
+        # In a real implementation, we'd scroll to the specific message
+        # For now, we'll just notify which message was found
+        msg = self._messages[msg_index]
+        self._notification_manager.info(f"Found in {msg.role} message at {msg.timestamp}")
+
+    # =========================================================================
+    # QUICK ACTIONS
+    # =========================================================================
+
+    def _on_quick_action(self, action_id: str):
+        """Handle quick action button click."""
+        if action_id == "new_session":
+            self._start_new_session()
+        elif action_id == "search":
+            self._activate_search()
+        elif action_id == "extract":
+            self._trigger_extraction()
+        elif action_id == "bookmarks":
+            self._show_bookmarks()
+
+    def _start_new_session(self):
+        """Start a new session."""
+        if self._temporal_tracker:
+            self._temporal_tracker.end_session()
+            self._temporal_tracker.start_session()
+        self._session_start = datetime.now()
+        self._is_first_message_of_session = True
+        self._notification_manager.success("New session started")
+
+    def _trigger_extraction(self):
+        """Trigger memory extraction."""
+        try:
+            from memory.extractor import get_memory_extractor
+            extractor = get_memory_extractor()
+            extractor.process_turns()
+            self._notification_manager.success("Memory extraction completed")
+        except Exception as e:
+            self._notification_manager.error(f"Extraction failed: {e}")
+
+    def _show_bookmarks(self):
+        """Show bookmarked messages."""
+        bookmarked = [m for m in self._messages if m.id in self._bookmarked_messages]
+        if bookmarked:
+            self._notification_manager.info(f"Found {len(bookmarked)} bookmarked message(s)")
+        else:
+            self._notification_manager.info("No bookmarked messages")
+
+    # =========================================================================
+    # COMMAND PALETTE
+    # =========================================================================
+
+    def _show_command_palette(self):
+        """Show the command palette."""
+        # Position it centered near top
+        palette_x = (self.width() - self._command_palette.width()) // 2
+        palette_y = 80
+
+        global_pos = self.mapToGlobal(self.rect().topLeft())
+        self._command_palette.move(global_pos.x() + palette_x, global_pos.y() + palette_y)
+        self._command_palette.show()
+        self._command_palette.search_input.setFocus()
+
+    # =========================================================================
+    # CHAT CONTEXT MENU
+    # =========================================================================
+
+    def _show_chat_context_menu(self, position):
+        """Show context menu for chat display."""
+        menu = QMenu(self)
+
+        # Copy selected text
+        copy_action = QAction("Copy Selected", self)
+        copy_action.triggered.connect(self._copy_selected_text)
+        menu.addAction(copy_action)
+
+        # Copy last message
+        copy_last_action = QAction("Copy Last Response", self)
+        copy_last_action.triggered.connect(self._copy_last_message)
+        menu.addAction(copy_last_action)
+
+        menu.addSeparator()
+
+        # Bookmark (would need cursor position to determine which message)
+        bookmark_action = QAction("Bookmark Message", self)
+        bookmark_action.triggered.connect(self._bookmark_current_message)
+        menu.addAction(bookmark_action)
+
+        menu.addSeparator()
+
+        # Search
+        search_action = QAction("Search...", self)
+        search_action.triggered.connect(self._activate_search)
+        menu.addAction(search_action)
+
+        menu.exec_(self.chat_display.viewport().mapToGlobal(position))
+
+    def _copy_selected_text(self):
+        """Copy selected text to clipboard."""
+        cursor = self.chat_display.textCursor()
+        if cursor.hasSelection():
+            text = cursor.selectedText()
+            QApplication.clipboard().setText(text)
+            self._notification_manager.success("Copied to clipboard")
+
+    def _copy_last_message(self):
+        """Copy the last AI response to clipboard."""
+        for msg in reversed(self._messages):
+            if msg.role == "assistant":
+                QApplication.clipboard().setText(msg.content)
+                self._notification_manager.success("Last response copied")
+                return
+        self._notification_manager.warning("No AI response to copy")
+
+    def _bookmark_current_message(self):
+        """Bookmark the most recent message."""
+        if self._messages:
+            msg = self._messages[-1]
+            if msg.id in self._bookmarked_messages:
+                self._bookmarked_messages.remove(msg.id)
+                self._notification_manager.info("Bookmark removed")
+            else:
+                self._bookmarked_messages.add(msg.id)
+                self._notification_manager.success("Message bookmarked")
+
+    # =========================================================================
+    # UTILITY METHODS
+    # =========================================================================
+
+    def _focus_input(self):
+        """Focus the input field."""
+        self.input_field.setFocus()
+
+    def _scroll_to_bottom(self):
+        """Scroll chat to bottom."""
+        self.chat_display.moveCursor(QTextCursor.End)
+
+    def _clear_chat_display(self):
+        """Clear the chat display."""
+        self.chat_display.clear()
+        self._notification_manager.info("Chat display cleared")
+
+    # =========================================================================
+    # STATUS AND NOTIFICATION HANDLERS
+    # =========================================================================
+
+    def _update_status_with_type(self, text: str, status_type: str):
+        """Update status bar with type-based styling."""
+        if status_type == StatusManager.STATUS_ERROR:
+            color = self._theme.error
+        elif status_type == StatusManager.STATUS_THINKING:
+            color = self._theme.pulse
+        elif status_type == StatusManager.STATUS_TOOLS:
+            color = self._theme.action
+        else:
+            color = self._theme.text_dim
+
+        self.status_label.setText(text)
+        self.status_label.setStyleSheet(f"color: {color}; font-size: 10px;")
+
+    def _on_status_changed(self, text: str, status_type: str):
+        """Handle status manager changes."""
+        self.signals.update_status.emit(text, status_type)
+
+    def _show_notification(self, message: str, level: str):
+        """Show a toast notification."""
+        if level == "success":
+            self._notification_manager.success(message)
+        elif level == "warning":
+            self._notification_manager.warning(message)
+        elif level == "error":
+            self._notification_manager.error(message)
+        else:
+            self._notification_manager.info(message)
+
+    def _on_tool_executing(self, tool_name: str):
+        """Handle tool execution status."""
+        self._status_manager.set_executing_tools(tool_name)
+
+    # =========================================================================
+    # CANCEL HANDLING
+    # =========================================================================
+
+    def _on_cancel_clicked(self):
+        """Handle cancel button click."""
+        self._cancel_requested = True
+        self.cancel_btn.setEnabled(False)
+        self.cancel_btn.setText("Cancelling...")
+        self._notification_manager.warning("Cancelling request...")
+
+    def _show_cancel_button(self):
+        """Show the cancel button."""
+        self._cancel_requested = False
+        self.cancel_btn.setEnabled(True)
+        self.cancel_btn.setText("Cancel")
+        self.cancel_btn.show()
+
+    def _hide_cancel_button(self):
+        """Hide the cancel button."""
+        self.cancel_btn.hide()
 
     def set_backend(
         self,
@@ -650,27 +1078,41 @@ class ChatWindow(QMainWindow):
 
     def _append_message(self, role: str, content: str, timestamp: str):
         """Append a message to the chat display."""
+        # Store message for search
+        msg_id = str(uuid.uuid4())
+        msg_data = MessageData(
+            id=msg_id,
+            role=role,
+            content=content,
+            timestamp=timestamp
+        )
+        self._messages.append(msg_data)
+
         # Color based on role
         if role == "user":
-            color = COLORS['user']
+            color = self._theme.user
             prefix = "You"
         elif role == "assistant":
-            color = COLORS['assistant']
+            color = self._theme.assistant
             prefix = "AI"
         else:
-            color = COLORS['system']
+            color = self._theme.system
             prefix = "System"
 
-        # Format content with all text formatting (bold, italic, code, etc.)
-        formatted_content = self._format_message_text(content, role)
+        # Format content with new markdown renderer (for assistant messages)
+        # or simple HTML escape (for user/system)
+        if role == "assistant":
+            formatted_content = self._markdown_renderer.render(content, role)
+        else:
+            formatted_content = self._format_message_text(content, role)
 
         # Build HTML (using msg_html to avoid shadowing html module)
         msg_html = f"""
-        <div style='margin-bottom: 10px;'>
-            <span style='color:{COLORS['timestamp']};'>[{timestamp}]</span>
+        <div style='margin-bottom: 10px;' data-msg-id='{msg_id}'>
+            <span style='color:{self._theme.timestamp};'>[{timestamp}]</span>
             <span style='color:{color}; font-weight:bold;'>{prefix}:</span>
             <br/>
-            <span style='color:{COLORS['text']}; margin-left: 20px;'>{formatted_content}</span>
+            <span style='color:{self._theme.text}; margin-left: 20px;'>{formatted_content}</span>
         </div>
         """
 
@@ -683,10 +1125,15 @@ class ChatWindow(QMainWindow):
         if not text or self._is_processing:
             return
 
+        # Check for pasted image
+        pasted_image = self.input_field.get_pending_image()
+
         self.input_field.clear()
+        self._draft_manager.clear_draft()  # Clear saved draft
         self._is_processing = True
         self.send_btn.setEnabled(False)
-        self.status_label.setText("Thinking...")
+        self._status_manager.set_thinking()
+        self._show_cancel_button()
 
         # Reset and pause the pulse timer (user is active)
         if self._system_pulse_timer:
@@ -699,15 +1146,18 @@ class ChatWindow(QMainWindow):
 
         # Add user message to display immediately
         timestamp = self._get_timestamp()
-        self.signals.new_message.emit("user", text, timestamp)
+        display_text = text
+        if pasted_image:
+            display_text = f"[Image] {text}" if text else "[Image attached]"
+        self.signals.new_message.emit("user", display_text, timestamp)
 
         # Process in background thread
-        thread = threading.Thread(
+        self._processing_thread = threading.Thread(
             target=self._process_message,
-            args=(text,),
+            args=(text, pasted_image),
             daemon=True
         )
-        thread.start()
+        self._processing_thread.start()
 
     def _capture_visuals_for_message(self, text_content: str) -> dict:
         """
@@ -814,11 +1264,85 @@ class ChatWindow(QMainWindow):
             # Fallback to text-only
             return {"role": "user", "content": text}
 
-    def _process_message(self, user_input: str):
+    def _build_message_with_pasted_image(self, text: str, image: QImage) -> dict:
+        """
+        Build a multimodal message from a pasted QImage.
+
+        Converts the QImage to base64 and includes it in the message.
+
+        Args:
+            text: The message text
+            image: QImage pasted from clipboard
+
+        Returns:
+            Message dict with multimodal content array
+        """
+        try:
+            import base64
+            from io import BytesIO
+            from PIL import Image as PILImage
+            from agency.visual_capture import ImageContent, build_multimodal_content
+
+            # Convert QImage to PIL Image
+            buffer = image.bits()
+            buffer.setsize(image.byteCount())
+
+            # Get image dimensions and format
+            width = image.width()
+            height = image.height()
+
+            # Create PIL image from QImage data
+            if image.format() == QImage.Format_RGB32 or image.format() == QImage.Format_ARGB32:
+                pil_image = PILImage.frombytes("RGBA", (width, height), bytes(buffer), "raw", "BGRA")
+            else:
+                # Convert to a standard format first
+                converted = image.convertToFormat(QImage.Format_ARGB32)
+                buffer = converted.bits()
+                buffer.setsize(converted.byteCount())
+                pil_image = PILImage.frombytes("RGBA", (width, height), bytes(buffer), "raw", "BGRA")
+
+            # Convert to RGB (remove alpha)
+            pil_image = pil_image.convert("RGB")
+
+            # Resize if too large
+            max_dim = 1024
+            if pil_image.width > max_dim or pil_image.height > max_dim:
+                pil_image.thumbnail((max_dim, max_dim), PILImage.Resampling.LANCZOS)
+
+            # Convert to base64
+            buffer_io = BytesIO()
+            pil_image.save(buffer_io, format="JPEG", quality=85)
+            image_bytes = buffer_io.getvalue()
+            base64_data = base64.standard_b64encode(image_bytes).decode("utf-8")
+
+            # Create ImageContent
+            img_content = ImageContent(
+                base64_data=base64_data,
+                media_type="image/jpeg",
+                source_type="clipboard"
+            )
+
+            content_array = build_multimodal_content(text, [img_content])
+
+            log_info("Built multimodal message from pasted image", prefix="📋")
+
+            return {"role": "user", "content": content_array}
+
+        except Exception as e:
+            log_error(f"Failed to build pasted image message: {e}")
+            # Fallback to text-only
+            return {"role": "user", "content": text}
+
+    def _process_message(self, user_input: str, pasted_image: Optional[QImage] = None):
         """Process a message in background thread."""
         import time
 
         try:
+            # Check for cancellation early
+            if self._cancel_requested:
+                self.signals.show_notification.emit("Request cancelled", "warning")
+                return
+
             # Build prompt (no base prompt - emergent personality from context)
             # Pass is_session_start flag to trigger next_session reminders on first message
             assembled = self._prompt_builder.build(
@@ -857,7 +1381,11 @@ class ChatWindow(QMainWindow):
 
             # Capture visuals and build multimodal message if in auto mode
             # This adds the current user input with any captured images
-            user_message = self._capture_visuals_for_message(user_input)
+            # If a pasted image was provided, include it
+            if pasted_image and not pasted_image.isNull():
+                user_message = self._build_message_with_pasted_image(user_input, pasted_image)
+            else:
+                user_message = self._capture_visuals_for_message(user_input)
             history.append(user_message)
 
             # Get LLM response with native tool use
@@ -1168,8 +1696,11 @@ class ChatWindow(QMainWindow):
     def _on_response_complete(self):
         """Called when response processing is complete."""
         self._is_processing = False
+        self._cancel_requested = False
+        self._processing_thread = None
         self.send_btn.setEnabled(True)
-        self.status_label.setText("Ready")
+        self._status_manager.set_ready()
+        self._hide_cancel_button()
 
         # Resume the pulse timer
         if self._system_pulse_timer:
@@ -1628,8 +2159,8 @@ class ChatWindow(QMainWindow):
             self.signals.response_complete.emit()
 
     def _update_status(self, status: str):
-        """Update status bar."""
-        self.status_label.setText(status)
+        """Update status bar (legacy - uses default type)."""
+        self._update_status_with_type(status, StatusManager.STATUS_READY)
 
     def _update_timer_display(self, session_time: str, total_time: str):
         """Update timer display."""
