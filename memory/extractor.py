@@ -177,38 +177,72 @@ Respond with only one word (fact, preference, event, reflection, or observation)
 # - More granular: One fact per statement, atomic facts
 # - Different decay: Facts generally persist longer than episodic observations
 
-FACTUAL_EXTRACTION_PROMPT = """Extract concrete facts from this conversation.
+FACTUAL_EXTRACTION_PROMPT = """<task>
+Extract facts about the USER from this conversation. Focus on durable information that would be useful to remember in future conversations.
+</task>
 
-Instructions:
-1. Extract explicitly stated facts about people, places, preferences, and things
-2. Focus on: names, locations, ages, relationships, preferences, technical choices, habits
-3. Output facts as standalone assertions using third-person ("Brian is..." not "I learned...")
-4. Each fact should be atomic - one fact per line
-5. Ignore: opinions in flux, hypotheticals, emotional reactions, conversational filler
-6. Only extract facts that were clearly stated or strongly implied
+<critical_rules>
+1. ONLY extract facts the USER explicitly stated or confirmed
+2. AI suggestions are NOT user preferences unless the user agreed
+3. If the AI suggested something and the user pushed back or was uncertain, that is NOT a user preference
+4. NEVER extract what the AI said, thought, or observed - only USER information
+5. Look for user confirmation patterns: "yes", "I like", "I prefer", "that's right", agreement
+6. Look for user rejection patterns: "maybe too", "not sure", "but", uncertainty, pushback
+</critical_rules>
 
-Output format (one fact per line):
-FACT: [fact statement]
+<what_to_extract>
+- User's stated preferences, likes, and dislikes
+- Biographical information (name, age, location, job, relationships)
+- Technical choices and tools the user uses
+- Habits and routines the user mentioned
+- Projects or goals the user is working on
+- References to media, people, or things the user knows
+</what_to_extract>
+
+<what_to_ignore>
+- Anything the AI said or suggested (unless user confirmed it)
+- AI's observations, reactions, or opinions
+- Hypotheticals and "what ifs"
+- Emotional reactions and conversational filler
+- Preferences still being explored or debated
+</what_to_ignore>
+
+<output_format>
+For each fact, output exactly this format:
+FACT: [third-person assertion about the user]
 IMPORTANCE: [HIGH/MEDIUM/LOW]
 TYPE: [fact/preference]
 
-Example output:
-FACT: Brian is 45 years old
+If no concrete facts about the user are present, output only: NONE
+</output_format>
+
+<examples>
+Example 1 - Correct extraction:
+Conversation: "User: I'm 32 and work as a data scientist"
+FACT: The user is 32 years old
+IMPORTANCE: MEDIUM
+TYPE: fact
+FACT: The user works as a data scientist
 IMPORTANCE: MEDIUM
 TYPE: fact
 
-FACT: Brian prefers human-scale urban design over car-centric sprawl
-IMPORTANCE: HIGH
-TYPE: preference
+Example 2 - Attribution error to avoid:
+Conversation: "AI: Maybe try a minimalist design? User: Hmm, that might be too plain"
+WRONG: "The user prefers minimalist design" (AI suggested it, user pushed back)
+CORRECT: Output NONE or note the user finds minimalist design too plain
 
-FACT: Brian bikes everywhere and doesn't own a car
-IMPORTANCE: HIGH
+Example 3 - User confirmation:
+Conversation: "AI: So you prefer TypeScript? User: Yes, definitely over JavaScript"
+FACT: The user prefers TypeScript over JavaScript
+IMPORTANCE: MEDIUM
 TYPE: preference
+</examples>
 
-Conversation:
+<conversation>
 {conversation}
+</conversation>
 
-Extract the facts (output NONE if no concrete facts are present):"""
+Extract facts about the USER (output NONE if no concrete facts are present):"""
 
 
 # =============================================================================
@@ -1244,7 +1278,7 @@ class MemoryExtractor:
 
         fact_response = router.generate(
             prompt=fact_prompt,
-            task_type=TaskType.EXTRACTION,
+            task_type=TaskType.FACT_EXTRACTION,  # Routes to API for higher accuracy
             temperature=0.2,  # Low for consistent extraction
             max_tokens=1024   # Allow multiple facts
         )
