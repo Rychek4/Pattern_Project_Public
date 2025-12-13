@@ -1282,14 +1282,14 @@ class ChatWindow(QMainWindow):
                 timestamp = self._get_timestamp()
                 self.signals.new_message.emit("assistant", final_text, timestamp)
             else:
-                self.signals.update_status.emit(f"Error: {response.error}")
+                self.signals.update_status.emit(f"Error: {response.error}", StatusManager.STATUS_ERROR)
 
         except Exception as e:
             error_msg = f"Message processing error: {str(e)}"
             tb = traceback.format_exc()
             log_error(f"Exception in _process_message: {error_msg}")
             log_error(f"Traceback:\n{tb}")
-            self.signals.update_status.emit(f"Error: {str(e)}")
+            self.signals.update_status.emit(f"Error: {str(e)}", StatusManager.STATUS_ERROR)
 
         finally:
             self.signals.response_complete.emit()
@@ -1367,9 +1367,9 @@ class ChatWindow(QMainWindow):
 
             # Show status
             if pass_num == 1:
-                self.signals.update_status.emit("Executing tools...")
+                self.signals.update_status.emit("Executing tools...", StatusManager.STATUS_TOOLS)
             else:
-                self.signals.update_status.emit(f"Executing tools (pass {pass_num})...")
+                self.signals.update_status.emit(f"Executing tools (pass {pass_num})...", StatusManager.STATUS_TOOLS)
 
             # Build continuation: add assistant message with raw content blocks
             current_history.append({
@@ -1479,9 +1479,9 @@ class ChatWindow(QMainWindow):
 
             # Show status for command execution
             if pass_num == 1:
-                self.signals.update_status.emit("Executing command...")
+                self.signals.update_status.emit("Executing command...", StatusManager.STATUS_TOOLS)
             else:
-                self.signals.update_status.emit(f"Executing command (pass {pass_num})...")
+                self.signals.update_status.emit(f"Executing command (pass {pass_num})...", StatusManager.STATUS_TOOLS)
 
             # Build continuation history with potential images from commands
             current_history.append({"role": "assistant", "content": current_text})
@@ -1585,7 +1585,7 @@ class ChatWindow(QMainWindow):
         import config
 
         self._is_processing = True
-        self.signals.update_status.emit("Processing Telegram message...")
+        self.signals.update_status.emit("Processing Telegram message...", StatusManager.STATUS_THINKING)
 
         try:
             # Pause timers during processing
@@ -1636,7 +1636,7 @@ class ChatWindow(QMainWindow):
             tools = get_tool_definitions()
 
             # Get response from LLM WITH tools enabled
-            self.signals.update_status.emit("Responding to Telegram...")
+            self.signals.update_status.emit("Responding to Telegram...", StatusManager.STATUS_THINKING)
             response = self._llm_router.chat(
                 messages=history,
                 system_prompt=assembled.full_system_prompt,
@@ -1695,7 +1695,7 @@ class ChatWindow(QMainWindow):
                     except Exception as e:
                         log_warning(f"Failed to send response to Telegram: {e}")
             else:
-                self.signals.update_status.emit(f"Error: {response.error}")
+                self.signals.update_status.emit(f"Error: {response.error}", StatusManager.STATUS_ERROR)
                 log_error(f"Telegram response error: {response.error}")
 
         except Exception as e:
@@ -1703,7 +1703,7 @@ class ChatWindow(QMainWindow):
             tb = traceback.format_exc()
             log_error(f"Exception in _process_telegram_message: {error_msg}")
             log_error(f"Traceback:\n{tb}")
-            self.signals.update_status.emit(f"Error: {str(e)}")
+            self.signals.update_status.emit(f"Error: {str(e)}", StatusManager.STATUS_ERROR)
 
         finally:
             self.signals.response_complete.emit()
@@ -1752,7 +1752,7 @@ class ChatWindow(QMainWindow):
                 self._telegram_listener.pause()
 
             # Update UI status
-            self.signals.update_status.emit("System pulse...")
+            self.signals.update_status.emit("System pulse...", StatusManager.STATUS_THINKING)
 
             # Show system message in chat
             timestamp = self._get_timestamp()
@@ -1842,7 +1842,7 @@ class ChatWindow(QMainWindow):
                 # Show error in CHAT (not just status bar) so it's visible
                 timestamp = self._get_timestamp()
                 self.signals.new_message.emit("system", f"[Pulse Error: {response.error}]", timestamp)
-                self.signals.update_status.emit(error_msg)
+                self.signals.update_status.emit(error_msg, StatusManager.STATUS_ERROR)
 
         except Exception as e:
             error_msg = f"Pulse exception: {str(e)}"
@@ -1853,7 +1853,7 @@ class ChatWindow(QMainWindow):
             # Show error in CHAT (not just status bar) so it's visible
             timestamp = self._get_timestamp()
             self.signals.new_message.emit("system", f"[Pulse Exception: {str(e)}]", timestamp)
-            self.signals.update_status.emit(error_msg)
+            self.signals.update_status.emit(error_msg, StatusManager.STATUS_ERROR)
 
         finally:
             log_info("=== PULSE: _process_pulse() completing ===", prefix="⏱️")
@@ -1904,7 +1904,7 @@ class ChatWindow(QMainWindow):
                 self._telegram_listener.pause()
 
             # Update UI status
-            self.signals.update_status.emit("Reminder triggered...")
+            self.signals.update_status.emit("Reminder triggered...", StatusManager.STATUS_THINKING)
 
             # Show system message in chat
             timestamp = self._get_timestamp()
@@ -1984,7 +1984,7 @@ class ChatWindow(QMainWindow):
                 log_error(f"REMINDER: API call failed - {error_msg}")
                 timestamp = self._get_timestamp()
                 self.signals.new_message.emit("system", f"[Reminder Pulse Error: {response.error}]", timestamp)
-                self.signals.update_status.emit(error_msg)
+                self.signals.update_status.emit(error_msg, StatusManager.STATUS_ERROR)
 
         except Exception as e:
             error_msg = f"Reminder pulse exception: {str(e)}"
@@ -1993,7 +1993,7 @@ class ChatWindow(QMainWindow):
             log_error(f"REMINDER: Traceback:\n{tb}")
             timestamp = self._get_timestamp()
             self.signals.new_message.emit("system", f"[Reminder Pulse Exception: {str(e)}]", timestamp)
-            self.signals.update_status.emit(error_msg)
+            self.signals.update_status.emit(error_msg, StatusManager.STATUS_ERROR)
 
         finally:
             log_info("=== REMINDER: _process_reminder_pulse() completing ===", prefix="⏰")
