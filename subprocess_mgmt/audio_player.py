@@ -75,6 +75,9 @@ def start_audio_player() -> bool:
 def stop_audio_player() -> bool:
     """Stop the audio player subprocess."""
     manager = get_subprocess_manager()
+    # Only attempt to stop if the process is registered
+    if manager.get_status("audio_player") is None:
+        return True  # Nothing to stop
     return manager.stop("audio_player")
 
 
