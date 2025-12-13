@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, List, Callable, TYPE_CHECKING
 
 from core.logger import log_info, log_warning, log_error
+import config
 
 if TYPE_CHECKING:
     from agency.visual_capture import ImageContent
