@@ -148,7 +148,7 @@ class CuriosityAnalyzer:
                 ORDER BY importance DESC, created_at DESC
                 LIMIT ?
                 """,
-                (min_importance, dormant_threshold.isoformat(), min_age_threshold.isoformat(), limit * 2),
+                (min_importance, dormant_threshold.strftime('%Y-%m-%d %H:%M:%S'), min_age_threshold.strftime('%Y-%m-%d %H:%M:%S'), limit * 2),
                 fetch=True
             )
 
@@ -260,7 +260,7 @@ class CuriosityAnalyzer:
                 ORDER BY importance DESC, created_at DESC
                 LIMIT ?
                 """,
-                (min_importance, threshold_date.isoformat(), limit * 2),
+                (min_importance, threshold_date.strftime('%Y-%m-%d %H:%M:%S'), limit * 2),
                 fetch=True
             )
 
