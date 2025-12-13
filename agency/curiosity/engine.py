@@ -128,7 +128,13 @@ class CuriosityEngine:
             return
 
         try:
-            from interface.dev_window import emit_curiosity_update
+            from interface.dev_window import emit_curiosity_update, get_dev_window
+
+            # Check if dev window is initialized
+            dev_window = get_dev_window()
+            if not dev_window:
+                log_info(f"Curiosity emit skipped: dev window not initialized (event={event})", prefix="🔍")
+                return
 
             # Build goal dict
             goal_dict = {
@@ -161,5 +167,6 @@ class CuriosityEngine:
                 cooldowns=cooldown_dicts,
                 event=event
             )
+            log_info(f"Curiosity DEV update emitted: event={event}, goal_id={goal.id}", prefix="🔍")
         except Exception as e:
             log_info(f"Failed to emit dev curiosity update: {e}", prefix="🔍")

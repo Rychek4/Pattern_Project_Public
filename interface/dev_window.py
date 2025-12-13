@@ -740,6 +740,9 @@ class DevWindow(QMainWindow):
             "initial": COLORS["info"],
             "activated": COLORS["success"],
             "resolved": COLORS["warning"],
+            "context_inject": COLORS["purple"],  # Normal conversation context
+            "pulse_inject": COLORS["accent"],    # Pulse/idle trigger
+            "interaction": COLORS["info"],       # Progress recorded
         }
         event_color = event_colors.get(data.event, COLORS["text_dim"])
 
@@ -882,14 +885,24 @@ def load_initial_active_thoughts():
 
 def load_initial_curiosity():
     """Load current curiosity state into the dev window on startup."""
-    if not _dev_window or not config.DEV_MODE_ENABLED:
+    from core.logger import log_info, log_error
+
+    if not _dev_window:
+        log_info("Curiosity initial load skipped: dev window not initialized", prefix="🔍")
+        return
+
+    if not config.DEV_MODE_ENABLED:
+        log_info("Curiosity initial load skipped: DEV_MODE not enabled", prefix="🔍")
         return
 
     try:
         from agency.curiosity import is_curiosity_enabled, get_curiosity_engine
 
         if not is_curiosity_enabled():
+            log_info("Curiosity initial load skipped: curiosity system disabled", prefix="🔍")
             return
+
+        log_info("Loading initial curiosity state for DEV window...", prefix="🔍")
 
         engine = get_curiosity_engine()
         goal = engine.get_current_goal()
@@ -903,6 +916,8 @@ def load_initial_curiosity():
             "context": goal.context,
             "activated_at": goal.activated_at.isoformat() if goal.activated_at else ""
         }
+
+        log_info(f"Initial curiosity goal [{goal.id}]: {goal.content[:50]}...", prefix="🔍")
 
         # Convert history to list of dicts
         history_dicts = []
@@ -923,9 +938,10 @@ def load_initial_curiosity():
             event="initial"
         )
         _dev_window.signals.curiosity_updated.emit(data)
-    except Exception:
-        # Don't fail dev window initialization if this fails
-        pass
+        log_info("Curiosity initial load emitted to DEV window", prefix="🔍")
+    except Exception as e:
+        # Log the error instead of silently swallowing it
+        log_error(f"Failed to load initial curiosity state: {e}", prefix="🔍")
 
 
 def emit_prompt_assembly(context_blocks: List[Dict[str, Any]], total_tokens: int = 0):
@@ -1025,12 +1041,20 @@ def emit_curiosity_update(
     event: str = "updated"
 ):
     """Emit curiosity update to dev window if active."""
-    if _dev_window and config.DEV_MODE_ENABLED:
-        data = CuriosityData(
-            current_goal=current_goal,
-            history=history or [],
-            cooldowns=cooldowns or [],
-            timestamp=datetime.now().strftime("%H:%M:%S.%f")[:-3],
-            event=event
-        )
-        _dev_window.signals.curiosity_updated.emit(data)
+    from core.logger import log_info
+
+    if not config.DEV_MODE_ENABLED:
+        return
+
+    if not _dev_window:
+        log_info(f"emit_curiosity_update called but dev window not initialized (event={event})", prefix="🔍")
+        return
+
+    data = CuriosityData(
+        current_goal=current_goal,
+        history=history or [],
+        cooldowns=cooldowns or [],
+        timestamp=datetime.now().strftime("%H:%M:%S.%f")[:-3],
+        event=event
+    )
+    _dev_window.signals.curiosity_updated.emit(data)
