@@ -107,6 +107,13 @@ class CuriosityAnalyzer:
         """
         Get candidates from dormant (old, unaccessed) memories.
 
+        A memory is considered dormant if:
+        - It hasn't been accessed in CURIOSITY_DORMANT_DAYS, OR
+        - It was created at least 2 days ago and has never been accessed
+
+        This allows recently created memories to become candidates
+        once they're no longer "fresh" (>48h old).
+
         Args:
             excluded_memory_ids: Memory IDs to exclude (in cooldown)
             limit: Maximum candidates to return
@@ -117,13 +124,16 @@ class CuriosityAnalyzer:
         dormant_days = getattr(config, 'CURIOSITY_DORMANT_DAYS', 7)
         min_importance = getattr(config, 'CURIOSITY_MIN_IMPORTANCE', 0.4)
 
-        # Calculate the dormancy threshold date
-        threshold_date = datetime.now() - timedelta(days=dormant_days)
+        # Calculate the dormancy threshold for last_accessed
+        access_threshold = datetime.now() - timedelta(days=dormant_days)
+        # Memories older than 2 days are eligible (closes gap with fresh candidates)
+        age_threshold = datetime.now() - timedelta(days=2)
 
         with self._lock_manager.acquire("database"):
             db = get_database()
 
             # Query for dormant, important memories
+            # Eligible if: not accessed in N days, OR created >2 days ago and never accessed
             result = db.execute(
                 """
                 SELECT
@@ -138,14 +148,13 @@ class CuriosityAnalyzer:
                 FROM memories
                 WHERE importance >= ?
                 AND (
-                    last_accessed_at IS NULL
-                    OR last_accessed_at < ?
+                    (last_accessed_at IS NOT NULL AND last_accessed_at < ?)
+                    OR (last_accessed_at IS NULL AND created_at < ?)
                 )
-                AND created_at < ?
                 ORDER BY importance DESC, created_at DESC
                 LIMIT ?
                 """,
-                (min_importance, threshold_date.isoformat(), threshold_date.isoformat(), limit * 2),
+                (min_importance, access_threshold.isoformat(), age_threshold.isoformat(), limit * 2),
                 fetch=True
             )
 
@@ -352,7 +361,8 @@ class CuriosityAnalyzer:
             fresh_hours = getattr(config, 'CURIOSITY_FRESH_HOURS', 48)
             fresh_min_importance = getattr(config, 'CURIOSITY_FRESH_MIN_IMPORTANCE', 0.7)
 
-            threshold_date = datetime.now() - timedelta(days=dormant_days)
+            access_threshold = datetime.now() - timedelta(days=dormant_days)
+            age_threshold = datetime.now() - timedelta(days=2)
             fresh_threshold = datetime.now() - timedelta(hours=fresh_hours)
 
             with self._lock_manager.acquire("database"):
@@ -370,13 +380,20 @@ class CuriosityAnalyzer:
                 )
                 important_count = important[0]["cnt"] if important else 0
 
-                # Memories old enough for dormant
-                old_enough = db.execute(
-                    "SELECT COUNT(*) as cnt FROM memories WHERE created_at < ?",
-                    (threshold_date.isoformat(),),
+                # Dormant eligible: not accessed in N days OR never accessed and >2 days old
+                dormant_eligible = db.execute(
+                    """
+                    SELECT COUNT(*) as cnt FROM memories
+                    WHERE importance >= ?
+                    AND (
+                        (last_accessed_at IS NOT NULL AND last_accessed_at < ?)
+                        OR (last_accessed_at IS NULL AND created_at < ?)
+                    )
+                    """,
+                    (min_importance, access_threshold.isoformat(), age_threshold.isoformat()),
                     fetch=True
                 )
-                old_count = old_enough[0]["cnt"] if old_enough else 0
+                dormant_count = dormant_eligible[0]["cnt"] if dormant_eligible else 0
 
                 # Fresh high-importance memories
                 fresh = db.execute(
@@ -390,7 +407,7 @@ class CuriosityAnalyzer:
                     f"Curiosity fallback triggered - Memory stats: "
                     f"total={total_count}, "
                     f"importance>={min_importance}: {important_count}, "
-                    f"older than {dormant_days}d: {old_count}, "
+                    f"dormant eligible: {dormant_count}, "
                     f"fresh (importance>={fresh_min_importance}, <{fresh_hours}h): {fresh_count}",
                     prefix="🔍"
                 )
