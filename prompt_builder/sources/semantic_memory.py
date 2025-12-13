@@ -9,12 +9,25 @@ Dual-Track Retrieval:
 
     Retrieval queries both categories separately to ensure balanced results.
     The prompt formatting uses Option B: separated sections for clarity.
+
+Warmth Cache System:
+    The WarmthCache provides session-scoped memory boosting for conversational
+    continuity. It tracks two types of "warmth":
+
+    1. Retrieval Warmth: Memories retrieved in recent turns stay accessible
+       even if the next query doesn't directly reference them.
+
+    2. Topic Warmth: Memories semantically related to retrieved memories are
+       pre-warmed for predictive loading via same-session clustering.
+
+    Both decay each turn, creating a natural conversational memory window.
 """
 
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Set
+from dataclasses import dataclass, field
 
 from prompt_builder.sources.base import ContextSource, ContextBlock, SourcePriority
-from memory.vector_store import get_vector_store, MemorySearchResult
+from memory.vector_store import get_vector_store, MemorySearchResult, Memory
 from core.temporal import format_fuzzy_relative_time
 from config import (
     MEMORY_MAX_PER_QUERY,
@@ -22,9 +35,191 @@ from config import (
     MEMORY_MAX_FACTUAL_PER_QUERY,
     MEMORY_RELEVANCE_FLOOR,
     MEMORY_DEDUP_ENABLED,
-    MEMORY_DEDUP_THRESHOLD
+    MEMORY_DEDUP_THRESHOLD,
+    MEMORY_OVERFETCH_MULTIPLIER,
+    WARMTH_RETRIEVAL_INITIAL,
+    WARMTH_RETRIEVAL_DECAY,
+    WARMTH_TOPIC_INITIAL,
+    WARMTH_TOPIC_DECAY,
+    WARMTH_CAP,
+    WARMTH_TOPIC_SIMILARITY_THRESHOLD,
+    WARMTH_TOPIC_MAX_EXPANSION
 )
-from core.embeddings import cosine_similarity
+from core.embeddings import cosine_similarity, cosine_similarity_batch
+import numpy as np
+
+
+@dataclass
+class WarmthEntry:
+    """A single entry in the warmth cache."""
+    retrieval_warmth: float = 0.0
+    topic_warmth: float = 0.0
+
+    @property
+    def combined(self) -> float:
+        """Get combined warmth, capped at WARMTH_CAP."""
+        return min(WARMTH_CAP, self.retrieval_warmth + self.topic_warmth)
+
+
+class WarmthCache:
+    """
+    Session-scoped cache for memory warmth scoring.
+
+    Tracks two types of warmth:
+    - Retrieval Warmth: Memories directly retrieved in recent turns
+    - Topic Warmth: Memories associated with retrieved memories
+
+    Both decay each turn, creating a natural conversational memory window.
+    """
+
+    def __init__(self):
+        """Initialize an empty warmth cache."""
+        self._cache: Dict[int, WarmthEntry] = {}
+        self._last_retrieved_ids: Set[int] = set()
+
+    def decay_all(self) -> None:
+        """
+        Decay all warmth scores. Called at the start of each retrieval.
+
+        Retrieval warmth decays by WARMTH_RETRIEVAL_DECAY (0.6).
+        Topic warmth decays by WARMTH_TOPIC_DECAY (0.5).
+
+        Entries with negligible warmth (<0.01) are removed.
+        """
+        to_remove = []
+
+        for memory_id, entry in self._cache.items():
+            entry.retrieval_warmth *= WARMTH_RETRIEVAL_DECAY
+            entry.topic_warmth *= WARMTH_TOPIC_DECAY
+
+            # Remove negligible entries to prevent unbounded growth
+            if entry.combined < 0.01:
+                to_remove.append(memory_id)
+
+        for memory_id in to_remove:
+            del self._cache[memory_id]
+
+    def get_warmth(self, memory_id: int) -> float:
+        """Get combined warmth for a memory (0.0 if not cached)."""
+        entry = self._cache.get(memory_id)
+        return entry.combined if entry else 0.0
+
+    def get_entry(self, memory_id: int) -> Optional[WarmthEntry]:
+        """Get the warmth entry for a memory (None if not cached)."""
+        return self._cache.get(memory_id)
+
+    def set_retrieval_warmth(self, memory_ids: List[int]) -> None:
+        """
+        Set retrieval warmth for memories that were just retrieved.
+
+        Args:
+            memory_ids: IDs of memories that were retrieved and injected
+        """
+        self._last_retrieved_ids = set(memory_ids)
+
+        for memory_id in memory_ids:
+            if memory_id not in self._cache:
+                self._cache[memory_id] = WarmthEntry()
+            # Set (not add) to WARMTH_RETRIEVAL_INITIAL - no stacking
+            self._cache[memory_id].retrieval_warmth = WARMTH_RETRIEVAL_INITIAL
+
+    def expand_topic_warmth(
+        self,
+        retrieved_memories: List[Memory],
+        vector_store
+    ) -> int:
+        """
+        Expand topic warmth to memories associated with retrieved ones.
+
+        Association rules:
+        1. Same source_session_id as a retrieved memory
+        2. Embedding similarity > WARMTH_TOPIC_SIMILARITY_THRESHOLD
+
+        Args:
+            retrieved_memories: Memories that were just retrieved
+            vector_store: VectorStore instance for loading related memories
+
+        Returns:
+            Number of memories that were topic-warmed
+        """
+        if not retrieved_memories:
+            return 0
+
+        # Collect session IDs from retrieved memories
+        session_ids = set()
+        retrieved_ids = set()
+        for mem in retrieved_memories:
+            retrieved_ids.add(mem.id)
+            if mem.source_session_id:
+                session_ids.add(mem.source_session_id)
+
+        if not session_ids:
+            return 0
+
+        # Load all memories from those sessions
+        candidate_memories: List[Memory] = []
+        for session_id in session_ids:
+            session_memories = vector_store.get_memories_by_session(session_id)
+            for mem in session_memories:
+                # Skip already-retrieved memories
+                if mem.id not in retrieved_ids:
+                    candidate_memories.append(mem)
+
+        if not candidate_memories:
+            return 0
+
+        # Build embedding matrices for batch similarity computation
+        retrieved_embeddings = np.array([m.embedding for m in retrieved_memories])
+        candidate_embeddings = np.array([m.embedding for m in candidate_memories])
+
+        # For each candidate, find max similarity to any retrieved memory
+        warmed_count = 0
+        for i, candidate in enumerate(candidate_memories):
+            if warmed_count >= WARMTH_TOPIC_MAX_EXPANSION:
+                break
+
+            # Compute similarity to all retrieved memories
+            similarities = cosine_similarity_batch(
+                candidate_embeddings[i],
+                retrieved_embeddings
+            )
+            max_similarity = float(np.max(similarities))
+
+            # If similar enough, add topic warmth
+            if max_similarity >= WARMTH_TOPIC_SIMILARITY_THRESHOLD:
+                if candidate.id not in self._cache:
+                    self._cache[candidate.id] = WarmthEntry()
+                # Set (not add) to WARMTH_TOPIC_INITIAL
+                self._cache[candidate.id].topic_warmth = WARMTH_TOPIC_INITIAL
+                warmed_count += 1
+
+        return warmed_count
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Get statistics about the warmth cache for debugging."""
+        if not self._cache:
+            return {
+                "total_entries": 0,
+                "retrieval_warm": 0,
+                "topic_warm": 0,
+                "avg_combined": 0.0
+            }
+
+        retrieval_warm = sum(1 for e in self._cache.values() if e.retrieval_warmth > 0.01)
+        topic_warm = sum(1 for e in self._cache.values() if e.topic_warmth > 0.01)
+        avg_combined = sum(e.combined for e in self._cache.values()) / len(self._cache)
+
+        return {
+            "total_entries": len(self._cache),
+            "retrieval_warm": retrieval_warm,
+            "topic_warm": topic_warm,
+            "avg_combined": round(avg_combined, 3)
+        }
+
+    def clear(self) -> None:
+        """Clear all warmth data (e.g., on session end)."""
+        self._cache.clear()
+        self._last_retrieved_ids.clear()
 
 
 class SemanticMemorySource(ContextSource):
@@ -37,6 +232,10 @@ class SemanticMemorySource(ContextSource):
 
     Both categories are queried separately with their own limits, then combined
     using Option B formatting (separated sections) for prompt clarity.
+
+    The WarmthCache system provides session-scoped boosting for conversational
+    continuity, keeping recently-discussed topics accessible and pre-warming
+    related memories for predictive loading.
     """
 
     def __init__(
@@ -67,6 +266,8 @@ class SemanticMemorySource(ContextSource):
         self.dedup_threshold = dedup_threshold
         # Legacy compatibility
         self.max_memories = MEMORY_MAX_PER_QUERY
+        # Warmth cache for session-scoped memory boosting
+        self._warmth_cache = WarmthCache()
 
     @property
     def source_name(self) -> str:
@@ -82,52 +283,99 @@ class SemanticMemorySource(ContextSource):
         session_context: Dict[str, Any]
     ) -> Optional[ContextBlock]:
         """
-        Search for relevant memories using dual-track retrieval.
+        Search for relevant memories using dual-track retrieval with warmth boosting.
 
-        Queries both episodic and factual categories separately to ensure
-        balanced representation, then formats using Option B (separated sections).
+        Pipeline:
+        1. Decay all warmth scores (per-turn decay)
+        2. Over-fetch memories (2.4x limit) from both categories
+        3. Apply warmth boosts to results
+        4. Re-rank by adjusted scores
+        5. Filter by min_score on BASE score (warmth doesn't make irrelevant memories relevant)
+        6. Deduplicate
+        7. Take top N per category
+        8. Update retrieval warmth for returned memories
+        9. Expand topic warmth to associated memories
         """
         import config
         vector_store = get_vector_store()
 
-        # Dual-track retrieval: query each category separately
+        # Step 1: Decay warmth from previous turn
+        self._warmth_cache.decay_all()
+
+        # Calculate over-fetch limits
+        overfetch_episodic = int(self.max_episodic * MEMORY_OVERFETCH_MULTIPLIER)
+        overfetch_factual = int(self.max_factual * MEMORY_OVERFETCH_MULTIPLIER)
+
+        # Step 2: Over-fetch from both categories
         episodic_results = vector_store.search(
             query=user_input,
-            limit=self.max_episodic,
+            limit=overfetch_episodic,
             memory_category="episodic",
             min_score=self.min_score
         )
 
         factual_results = vector_store.search(
             query=user_input,
-            limit=self.max_factual,
+            limit=overfetch_factual,
             memory_category="factual",
             min_score=self.min_score
         )
 
+        # Step 3 & 4: Apply warmth boosts and prepare for re-ranking
+        episodic_with_warmth = self._apply_warmth_and_rerank(episodic_results)
+        factual_with_warmth = self._apply_warmth_and_rerank(factual_results)
+
+        # Step 5: Filter by min_score on BASE score (already done by vector_store)
+        # The warmth boost doesn't lower the floor for relevance
+
+        # Step 6 & 7: Deduplicate and take top N per category
+        if self.dedup_enabled:
+            episodic_with_warmth = self._deduplicate_results(
+                [r for r, _, _ in episodic_with_warmth]
+            )
+            factual_with_warmth = self._deduplicate_results(
+                [r for r, _, _ in factual_with_warmth]
+            )
+            # Convert back to tuples with warmth info
+            episodic_with_warmth = [
+                (r, self._warmth_cache.get_warmth(r.memory.id),
+                 self._warmth_cache.get_entry(r.memory.id))
+                for r in episodic_with_warmth
+            ]
+            factual_with_warmth = [
+                (r, self._warmth_cache.get_warmth(r.memory.id),
+                 self._warmth_cache.get_entry(r.memory.id))
+                for r in factual_with_warmth
+            ]
+
+        # Take top N after warmth-based re-ranking
+        episodic_final = episodic_with_warmth[:self.max_episodic]
+        factual_final = factual_with_warmth[:self.max_factual]
+
+        # Extract just the results for formatting
+        episodic_results = [r for r, _, _ in episodic_final]
+        factual_results = [r for r, _, _ in factual_final]
         all_results = episodic_results + factual_results
 
-        # Deduplicate near-identical memories to prevent redundant context
-        # This handles cases where the same fact was extracted from multiple conversations
-        if self.dedup_enabled and all_results:
-            original_count = len(all_results)
-            all_results = self._deduplicate_results(all_results)
-            # Also deduplicate the separate lists for proper formatting
-            episodic_results = [r for r in all_results if r.memory.memory_category == "episodic"]
-            factual_results = [r for r in all_results if r.memory.memory_category == "factual"]
-            if len(all_results) < original_count:
-                from core.logger import log_info
-                log_info(
-                    f"Deduplicated {original_count} → {len(all_results)} memories "
-                    f"(threshold: {self.dedup_threshold})",
-                    prefix="🔄"
-                )
+        # Step 8: Update retrieval warmth for returned memories
+        returned_ids = [r.memory.id for r in all_results]
+        self._warmth_cache.set_retrieval_warmth(returned_ids)
 
-        # Emit memory recall to dev window
+        # Step 9: Expand topic warmth to associated memories
+        returned_memories = [r.memory for r in all_results]
+        topic_warmed_count = self._warmth_cache.expand_topic_warmth(
+            returned_memories,
+            vector_store
+        )
+
+        # Emit memory recall to dev window with warmth info
         if config.DEV_MODE_ENABLED and all_results:
             from interface.dev_window import emit_memory_recall
-            recall_data = [
-                {
+            warmth_stats = self._warmth_cache.get_stats()
+            recall_data = []
+            for r in all_results:
+                entry = self._warmth_cache.get_entry(r.memory.id)
+                recall_data.append({
                     "content": r.memory.content,
                     "score": r.combined_score,
                     "semantic_score": r.semantic_score,
@@ -135,10 +383,17 @@ class SemanticMemorySource(ContextSource):
                     "freshness_score": r.freshness_score,
                     "memory_type": r.memory.memory_type,
                     "memory_category": r.memory.memory_category,
-                    "importance": r.memory.importance
-                }
-                for r in all_results
-            ]
+                    "importance": r.memory.importance,
+                    # Warmth info
+                    "warmth_boost": self._warmth_cache.get_warmth(r.memory.id),
+                    "retrieval_warmth": entry.retrieval_warmth if entry else 0.0,
+                    "topic_warmth": entry.topic_warmth if entry else 0.0,
+                    "adjusted_score": r.combined_score + self._warmth_cache.get_warmth(r.memory.id)
+                })
+            # Add warmth stats to the first entry for display
+            if recall_data:
+                recall_data[0]["_warmth_stats"] = warmth_stats
+                recall_data[0]["_topic_warmed_count"] = topic_warmed_count
             emit_memory_recall(user_input, recall_data)
 
         if not all_results:
@@ -189,9 +444,37 @@ class SemanticMemorySource(ContextSource):
                 "episodic_count": len(episodic_results),
                 "factual_count": len(factual_results),
                 "promotion_candidates": len(promotion_candidates),
-                "top_score": max((r.combined_score for r in all_results), default=0)
+                "top_score": max((r.combined_score for r in all_results), default=0),
+                "warmth_cache_size": self._warmth_cache.get_stats()["total_entries"],
+                "topic_warmed_count": topic_warmed_count
             }
         )
+
+    def _apply_warmth_and_rerank(
+        self,
+        results: List[MemorySearchResult]
+    ) -> List[tuple]:
+        """
+        Apply warmth boosts to results and re-rank by adjusted score.
+
+        Args:
+            results: Original search results from vector store
+
+        Returns:
+            List of (result, warmth_boost, warmth_entry) tuples sorted by adjusted score
+        """
+        results_with_warmth = []
+        for result in results:
+            warmth = self._warmth_cache.get_warmth(result.memory.id)
+            entry = self._warmth_cache.get_entry(result.memory.id)
+            adjusted_score = result.combined_score + warmth
+            results_with_warmth.append((result, warmth, entry, adjusted_score))
+
+        # Sort by adjusted score (descending)
+        results_with_warmth.sort(key=lambda x: x[3], reverse=True)
+
+        # Return without the adjusted_score (it was just for sorting)
+        return [(r, w, e) for r, w, e, _ in results_with_warmth]
 
     def search(
         self,
@@ -286,6 +569,14 @@ class SemanticMemorySource(ContextSource):
             return "medium"
         else:
             return "low"
+
+    def get_warmth_stats(self) -> Dict[str, Any]:
+        """Get current warmth cache statistics for debugging."""
+        return self._warmth_cache.get_stats()
+
+    def clear_warmth_cache(self) -> None:
+        """Clear the warmth cache (e.g., on session end)."""
+        self._warmth_cache.clear()
 
 
 # Global instance
