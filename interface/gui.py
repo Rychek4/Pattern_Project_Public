@@ -970,14 +970,24 @@ class ChatWindow(QMainWindow):
             from core.user_settings import is_tts_enabled, get_tts_voice_id
 
             if not is_tts_enabled():
+                log_info("TTS skipped - not enabled", prefix="🔊")
                 return
+
+            # Truncate text for logging
+            preview = text[:50] + "..." if len(text) > 50 else text
+            log_info(f"TTS triggered for: {preview}", prefix="🔊")
 
             # Run TTS in background thread to not block UI
             def play_tts_async():
                 try:
                     from subprocess_mgmt.audio_player import play_tts
                     voice_id = get_tts_voice_id()
-                    play_tts(text, voice_id)
+                    log_info(f"TTS sending to audio player (voice: {voice_id})", prefix="🔊")
+                    result = play_tts(text, voice_id)
+                    if result:
+                        log_info("TTS request accepted by audio player", prefix="🔊")
+                    else:
+                        log_warning("TTS request rejected by audio player")
                 except Exception as e:
                     log_warning(f"TTS playback error: {e}")
 

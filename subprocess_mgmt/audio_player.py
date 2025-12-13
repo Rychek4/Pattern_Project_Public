@@ -94,22 +94,30 @@ def play_tts(text: str, voice_id: Optional[str] = None) -> bool:
     port = config.ELEVENLABS_AUDIO_PORT
     url = f"http://127.0.0.1:{port}/play_audio"
 
+    effective_voice_id = voice_id or config.ELEVENLABS_DEFAULT_VOICE_ID
     payload = {
         "text": text,
-        "voice_id": voice_id or config.ELEVENLABS_DEFAULT_VOICE_ID,
+        "voice_id": effective_voice_id,
         "model": config.ELEVENLABS_MODEL
     }
 
+    text_preview = text[:50] + "..." if len(text) > 50 else text
+    log_info(f"TTS client: sending to {url}", prefix="🔊")
+    log_info(f"TTS client: text='{text_preview}', voice={effective_voice_id}", prefix="🔊")
+
     try:
         response = requests.post(url, json=payload, timeout=5)
+        log_info(f"TTS client: got response {response.status_code}", prefix="🔊")
         if response.status_code == 200:
+            response_data = response.json()
+            log_info(f"TTS client: success - {response_data}", prefix="🔊")
             return True
         else:
-            log_warning(f"TTS request failed: {response.text}")
+            log_warning(f"TTS client: request failed ({response.status_code}): {response.text}")
             return False
-    except requests.exceptions.ConnectionError:
-        log_warning("TTS audio player not running")
+    except requests.exceptions.ConnectionError as e:
+        log_warning(f"TTS client: audio player not running - {e}")
         return False
     except Exception as e:
-        log_warning(f"TTS request error: {e}")
+        log_warning(f"TTS client: request error - {e}")
         return False
