@@ -45,7 +45,7 @@ class ConversationManager:
         content: str,
         input_type: str = "text",
         session_id: Optional[int] = None
-    ) -> int:
+    ) -> Optional[int]:
         """
         Add a conversation turn.
 
@@ -59,8 +59,19 @@ class ConversationManager:
             session_id: Session ID (uses current if None)
 
         Returns:
-            The new turn's ID
+            The new turn's ID, or None if the turn was skipped (e.g., empty assistant message)
         """
+        # Validate content - reject empty assistant messages
+        # Empty assistant messages cause API errors: "messages must have non-empty content"
+        # This can happen when AI responds with only tool calls and no text
+        if role == "assistant" and (content is None or content.strip() == ""):
+            from core.logger import log_warning
+            log_warning(
+                "Skipping empty assistant message - would cause API errors in future calls",
+                prefix="⚠️"
+            )
+            return None
+
         with self._lock_manager.acquire("conversation"):
             db = get_database()
             tracker = get_temporal_tracker()
@@ -171,18 +182,21 @@ class ConversationManager:
         """
         Get recent conversation history formatted for LLM context.
 
+        Filters out empty messages to prevent API errors. The Anthropic API
+        rejects requests where non-final messages have empty content.
+
         Args:
             limit: Maximum turns to return
             session_id: Session ID (uses current if None)
 
         Returns:
-            List of {"role": ..., "content": ...} dicts
+            List of {"role": ..., "content": ...} dicts with non-empty content
         """
         turns = self.get_session_history(session_id=session_id, limit=limit)
         return [
             {"role": turn.role, "content": turn.content}
             for turn in turns
-            if turn.role in ("user", "assistant")
+            if turn.role in ("user", "assistant") and turn.content and turn.content.strip()
         ]
 
     @db_retry()
@@ -325,6 +339,50 @@ class ConversationManager:
                 }
 
             return {}
+
+    @db_retry()
+    def cleanup_empty_messages(self) -> int:
+        """
+        Remove empty assistant messages from the database.
+
+        Empty assistant messages can cause API errors when retrieved for context.
+        This method cleans up any historical empty messages that may have been
+        saved before validation was added.
+
+        Returns:
+            Number of messages deleted
+        """
+        from core.logger import log_info, log_warning
+
+        with self._lock_manager.acquire("conversation"):
+            db = get_database()
+
+            # First, count how many empty messages exist
+            count_result = db.execute(
+                """
+                SELECT COUNT(*) as count FROM conversations
+                WHERE role = 'assistant'
+                AND (content IS NULL OR TRIM(content) = '')
+                """,
+                fetch=True
+            )
+            count = count_result[0]["count"] if count_result else 0
+
+            if count == 0:
+                log_info("No empty assistant messages found", prefix="✅")
+                return 0
+
+            # Delete empty assistant messages
+            db.execute(
+                """
+                DELETE FROM conversations
+                WHERE role = 'assistant'
+                AND (content IS NULL OR TRIM(content) = '')
+                """
+            )
+
+            log_warning(f"Cleaned up {count} empty assistant message(s)", prefix="🧹")
+            return count
 
     def _row_to_turn(self, row) -> ConversationTurn:
         """Convert a database row to ConversationTurn."""
