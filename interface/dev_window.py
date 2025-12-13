@@ -264,7 +264,7 @@ class DevWindow(QMainWindow):
         layout = QVBoxLayout(tab)
 
         # Info label
-        info = QLabel("Shows memory recall queries and scores")
+        info = QLabel("Shows memory recall queries, scores, and warmth cache status")
         info.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 11px;")
         layout.addWidget(info)
 
@@ -561,7 +561,7 @@ class DevWindow(QMainWindow):
         return ''.join(lines)
 
     def _format_memory_recall(self, data: MemoryRecallData) -> str:
-        """Format memory recall data as HTML."""
+        """Format memory recall data as HTML with warmth cache information."""
         lines = [
             f'<div style="margin-bottom: 15px; padding: 10px; background-color: {COLORS["surface_alt"]}; border-radius: 5px;">',
             f'<div style="color: {COLORS["success"]}; font-weight: bold; margin-bottom: 8px;">'
@@ -573,6 +573,25 @@ class DevWindow(QMainWindow):
             f'{len(data.results)} result(s)</div>',
         ]
 
+        # Show warmth cache stats if available (attached to first result)
+        if data.results and data.results[0].get("_warmth_stats"):
+            stats = data.results[0]["_warmth_stats"]
+            topic_warmed = data.results[0].get("_topic_warmed_count", 0)
+            lines.append(
+                f'<div style="margin: 8px 0; padding: 8px; background-color: {COLORS["surface"]}; '
+                f'border-radius: 4px; border-left: 3px solid {COLORS["purple"]};">'
+                f'<div style="color: {COLORS["purple"]}; font-weight: bold; margin-bottom: 5px;">'
+                f'🔥 Warmth Cache</div>'
+                f'<div style="color: {COLORS["text_dim"]}; font-size: 11px;">'
+                f'Cache entries: {stats.get("total_entries", 0)} | '
+                f'Retrieval warm: {stats.get("retrieval_warm", 0)} | '
+                f'Topic warm: {stats.get("topic_warm", 0)} | '
+                f'Avg warmth: {stats.get("avg_combined", 0):.3f}</div>'
+                f'<div style="color: {COLORS["text_dim"]}; font-size: 11px;">'
+                f'Topic-warmed this turn: {topic_warmed}</div>'
+                f'</div>'
+            )
+
         for i, result in enumerate(data.results, 1):
             score = result.get("score", 0)
             semantic = result.get("semantic_score", 0)
@@ -581,16 +600,43 @@ class DevWindow(QMainWindow):
             content = result.get("content", "")[:150]
             content = content.replace("<", "&lt;").replace(">", "&gt;")
 
-            # Color code by score
-            score_color = COLORS["success"] if score > 0.7 else (
-                COLORS["warning"] if score > 0.4 else COLORS["text_dim"]
+            # Warmth information
+            warmth_boost = result.get("warmth_boost", 0)
+            retrieval_warmth = result.get("retrieval_warmth", 0)
+            topic_warmth = result.get("topic_warmth", 0)
+            adjusted_score = result.get("adjusted_score", score)
+
+            # Color code by adjusted score (includes warmth)
+            score_color = COLORS["success"] if adjusted_score > 0.7 else (
+                COLORS["warning"] if adjusted_score > 0.4 else COLORS["text_dim"]
             )
+
+            # Build score line with warmth indicator
+            score_display = f'#{i} Score: {score:.3f}'
+            if warmth_boost > 0.001:
+                score_display += f' <span style="color: {COLORS["purple"]};">(+{warmth_boost:.3f} warmth = {adjusted_score:.3f})</span>'
 
             lines.append(
                 f'<div style="margin: 8px 0; padding: 8px; border-left: 3px solid {score_color};">'
-                f'<div style="color: {score_color}; font-weight: bold;">#{i} Score: {score:.3f}</div>'
+                f'<div style="color: {score_color}; font-weight: bold;">{score_display}</div>'
                 f'<div style="color: {COLORS["text_dim"]}; font-size: 11px;">'
                 f'semantic: {semantic:.2f} | importance: {importance:.2f} | freshness: {freshness:.2f}</div>'
+            )
+
+            # Show warmth breakdown if there's any warmth
+            if warmth_boost > 0.001:
+                warmth_details = []
+                if retrieval_warmth > 0.001:
+                    warmth_details.append(f'retrieval: {retrieval_warmth:.3f}')
+                if topic_warmth > 0.001:
+                    warmth_details.append(f'topic: {topic_warmth:.3f}')
+                if warmth_details:
+                    lines.append(
+                        f'<div style="color: {COLORS["purple"]}; font-size: 11px;">'
+                        f'🔥 warmth: {" | ".join(warmth_details)}</div>'
+                    )
+
+            lines.append(
                 f'<div style="color: {COLORS["text"]}; margin-top: 5px; white-space: pre-wrap;">'
                 f'{content}{"..." if len(result.get("content", "")) > 150 else ""}</div>'
                 f'</div>'

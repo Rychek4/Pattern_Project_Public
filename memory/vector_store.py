@@ -88,10 +88,10 @@ class VectorStore:
         self,
         embedding_dimensions: int = 384,
         freshness_half_life_days: float = 30.0,
-        semantic_weight: float = 0.55,
+        semantic_weight: float = 0.65,
         importance_weight: float = 0.25,
-        freshness_weight: float = 0.12,
-        access_weight: float = 0.08
+        freshness_weight: float = 0.10,
+        access_weight: float = 0.00
     ):
         """
         Initialize the vector store.
@@ -102,7 +102,8 @@ class VectorStore:
             semantic_weight: Weight for semantic similarity (primary signal)
             importance_weight: Weight for memory importance score
             freshness_weight: Weight for freshness score (tie-breaker)
-            access_weight: Weight for access recency score (minimal bias)
+            access_weight: DEPRECATED - Set to 0.0, handled by Warmth Cache
+                          at application layer (see semantic_memory.py)
         """
         self.embedding_dimensions = embedding_dimensions
         self.freshness_half_life_days = freshness_half_life_days
@@ -276,7 +277,10 @@ class VectorStore:
                 # Access recency score
                 access_score = self._compute_access_score(memory, now)
 
-                # Combined score: semantic + importance + freshness + access
+                # Combined score: semantic + importance + freshness
+                # NOTE: access_weight is 0.0 (deprecated) - recency is now handled by
+                # the Warmth Cache system at the application layer. The access_score
+                # is still computed for backward compatibility in MemorySearchResult.
                 combined_score = (
                     self.semantic_weight * semantic_score +
                     self.importance_weight * importance_score +

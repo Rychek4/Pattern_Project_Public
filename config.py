@@ -134,10 +134,42 @@ MEMORY_IMPORTANCE_FLOOR = 0.3  # Don't store memories below this importance
 
 # Scoring weights for memory retrieval (must sum to 1.0)
 # Prioritizes semantic relevance and importance over recency
-MEMORY_SEMANTIC_WEIGHT = 0.55  # Semantic similarity to query (primary signal)
+# NOTE: Access weight is 0.0 - recency is now handled by the Warmth Cache system
+# at the application layer (see semantic_memory.py WarmthCache)
+MEMORY_SEMANTIC_WEIGHT = 0.65  # Semantic similarity to query (boosted - semantic is king)
 MEMORY_IMPORTANCE_WEIGHT = 0.25  # Memory importance score (value-aware retrieval)
-MEMORY_FRESHNESS_WEIGHT = 0.12  # Recency of memory source (tie-breaker)
-MEMORY_ACCESS_WEIGHT = 0.08  # How recently memory was recalled (minimal bias)
+MEMORY_FRESHNESS_WEIGHT = 0.10  # Recency of memory source (tie-breaker)
+MEMORY_ACCESS_WEIGHT = 0.00  # DEPRECATED: Handled by Warmth Cache at application layer
+
+# -----------------------------------------------------------------------------
+# Memory Warmth Cache System
+# -----------------------------------------------------------------------------
+# The Warmth Cache provides session-scoped memory boosting for conversational
+# continuity. It tracks two types of "warmth":
+#
+# 1. Retrieval Warmth: Memories that were retrieved and injected in recent turns
+#    - Ensures recently discussed topics stay accessible even if next query
+#      doesn't directly reference them
+#    - Example: Discussed "Clair Obscura awards", user asks "what studio made it?"
+#      The award memory stays warm even though "studio" doesn't match "awards"
+#
+# 2. Topic Warmth: Memories semantically related to retrieved memories
+#    - Pre-warms associated memories for predictive loading
+#    - Uses same-session clustering + embedding similarity
+#    - Example: Retrieve "won 11 awards" → pre-warm "developed by Sandfall"
+#
+# Both decay each turn, creating a natural conversational memory window.
+WARMTH_RETRIEVAL_INITIAL = 0.15     # Boost for directly retrieved memories
+WARMTH_RETRIEVAL_DECAY = 0.6        # Per-turn decay multiplier (4-turn lifespan)
+WARMTH_TOPIC_INITIAL = 0.10         # Boost for associated memories
+WARMTH_TOPIC_DECAY = 0.5            # Per-turn decay multiplier (3-turn lifespan)
+WARMTH_CAP = 0.20                   # Maximum combined warmth boost
+WARMTH_TOPIC_SIMILARITY_THRESHOLD = 0.5   # Min similarity for topic association
+WARMTH_TOPIC_MAX_EXPANSION = 20     # Cap on topic-warm memories per turn
+
+# Over-fetch multiplier for warmth-based re-ranking
+# We fetch more candidates than needed, apply warmth, re-rank, then take top N
+MEMORY_OVERFETCH_MULTIPLIER = 2.4
 
 # =============================================================================
 # DECAY CATEGORY CONFIGURATION
