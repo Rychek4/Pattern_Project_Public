@@ -153,8 +153,8 @@ class LLMRouter:
             return LLMProvider.ANTHROPIC
 
         if task_type == TaskType.SIMPLE:
-            # Use local for simple tasks (if available)
-            return LLMProvider.KOBOLD
+            # Use Anthropic for simple tasks (uses default Sonnet model)
+            return LLMProvider.ANTHROPIC
 
         # For conversation and analysis, use primary provider
         return self.primary_provider
@@ -218,7 +218,8 @@ class LLMRouter:
             temperature=temperature,
             enable_web_search=enable_web_search,
             web_search_max_uses=web_search_max_uses,
-            tools=tools
+            tools=tools,
+            task_type=task_type
         )
 
         # Record web search usage if any were used
@@ -244,7 +245,8 @@ class LLMRouter:
                 max_tokens=max_tokens,
                 temperature=temperature,
                 enable_web_search=False,  # No web search on fallback
-                web_search_max_uses=None
+                web_search_max_uses=None,
+                task_type=task_type
             )
         elif not response.success and task_type == TaskType.CONVERSATION:
             log_warning(f"{provider.value} failed for CONVERSATION task - not falling back to preserve quality")
@@ -302,12 +304,23 @@ class LLMRouter:
         temperature: float,
         enable_web_search: bool = False,
         web_search_max_uses: Optional[int] = None,
-        tools: Optional[List[Dict[str, Any]]] = None
+        tools: Optional[List[Dict[str, Any]]] = None,
+        task_type: TaskType = TaskType.CONVERSATION
     ) -> LLMResponse:
         """Send request to a specific provider."""
         try:
             if provider == LLMProvider.ANTHROPIC:
                 client = self._get_anthropic()
+
+                # Select model based on task type
+                import config
+                if task_type == TaskType.CONVERSATION:
+                    model = config.ANTHROPIC_MODEL_CONVERSATION  # Opus for conversation
+                elif task_type in (TaskType.EXTRACTION, TaskType.FACT_EXTRACTION):
+                    model = config.ANTHROPIC_MODEL_EXTRACTION  # Sonnet for extraction
+                else:
+                    model = config.ANTHROPIC_MODEL  # Default (Sonnet) for simple/analysis
+
                 response = client.chat(
                     messages=messages,
                     system_prompt=system_prompt,
@@ -315,7 +328,8 @@ class LLMRouter:
                     temperature=temperature,
                     enable_web_search=enable_web_search,
                     web_search_max_uses=web_search_max_uses,
-                    tools=tools
+                    tools=tools,
+                    model=model
                 )
 
                 llm_response = LLMResponse(
@@ -335,7 +349,7 @@ class LLMRouter:
                 # Log the API request/response
                 log_api_request(
                     provider=provider.value,
-                    model=client.model,
+                    model=model,  # Use the selected model, not client.model
                     system_prompt=system_prompt,
                     messages=messages,
                     settings={
