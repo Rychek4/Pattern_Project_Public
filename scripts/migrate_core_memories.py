@@ -4,16 +4,18 @@ Pattern Project - Core Memories Migration Script
 Migrates CORE_MEMORIES.md content to the database as a narrative entry.
 
 Usage:
-    python scripts/migrate_core_memories.py
+    python scripts/migrate_core_memories.py           # Insert new narrative
+    python scripts/migrate_core_memories.py --update  # Update existing narrative
 
 This script:
 1. Reads the CORE_MEMORIES.md file
 2. Checks if a narrative entry already exists
-3. Inserts the content as a single 'narrative' category entry
+3. Inserts or updates the content as a single 'narrative' category entry
 4. Preserves the original file as a historical artifact
 """
 
 import sys
+import argparse
 from pathlib import Path
 
 # Add project root to path
@@ -68,8 +70,46 @@ def insert_narrative(content: str) -> int:
     return result[0]["id"] if result else 0
 
 
+def update_narrative(content: str) -> int:
+    """Update the existing narrative content in the database."""
+    db = get_database()
+
+    # Get the existing narrative ID
+    result = db.execute(
+        "SELECT id FROM core_memories WHERE category = 'narrative' ORDER BY id ASC LIMIT 1",
+        fetch=True
+    )
+
+    if not result:
+        return 0
+
+    memory_id = result[0]["id"]
+
+    db.execute(
+        """
+        UPDATE core_memories
+        SET content = ?
+        WHERE id = ?
+        """,
+        (content, memory_id)
+    )
+
+    return memory_id
+
+
 def main():
     """Run the migration."""
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(
+        description="Migrate CORE_MEMORIES.md to the database"
+    )
+    parser.add_argument(
+        "--update",
+        action="store_true",
+        help="Update existing narrative instead of inserting new"
+    )
+    args = parser.parse_args()
+
     # Setup logging
     setup_logging(LOGS_DIR / "migration.log")
 
@@ -80,13 +120,18 @@ def main():
     init_database(DATABASE_PATH, DB_BUSY_TIMEOUT_MS)
 
     # Check if narrative already exists
-    if check_existing_narrative():
+    narrative_exists = check_existing_narrative()
+
+    if narrative_exists and not args.update:
         log_warning("A narrative entry already exists in the database.")
-        log_warning("To re-import, first delete the existing narrative entry.")
+        log_warning("Use --update flag to update the existing narrative.")
         print("\nExisting narrative found. Migration skipped.")
-        print("To force re-import, run:")
-        print("  sqlite3 data/pattern.db \"DELETE FROM core_memories WHERE category='narrative'\"")
+        print("To update the existing narrative, run:")
+        print("  python scripts/migrate_core_memories.py --update")
         return 1
+
+    if args.update and not narrative_exists:
+        log_warning("No existing narrative found. Will insert new entry instead.")
 
     # Read the markdown content
     try:
@@ -98,20 +143,26 @@ def main():
         print(f"\nError: {e}")
         return 1
 
-    # Insert into database
-    log_info("Inserting narrative into database...")
-    memory_id = insert_narrative(content)
+    # Insert or update database
+    if narrative_exists and args.update:
+        log_info("Updating existing narrative in database...")
+        memory_id = update_narrative(content)
+        action = "updated"
+    else:
+        log_info("Inserting narrative into database...")
+        memory_id = insert_narrative(content)
+        action = "inserted"
 
     if memory_id:
-        log_success(f"Successfully inserted narrative as core memory #{memory_id}")
+        log_success(f"Successfully {action} narrative as core memory #{memory_id}")
         print(f"\nMigration successful!")
-        print(f"  - Narrative inserted with ID: {memory_id}")
+        print(f"  - Narrative {action} with ID: {memory_id}")
         print(f"  - Content length: {len(content)} characters")
         print(f"  - Original file preserved at: {CORE_MEMORIES_FILE}")
         return 0
     else:
-        log_error("Failed to insert narrative")
-        print("\nError: Failed to insert narrative into database")
+        log_error(f"Failed to {action} narrative")
+        print(f"\nError: Failed to {action} narrative in database")
         return 1
 
 
