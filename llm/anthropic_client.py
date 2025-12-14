@@ -109,7 +109,8 @@ class AnthropicClient:
         stop_sequences: Optional[List[str]] = None,
         enable_web_search: bool = False,
         web_search_max_uses: Optional[int] = None,
-        tools: Optional[List[Dict[str, Any]]] = None
+        tools: Optional[List[Dict[str, Any]]] = None,
+        model: Optional[str] = None
     ) -> AnthropicResponse:
         """
         Send a chat completion request.
@@ -137,6 +138,7 @@ class AnthropicClient:
             enable_web_search: Whether to enable Claude's web search tool
             web_search_max_uses: Max searches per request (None = no limit)
             tools: Optional list of tool definitions for native tool use
+            model: Optional model override (uses instance model if None)
 
         Returns:
             AnthropicResponse with generated text and any tool calls
@@ -148,8 +150,9 @@ class AnthropicClient:
             client = self._get_client()
 
             # Build request parameters
+            # Use model override if provided, otherwise fall back to instance model
             request_params = {
-                "model": self.model,
+                "model": model or self.model,
                 "max_tokens": max_tokens,
                 "temperature": temperature,
                 "messages": messages
