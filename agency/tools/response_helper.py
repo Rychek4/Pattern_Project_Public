@@ -160,8 +160,13 @@ class ToolResponseHelper:
             # Handle pulse interval change from this pass
             if processed.has_pulse_interval_change():
                 pulse_interval_changed = True
+                log_info(f"PULSE DEBUG: pulse_interval_change detected: {processed.pulse_interval_change}s", prefix="🔍")
                 if pulse_callback:
+                    log_info(f"PULSE DEBUG: Invoking pulse_callback({processed.pulse_interval_change})", prefix="🔍")
                     pulse_callback(processed.pulse_interval_change)
+                    log_info("PULSE DEBUG: pulse_callback returned", prefix="🔍")
+                else:
+                    log_warning("PULSE DEBUG: No pulse_callback provided!")
 
             # Track telegram sends across all passes
             if processed.telegram_sent:

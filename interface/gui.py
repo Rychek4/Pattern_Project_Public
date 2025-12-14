@@ -713,11 +713,19 @@ class ChatWindow(QMainWindow):
             new_label = get_interval_label(new_interval)
             log_info(f"Pulse timer changed: {old_label} -> {new_label}", prefix="⏱️")
 
+    def _emit_pulse_interval_change(self, interval: int):
+        """Emit pulse interval change signal with debug logging."""
+        log_info(f"PULSE DEBUG: Emitting pulse_interval_change signal with {interval}s", prefix="🔍")
+        self.signals.pulse_interval_change.emit(interval)
+        log_info("PULSE DEBUG: Signal emitted", prefix="🔍")
+
     def set_pulse_interval_by_seconds(self, seconds: int):
         """Set the pulse interval and update dropdown to match.
 
         Used when AI changes the interval via [[PULSE:Xm]] command.
         """
+        log_info(f"PULSE DEBUG: set_pulse_interval_by_seconds({seconds}) ENTRY", prefix="🔍")
+
         # Map seconds to dropdown index
         seconds_to_index = {
             180: 0,    # 3 min
@@ -728,23 +736,33 @@ class ChatWindow(QMainWindow):
         }
 
         index = seconds_to_index.get(seconds)
+        log_info(f"PULSE DEBUG: seconds={seconds} mapped to index={index}", prefix="🔍")
+
         if index is not None:
             # Block signals to avoid triggering _on_pulse_interval_changed twice
+            log_info(f"PULSE DEBUG: Updating dropdown to index {index}", prefix="🔍")
             self.pulse_dropdown.blockSignals(True)
             self.pulse_dropdown.setCurrentIndex(index)
             self.pulse_dropdown.blockSignals(False)
+            log_info(f"PULSE DEBUG: Dropdown updated, current index now: {self.pulse_dropdown.currentIndex()}", prefix="🔍")
 
             # Update the timer
             if self._system_pulse_timer:
                 old_interval = self._system_pulse_timer.pulse_interval
+                log_info(f"PULSE DEBUG: Updating timer: {old_interval}s -> {seconds}s", prefix="🔍")
                 self._system_pulse_timer.pulse_interval = seconds
                 self._system_pulse_timer.reset()
+                log_info(f"PULSE DEBUG: Timer updated, pulse_interval now: {self._system_pulse_timer.pulse_interval}s", prefix="🔍")
 
                 # Log the change
                 from prompt_builder.sources.system_pulse import get_interval_label
                 old_label = get_interval_label(old_interval)
                 new_label = get_interval_label(seconds)
                 log_info(f"AI adjusted pulse timer: {old_label} -> {new_label}", prefix="⏱️")
+            else:
+                log_warning("PULSE DEBUG: _system_pulse_timer is None!")
+        else:
+            log_warning(f"PULSE DEBUG: Invalid seconds value {seconds} - not in mapping!")
 
     def _get_timestamp(self) -> str:
         """Get current timestamp string."""
@@ -1301,7 +1319,7 @@ class ChatWindow(QMainWindow):
                     history=history,
                     system_prompt=assembled.full_system_prompt,
                     max_passes=max_passes,
-                    pulse_callback=lambda interval: self.signals.pulse_interval_change.emit(interval),
+                    pulse_callback=lambda interval: self._emit_pulse_interval_change(interval),
                     tools=tools,
                     dev_mode_callbacks=dev_callbacks
                 )
@@ -1700,7 +1718,7 @@ class ChatWindow(QMainWindow):
                     history=history,
                     system_prompt=assembled.full_system_prompt,
                     max_passes=5,
-                    pulse_callback=lambda interval: self.signals.pulse_interval_change.emit(interval),
+                    pulse_callback=lambda interval: self._emit_pulse_interval_change(interval),
                     tools=tools,
                     dev_mode_callbacks=dev_callbacks
                 )
@@ -1856,7 +1874,7 @@ class ChatWindow(QMainWindow):
                     history=history,
                     system_prompt=assembled.full_system_prompt,
                     max_passes=5,
-                    pulse_callback=lambda interval: self.signals.pulse_interval_change.emit(interval),
+                    pulse_callback=lambda interval: self._emit_pulse_interval_change(interval),
                     tools=tools,
                     dev_mode_callbacks=dev_callbacks
                 )
@@ -2000,7 +2018,7 @@ class ChatWindow(QMainWindow):
                     history=history,
                     system_prompt=assembled.full_system_prompt,
                     max_passes=5,
-                    pulse_callback=lambda interval: self.signals.pulse_interval_change.emit(interval),
+                    pulse_callback=lambda interval: self._emit_pulse_interval_change(interval),
                     tools=tools,
                     dev_mode_callbacks=dev_callbacks
                 )
