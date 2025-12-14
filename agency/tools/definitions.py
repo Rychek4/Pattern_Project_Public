@@ -56,9 +56,9 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
         tools.append(SET_PULSE_INTERVAL_TOOL)
 
     # Curiosity tools (if curiosity system enabled)
+    # Note: resolve_curiosity is deprecated - advance_curiosity now handles resolution
     if getattr(config, 'CURIOSITY_ENABLED', True):
         tools.append(ADVANCE_CURIOSITY_TOOL)
-        tools.append(RESOLVE_CURIOSITY_TOOL)
 
     return tools
 
@@ -474,19 +474,47 @@ Rules:
 
 ADVANCE_CURIOSITY_TOOL: Dict[str, Any] = {
     "name": "advance_curiosity",
-    "description": """Record progress on your current curiosity topic.
+    "description": """Record progress on your current curiosity topic, and optionally resolve it.
 
-Call this each time you have a meaningful exchange about your curiosity topic.
-This tracks interaction depth and determines cooldown duration when resolved.
+THREE MODES:
 
-You must have at least 2 interactions before marking a topic as "explored".
-Use this to track your progress toward that minimum.""",
+1. PROGRESS ONLY (just note):
+   Record an interaction while continuing to explore the topic.
+
+2. RESOLVE - SYSTEM PICKS NEXT (note + outcome):
+   Close the current topic. System will select next topic from memory.
+
+3. RESOLVE - YOU PICK NEXT (note + outcome + next_topic):
+   Close the current topic and specify what to explore next.
+   Use this when conversation naturally flows to a new subject.
+
+OUTCOMES (when resolving):
+- explored: Topic was meaningfully discussed (requires 2+ interactions)
+- deferred: User said "not now" - short 2-hour cooldown
+- declined: User rejected the topic - 3-day cooldown
+
+Cooldown for "explored" scales with interaction depth (20-48 hours).
+
+EXAMPLE - Following conversation flow:
+User mentions their other dog Nuk while you're exploring Sammy.
+Call with note="Wrapping up Sammy - user eager to discuss Nuk",
+outcome="explored", next_topic="User's other dog Nuk - they seem excited to share"
+""",
     "input_schema": {
         "type": "object",
         "properties": {
             "note": {
                 "type": "string",
-                "description": "Brief note on what was discussed or learned in this exchange"
+                "description": "Brief note on what was discussed or learned"
+            },
+            "outcome": {
+                "type": "string",
+                "enum": ["explored", "deferred", "declined"],
+                "description": "How to resolve the topic (omit to just record progress)"
+            },
+            "next_topic": {
+                "type": "string",
+                "description": "Specify next curiosity topic (only valid with outcome). Use when conversation naturally flows to a new subject."
             }
         },
         "required": []

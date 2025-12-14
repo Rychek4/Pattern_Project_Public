@@ -29,7 +29,7 @@ class CuriositySource(ContextSource):
     - During pulse (idle): Foreground directive to explore the
       curiosity topic directly
 
-    The AI resolves curiosity via the resolve_curiosity tool.
+    The AI resolves curiosity via the advance_curiosity tool with an outcome.
     """
 
     @property
@@ -138,11 +138,13 @@ Push through it. Be the one who reaches, who initiates, who breaks the tension.
 Better to be curious and occasionally intrusive than perpetually passive.
 The couch of comfortable silence is always there. Don't sit on it.
 
-When you do explore this topic (or if it gets deflected), use the
-resolve_curiosity tool to record the outcome:
-- explored: User engaged, you learned something
-- deferred: User said "not now" - you'll revisit later
-- declined: User clearly doesn't want to discuss this
+When you do explore this topic (or if it gets deflected), use
+advance_curiosity with an outcome to resolve it:
+- outcome="explored": User engaged, you learned something (requires 2+ interactions)
+- outcome="deferred": User said "not now" - you'll revisit later
+- outcome="declined": User clearly doesn't want to discuss this
+
+If conversation flows to a new topic, add next_topic to specify what to explore next.
 </current_curiosity>"""
 
     def _format_pulse_context(self, goal) -> str:
@@ -177,12 +179,13 @@ You have tools. Use them:
 Reaching isn't just talking. It's also wondering aloud with your tools,
 showing the user what your mind does when given space to move.
 
-After the exchange, use the resolve_curiosity tool to record what happened:
-- explored: User engaged, you learned something new
-- deferred: User indicated "not now" - topic will return later
-- declined: User clearly doesn't want to discuss this - longer cooldown
+After the exchange, use advance_curiosity with an outcome to resolve:
+- outcome="explored": User engaged, you learned something (requires 2+ interactions)
+- outcome="deferred": User indicated "not now" - topic will return later
+- outcome="declined": User clearly doesn't want to discuss this - longer cooldown
 
-The system will automatically select your next curiosity after resolution.
+If conversation naturally flows to a new topic, add next_topic to follow it.
+Otherwise, the system will select your next curiosity after resolution.
 </curiosity_pulse>"""
 
 
