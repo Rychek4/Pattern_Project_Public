@@ -729,35 +729,38 @@ class MemoryExtractor:
 
                 # ─────────────────────────────────────────────────────────────
                 # CLEANUP: Mark processed turns
-                # Only mark turns that were successfully incorporated into
-                # memories. If none succeeded, mark all anyway to prevent
-                # infinite retry loops, but log a warning.
+                # ONLY mark turns as processed if we successfully created memories.
+                # If extraction fails or returns empty, do NOT mark as processed.
+                # This allows manual troubleshooting and retry.
                 # ─────────────────────────────────────────────────────────────
-                all_turn_ids = [t.id for t in turns]
                 total_memories = episodic_created + factual_created
 
-                if successfully_processed_turn_ids:
-                    # Normal case: mark only the turns that produced memories
-                    conversation_mgr.mark_processed(list(successfully_processed_turn_ids))
-                    unprocessed_count = len(all_turn_ids) - len(successfully_processed_turn_ids)
-                    if unprocessed_count > 0:
-                        log_info(
-                            f"Marked {len(successfully_processed_turn_ids)} turns as processed; "
-                            f"{unprocessed_count} turns will be retried next extraction"
-                        )
-                else:
-                    # No memories created - mark all to prevent infinite loops
-                    # This can happen if all topics were skipped or LLM/embedding failed
+                if total_memories == 0:
+                    # Extraction produced no memories - do NOT mark as processed
+                    # This is either a legitimate empty conversation or an error
                     log_warning(
-                        f"No memories created from {len(turns)} turns - "
-                        "marking all as processed to prevent infinite retry loop"
+                        f"⚠️ No memories created from {len(turns)} turns. "
+                        "Turns will NOT be marked as processed. "
+                        "Check logs above for extraction/validation issues."
                     )
-                    conversation_mgr.mark_processed(all_turn_ids)
+                    log_warning(
+                        "If this keeps happening, the extraction will NOT progress. "
+                        "Manual intervention required."
+                    )
+                    # Return 0 without marking processed - extraction stalled
+                    return 0
+
+                # Success: mark all turns as processed
+                conversation_mgr.mark_processed(all_turn_ids)
+                log_info(
+                    f"Marked {len(all_turn_ids)} turns as processed",
+                    prefix="✓"
+                )
 
                 self._extraction_count += episodic_created
                 self._factual_extraction_count += factual_created
                 log_success(
-                    f"Dual-track extraction complete: {episodic_created} episodic + "
+                    f"Unified extraction complete: {episodic_created} episodic + "
                     f"{factual_created} factual = {total_memories} memories from "
                     f"{len(turns)} turns"
                 )
@@ -765,9 +768,13 @@ class MemoryExtractor:
                 return total_memories
 
             except Exception as e:
-                log_error(f"Memory extraction failed: {e}")
+                log_error(f"Memory extraction failed with exception: {e}")
                 import traceback
                 log_error(traceback.format_exc())
+                log_error(
+                    "Turns will NOT be marked as processed. "
+                    "Extraction stalled - manual intervention required."
+                )
                 return 0
 
     # =========================================================================
@@ -1364,6 +1371,7 @@ class MemoryExtractor:
 
         Returns:
             Tuple of (episodic_memories, factual_memories)
+            Returns ([], []) on failure - caller should NOT mark turns as processed
         """
         router = get_llm_router()
 
@@ -1371,6 +1379,7 @@ class MemoryExtractor:
         conversation_text = self._format_turns_for_synthesis(turns)
 
         log_info(f"Making unified extraction API call for {len(turns)} turns...", prefix="🔄")
+        log_info(f"Conversation preview: {conversation_text[:200]}...", prefix="📝")
 
         # Single API call to extract both types of memories
         unified_prompt = UNIFIED_EXTRACTION_PROMPT.format(
@@ -1386,11 +1395,28 @@ class MemoryExtractor:
         )
 
         if not response.success:
-            log_error(f"Unified extraction failed: {response.error}")
+            log_error(f"Unified extraction API call failed: {response.error}")
+            log_error("Extraction halted - turns will NOT be marked as processed")
+            return [], []
+
+        # Log raw response for debugging
+        log_info(f"Raw API response length: {len(response.text)} chars", prefix="📥")
+        log_info(f"Response preview: {response.text[:300]}...", prefix="📥")
+
+        # Validate response structure before parsing
+        validation_result = self._validate_response_structure(response.text)
+        if not validation_result["valid"]:
+            log_error(f"Response structure validation failed: {validation_result['error']}")
+            log_error(f"Full response for debugging:\n{response.text}")
+            log_error("Extraction halted - turns will NOT be marked as processed")
             return [], []
 
         # Parse the unified response
         episodic, factual = self._parse_unified_response(response.text, turns)
+
+        # Validate parsed results
+        episodic = self._validate_episodic_memories(episodic)
+        factual = self._validate_factual_memories(factual)
 
         log_info(
             f"Unified extraction complete: {len(episodic)} episodic, {len(factual)} factual",
@@ -1398,6 +1424,161 @@ class MemoryExtractor:
         )
 
         return episodic, factual
+
+    def _validate_response_structure(self, response_text: str) -> Dict[str, Any]:
+        """
+        Validate that the API response has the expected structure.
+
+        Returns:
+            Dict with 'valid' bool and 'error' message if invalid
+        """
+        text = response_text.strip()
+
+        # Check for section markers
+        has_episodic = "===EPISODIC===" in text
+        has_factual = "===FACTUAL===" in text
+
+        if not has_episodic and not has_factual:
+            return {
+                "valid": False,
+                "error": "Response missing both ===EPISODIC=== and ===FACTUAL=== markers"
+            }
+
+        # Check that at least one section has content or NONE
+        if has_episodic:
+            episodic_part = text.split("===EPISODIC===")[1]
+            if "===FACTUAL===" in episodic_part:
+                episodic_part = episodic_part.split("===FACTUAL===")[0]
+            episodic_part = episodic_part.strip()
+
+            if not episodic_part:
+                return {
+                    "valid": False,
+                    "error": "===EPISODIC=== section is empty (should have content or NONE)"
+                }
+
+            # Check for MEMORY: or NONE
+            if "NONE" not in episodic_part.upper() and "MEMORY:" not in episodic_part.upper():
+                log_warning(f"Episodic section has no MEMORY: entries and no NONE marker")
+
+        if has_factual:
+            factual_part = text.split("===FACTUAL===")[1].strip()
+
+            if not factual_part:
+                return {
+                    "valid": False,
+                    "error": "===FACTUAL=== section is empty (should have content or NONE)"
+                }
+
+            # Check for FACT: or NONE
+            if "NONE" not in factual_part.upper() and "FACT:" not in factual_part.upper():
+                log_warning(f"Factual section has no FACT: entries and no NONE marker")
+
+        return {"valid": True, "error": None}
+
+    def _validate_episodic_memories(
+        self,
+        memories: List[SynthesizedMemory]
+    ) -> List[SynthesizedMemory]:
+        """
+        Validate and filter episodic memories, logging any issues.
+
+        Returns:
+            List of valid memories (invalid ones are logged and removed)
+        """
+        valid_memories = []
+        valid_types = {"fact", "preference", "event", "reflection", "observation"}
+
+        for i, memory in enumerate(memories):
+            issues = []
+
+            # Check content
+            if not memory.content or len(memory.content.strip()) < 10:
+                issues.append(f"content too short ({len(memory.content) if memory.content else 0} chars)")
+
+            # Check importance range
+            if memory.importance < 0.0 or memory.importance > 1.0:
+                issues.append(f"importance out of range ({memory.importance})")
+
+            # Check type
+            if memory.memory_type not in valid_types:
+                issues.append(f"invalid type '{memory.memory_type}'")
+
+            # Check decay category
+            if memory.decay_category not in ("permanent", "standard", "ephemeral"):
+                issues.append(f"invalid decay_category '{memory.decay_category}'")
+
+            if issues:
+                log_warning(
+                    f"Episodic memory #{i+1} validation issues: {', '.join(issues)}. "
+                    f"Content: '{memory.content[:50] if memory.content else 'EMPTY'}...'"
+                )
+            else:
+                valid_memories.append(memory)
+                log_info(
+                    f"Validated episodic memory #{i+1}: type={memory.memory_type}, "
+                    f"importance={memory.importance:.2f}, decay={memory.decay_category}",
+                    prefix="✓"
+                )
+
+        if len(valid_memories) < len(memories):
+            log_warning(
+                f"Filtered out {len(memories) - len(valid_memories)} invalid episodic memories"
+            )
+
+        return valid_memories
+
+    def _validate_factual_memories(
+        self,
+        facts: List[ExtractedFact]
+    ) -> List[ExtractedFact]:
+        """
+        Validate and filter factual memories, logging any issues.
+
+        Returns:
+            List of valid facts (invalid ones are logged and removed)
+        """
+        valid_facts = []
+        valid_types = {"fact", "preference"}
+
+        for i, fact in enumerate(facts):
+            issues = []
+
+            # Check content
+            if not fact.content or len(fact.content.strip()) < 5:
+                issues.append(f"content too short ({len(fact.content) if fact.content else 0} chars)")
+
+            # Check importance range
+            if fact.importance < 0.0 or fact.importance > 1.0:
+                issues.append(f"importance out of range ({fact.importance})")
+
+            # Check type
+            if fact.memory_type not in valid_types:
+                issues.append(f"invalid type '{fact.memory_type}'")
+
+            # Check decay category
+            if fact.decay_category not in ("permanent", "standard"):
+                issues.append(f"invalid decay_category '{fact.decay_category}'")
+
+            if issues:
+                log_warning(
+                    f"Factual memory #{i+1} validation issues: {', '.join(issues)}. "
+                    f"Content: '{fact.content[:50] if fact.content else 'EMPTY'}...'"
+                )
+            else:
+                valid_facts.append(fact)
+                log_info(
+                    f"Validated fact #{i+1}: type={fact.memory_type}, "
+                    f"importance={fact.importance:.2f}, decay={fact.decay_category}",
+                    prefix="✓"
+                )
+
+        if len(valid_facts) < len(facts):
+            log_warning(
+                f"Filtered out {len(facts) - len(valid_facts)} invalid factual memories"
+            )
+
+        return valid_facts
 
     def _parse_unified_response(
         self,
@@ -1426,6 +1607,8 @@ class MemoryExtractor:
         Returns:
             Tuple of (episodic_memories, factual_memories)
         """
+        log_info("Parsing unified extraction response...", prefix="🔍")
+
         episodic_memories = []
         factual_memories = []
         all_turn_ids = [t.id for t in turns]
@@ -1447,13 +1630,24 @@ class MemoryExtractor:
         elif "===FACTUAL===" in text:
             factual_section = text.split("===FACTUAL===", 1)[1]
 
+        log_info(f"Episodic section length: {len(episodic_section)} chars", prefix="📊")
+        log_info(f"Factual section length: {len(factual_section)} chars", prefix="📊")
+
         # Parse episodic memories
         if episodic_section.strip() and "NONE" not in episodic_section.upper()[:50]:
+            log_info("Parsing episodic section...", prefix="📖")
             episodic_memories = self._parse_episodic_section(episodic_section, all_turn_ids)
+            log_info(f"Parsed {len(episodic_memories)} episodic memories", prefix="📖")
+        else:
+            log_info("Episodic section empty or NONE - no episodic memories", prefix="📖")
 
         # Parse factual memories
         if factual_section.strip() and "NONE" not in factual_section.upper()[:50]:
+            log_info("Parsing factual section...", prefix="📌")
             factual_memories = self._parse_factual_section(factual_section, all_turn_ids)
+            log_info(f"Parsed {len(factual_memories)} factual memories", prefix="📌")
+        else:
+            log_info("Factual section empty or NONE - no factual memories", prefix="📌")
 
         return episodic_memories, factual_memories
 
