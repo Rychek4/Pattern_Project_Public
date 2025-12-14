@@ -82,11 +82,11 @@ MEMORY_FRESHNESS_HALF_LIFE_DAYS = 14  # Decay rate for freshness scoring (more r
 # This replaces the old threshold-based extraction system where context
 # and extraction operated independently, leading to duplicate memories.
 #
-# Flow: Context Window (30) → Overflow (35) → Extract oldest 5 → Back to 30
+# Flow: Context Window (30) → Overflow (40) → Extract oldest 10 → Back to 30
 # The context window spans sessions for AI continuity.
 CONTEXT_WINDOW_SIZE = 30           # Target turns to keep in active context
-CONTEXT_OVERFLOW_TRIGGER = 35      # Extract when context reaches this size
-CONTEXT_EXTRACTION_BATCH = 5       # Turns to extract per overflow (35 - 30 = 5)
+CONTEXT_OVERFLOW_TRIGGER = 40      # Extract when context reaches this size
+CONTEXT_EXTRACTION_BATCH = 10      # Turns to extract per overflow (40 - 30 = 10)
 
 # DEPRECATED: Old threshold-based extraction (replaced by windowed system)
 # MEMORY_EXTRACTION_THRESHOLD = 10  # No longer used - see CONTEXT_OVERFLOW_TRIGGER
@@ -120,10 +120,10 @@ MEMORY_DEDUP_THRESHOLD = 0.85      # Embedding similarity threshold for "duplica
 # -----------------------------------------------------------------------------
 # Dual-Track Extraction Settings
 # -----------------------------------------------------------------------------
-# Both extraction passes run on same trigger (10 unprocessed turns).
+# Both extraction passes run on same trigger (40 unprocessed turns → extract 10).
 # Episodic extraction uses topic clustering; factual extraction scans whole batch.
-MEMORY_MAX_EPISODIC_PER_EXTRACTION = 3   # Max episodic memories per extraction run
-MEMORY_MAX_FACTUAL_PER_EXTRACTION = 6    # Max factual memories per extraction run (facts are granular)
+MEMORY_MAX_EPISODIC_PER_EXTRACTION = 6   # Max episodic memories per extraction run
+MEMORY_MAX_FACTUAL_PER_EXTRACTION = 8    # Max factual memories per extraction run (facts are granular)
 
 # Topic-Based Extraction Settings (for episodic extraction)
 # These control how conversations are clustered into topics before memory creation
@@ -318,16 +318,19 @@ MEMORY_PROMOTION_THRESHOLD = 0.85  # Score threshold for core memory promotion
 # Visual capture sends screenshots and webcam images directly to Claude for
 # interpretation. Images are attached to user messages as multimodal content.
 #
-# Capture modes:
-#   - "auto": Capture screenshot and webcam on every prompt (user input or pulse)
-#   - "on_demand": Only capture when AI uses [[SCREENSHOT]] or [[WEBCAM]] commands
+# Per-source capture modes (configured independently):
+#   - "auto": Capture on every prompt (user input or pulse, NOT telegram)
+#   - "on_demand": Only capture when AI uses the capture tool
+#   - "disabled": Never capture this source
 #
-# In auto mode, both screenshot and webcam are attached to each message.
-# In on_demand mode, the AI can request captures using command syntax.
+# Example: Screenshot auto + Webcam on_demand = screen always visible, webcam via tool
 VISUAL_ENABLED = os.getenv("VISUAL_ENABLED", "true").lower() == "true"
-VISUAL_CAPTURE_MODE = os.getenv("VISUAL_CAPTURE_MODE", "auto")  # "auto" or "on_demand"
-VISUAL_SCREENSHOT_ENABLED = os.getenv("VISUAL_SCREENSHOT_ENABLED", "true").lower() == "true"
-VISUAL_WEBCAM_ENABLED = os.getenv("VISUAL_WEBCAM_ENABLED", "true").lower() == "true"
+VISUAL_SCREENSHOT_MODE = os.getenv("VISUAL_SCREENSHOT_MODE", "auto")  # "auto", "on_demand", "disabled"
+VISUAL_WEBCAM_MODE = os.getenv("VISUAL_WEBCAM_MODE", "on_demand")  # "auto", "on_demand", "disabled"
+
+# Legacy enable flags (now derived from mode != "disabled")
+VISUAL_SCREENSHOT_ENABLED = VISUAL_SCREENSHOT_MODE != "disabled"
+VISUAL_WEBCAM_ENABLED = VISUAL_WEBCAM_MODE != "disabled"
 
 # Legacy: Timer-based capture interval (deprecated, kept for fallback system)
 VISUAL_CAPTURE_INTERVAL = int(os.getenv("VISUAL_CAPTURE_INTERVAL", "30"))

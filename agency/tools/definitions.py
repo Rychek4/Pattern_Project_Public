@@ -44,11 +44,12 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
     if config.EMAIL_GATEWAY_ENABLED:
         tools.append(SEND_EMAIL_TOOL)
 
-    # Visual tools (only in on_demand mode)
-    if config.VISUAL_ENABLED and config.VISUAL_CAPTURE_MODE == "on_demand":
-        if config.VISUAL_SCREENSHOT_ENABLED:
+    # Visual tools (register if source mode is "on_demand")
+    # Each source has independent mode: "auto", "on_demand", or "disabled"
+    if config.VISUAL_ENABLED:
+        if config.VISUAL_SCREENSHOT_MODE == "on_demand":
             tools.append(CAPTURE_SCREENSHOT_TOOL)
-        if config.VISUAL_WEBCAM_ENABLED:
+        if config.VISUAL_WEBCAM_MODE == "on_demand":
             tools.append(CAPTURE_WEBCAM_TOOL)
 
     # Pulse timer tool (if pulse system enabled)

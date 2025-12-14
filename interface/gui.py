@@ -1059,10 +1059,9 @@ class ChatWindow(QMainWindow):
         """
         Capture visual content and build a multimodal message if enabled.
 
-        In auto mode with VISUAL_ENABLED, captures screenshot and/or webcam
-        and returns a message dict with multimodal content array.
-
-        In on_demand mode or when disabled, returns a simple text message.
+        Captures sources configured for "auto" mode and returns a message dict
+        with multimodal content array. Sources in "on_demand" mode are NOT
+        captured here - they are captured via tool calls instead.
 
         Args:
             text_content: The text content for the message
@@ -1070,8 +1069,16 @@ class ChatWindow(QMainWindow):
         Returns:
             Message dict suitable for LLM API (text-only or multimodal)
         """
-        # Check if visual capture is enabled and in auto mode
-        if not config.VISUAL_ENABLED or config.VISUAL_CAPTURE_MODE != "auto":
+        # Check if visual capture is enabled
+        if not config.VISUAL_ENABLED:
+            return {"role": "user", "content": text_content}
+
+        # Check if any visual source is in auto mode
+        has_auto_visuals = (
+            config.VISUAL_SCREENSHOT_MODE == "auto" or
+            config.VISUAL_WEBCAM_MODE == "auto"
+        )
+        if not has_auto_visuals:
             return {"role": "user", "content": text_content}
 
         try:

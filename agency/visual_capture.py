@@ -322,9 +322,10 @@ def capture_webcam_for_claude() -> Optional[ImageContent]:
 
 def capture_all_visuals() -> List[ImageContent]:
     """
-    Capture all enabled visual sources for auto-mode.
+    Capture visual sources configured for auto-mode.
 
-    Captures screenshot and webcam based on config settings.
+    Only captures sources where mode is "auto" (not "on_demand" or "disabled").
+    Sources in "on_demand" mode are captured via tool calls instead.
     Failed captures are silently skipped (graceful degradation).
 
     Returns:
@@ -334,12 +335,14 @@ def capture_all_visuals() -> List[ImageContent]:
 
     images = []
 
-    if config.VISUAL_SCREENSHOT_ENABLED:
+    # Only capture screenshot if mode is "auto" (not "on_demand" or "disabled")
+    if config.VISUAL_SCREENSHOT_MODE == "auto":
         screenshot = capture_screenshot_for_claude()
         if screenshot:
             images.append(screenshot)
 
-    if config.VISUAL_WEBCAM_ENABLED:
+    # Only capture webcam if mode is "auto" (not "on_demand" or "disabled")
+    if config.VISUAL_WEBCAM_MODE == "auto":
         webcam = capture_webcam_for_claude()
         if webcam:
             images.append(webcam)
@@ -407,10 +410,8 @@ class LegacyVisualCaptureSystem:
     """
     Legacy visual capture system using Gemini for interpretation.
 
-    This class is DISABLED by default and kept only for potential future
-    fallback scenarios. The new system sends images directly to Claude.
-
-    To use: Set VISUAL_CAPTURE_MODE to "legacy" (not currently implemented)
+    This class is DISABLED and kept only for potential future fallback
+    scenarios. The new system sends images directly to Claude via multimodal.
     """
 
     def __init__(
