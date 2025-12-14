@@ -740,6 +740,7 @@ class DevWindow(QMainWindow):
             "initial": COLORS["info"],
             "activated": COLORS["success"],
             "resolved": COLORS["warning"],
+            "ai_specified": COLORS["success"],   # AI chose next topic (green)
             "context_inject": COLORS["purple"],  # Normal conversation context
             "pulse_inject": COLORS["accent"],    # Pulse/idle trigger
             "interaction": COLORS["info"],       # Progress recorded

@@ -590,12 +590,14 @@ class ToolExecutor:
         self, input: Dict, id: str, ctx: Dict
     ) -> ToolResult:
         """
-        Record progress on the current curiosity topic.
+        Three-mode curiosity advancement:
 
-        Increments the interaction count for the active goal.
+        1. Progress only (note) - increment interaction count
+        2. Resolve, system picks (note + outcome) - close and auto-select next
+        3. Resolve, AI picks (note + outcome + next_topic) - close and use specified topic
         """
-        from agency.curiosity import is_curiosity_enabled
-        from agency.curiosity.ledger import get_curiosity_ledger
+        from agency.curiosity import get_curiosity_engine, is_curiosity_enabled
+        from agency.curiosity.ledger import GoalStatus, get_curiosity_ledger
 
         if not is_curiosity_enabled():
             return ToolResult(
@@ -606,9 +608,12 @@ class ToolExecutor:
             )
 
         note = input.get("note", "")
+        outcome = input.get("outcome")  # None = progress only mode
+        next_topic = input.get("next_topic")  # None = system picks next
 
         try:
             ledger = get_curiosity_ledger()
+            engine = get_curiosity_engine()
             current_goal = ledger.get_active_goal()
 
             if not current_goal:
@@ -619,28 +624,84 @@ class ToolExecutor:
                     is_error=True
                 )
 
-            # Increment interaction count
+            # Always increment interaction count
             new_count = ledger.increment_interaction(current_goal.id)
             min_interactions = getattr(config, 'CURIOSITY_MIN_INTERACTIONS', 2)
 
-            if new_count >= min_interactions:
-                status_msg = f"Ready to resolve as 'explored' ({new_count}/{min_interactions} interactions)"
+            # ===== MODE 1: Progress only (no outcome) =====
+            if outcome is None:
+                if next_topic:
+                    return ToolResult(
+                        tool_use_id=id,
+                        tool_name="advance_curiosity",
+                        content="Cannot specify next_topic without an outcome. Add outcome to resolve the topic.",
+                        is_error=True
+                    )
+
+                status_msg = f"Progress: {new_count}/{min_interactions}"
+                if new_count >= min_interactions:
+                    status_msg += " (ready to resolve)"
+
+                log_info(f"Curiosity interaction recorded: {status_msg}", prefix="🔍")
+                self._emit_curiosity_progress(current_goal, new_count, min_interactions, note)
+
+                return ToolResult(
+                    tool_use_id=id,
+                    tool_name="advance_curiosity",
+                    content=f"Curiosity progress recorded. {status_msg}"
+                )
+
+            # ===== MODE 2 & 3: Resolving (outcome provided) =====
+            status_map = {
+                "explored": GoalStatus.EXPLORED,
+                "deferred": GoalStatus.DEFERRED,
+                "declined": GoalStatus.DECLINED,
+            }
+
+            if outcome not in status_map:
+                return ToolResult(
+                    tool_use_id=id,
+                    tool_name="advance_curiosity",
+                    content=f"Invalid outcome '{outcome}'. Valid options: explored, deferred, declined",
+                    is_error=True
+                )
+
+            status = status_map[outcome]
+
+            # Enforce minimum interactions for "explored"
+            if status == GoalStatus.EXPLORED and new_count < min_interactions:
+                return ToolResult(
+                    tool_use_id=id,
+                    tool_name="advance_curiosity",
+                    content=(
+                        f"Cannot mark as 'explored' - only {new_count} interaction(s) "
+                        f"(minimum: {min_interactions}). Continue exploring, or use 'deferred'."
+                    ),
+                    is_error=True
+                )
+
+            # Resolve and get next goal
+            if next_topic:
+                # MODE 3: AI specifies next topic
+                new_goal = engine.resolve_current_goal_with_next(status, note, next_topic)
+                log_info(f"Curiosity resolved as '{outcome}', AI specified next: {next_topic[:50]}...", prefix="🔍")
+                return ToolResult(
+                    tool_use_id=id,
+                    tool_name="advance_curiosity",
+                    content=f"Resolved as '{outcome}'. New curiosity (your choice): {new_goal.content[:80]}..."
+                )
             else:
-                status_msg = f"Progress: {new_count}/{min_interactions} interactions needed"
-
-            log_info(f"Curiosity interaction recorded: {status_msg}", prefix="🔍")
-
-            # Emit DEV window update to show progress
-            self._emit_curiosity_progress(current_goal, new_count, min_interactions, note)
-
-            return ToolResult(
-                tool_use_id=id,
-                tool_name="advance_curiosity",
-                content=f"Curiosity progress recorded. {status_msg}"
-            )
+                # MODE 2: System selects next
+                new_goal = engine.resolve_current_goal(status, note)
+                log_info(f"Curiosity resolved as '{outcome}', system selected next", prefix="🔍")
+                return ToolResult(
+                    tool_use_id=id,
+                    tool_name="advance_curiosity",
+                    content=f"Resolved as '{outcome}'. New curiosity: {new_goal.content[:80]}..."
+                )
 
         except Exception as e:
-            log_error(f"Error advancing curiosity: {e}")
+            log_error(f"Error in advance_curiosity: {e}")
             return ToolResult(
                 tool_use_id=id,
                 tool_name="advance_curiosity",

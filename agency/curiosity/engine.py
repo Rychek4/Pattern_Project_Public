@@ -5,7 +5,7 @@ Orchestrates the curiosity system components.
 
 from typing import Optional
 
-from agency.curiosity.analyzer import get_curiosity_analyzer, CuriosityAnalyzer
+from agency.curiosity.analyzer import get_curiosity_analyzer, CuriosityAnalyzer, CuriosityCandidate
 from agency.curiosity.selector import get_curiosity_selector, CuriositySelector
 from agency.curiosity.ledger import (
     get_curiosity_ledger,
@@ -83,6 +83,54 @@ class CuriosityEngine:
         # Select and return new goal
         new_goal = self._select_new_goal()
         self._emit_dev_update("resolved", new_goal)
+        return new_goal
+
+    def resolve_current_goal_with_next(
+        self,
+        status: GoalStatus,
+        notes: Optional[str] = None,
+        next_topic: str = None
+    ) -> CuriosityGoal:
+        """
+        Resolve the current goal and activate an AI-specified next topic.
+
+        This allows the AI to follow conversational flow by specifying
+        what to be curious about next, rather than letting the system
+        auto-select from memory candidates.
+
+        Args:
+            status: How the goal was resolved (explored, deferred, declined)
+            notes: Optional notes about the outcome
+            next_topic: The AI-specified next curiosity topic
+
+        Returns:
+            The NEW active goal (the AI-specified topic)
+        """
+        current = self._ledger.get_active_goal()
+
+        if current is not None:
+            self._ledger.resolve_goal(current.id, status, notes)
+            log_info(
+                f"Curiosity resolved: {status.value} - {notes or 'no notes'}",
+                prefix="🔍"
+            )
+
+        # Create candidate from AI-specified topic
+        ai_candidate = CuriosityCandidate(
+            content=next_topic,
+            source_memory_id=0,  # No source memory - AI discovered this
+            weight=1.0,
+            category="fresh_discovery",  # AI discoveries are always fresh
+            context=f"Discovered during conversation: {notes or 'No context'}",
+            last_discussed=None,
+            importance=0.8  # High importance - AI chose this deliberately
+        )
+
+        # Activate directly (bypass analyzer/selector pipeline)
+        new_goal = self._ledger.activate_goal(ai_candidate)
+        self._emit_dev_update("ai_specified", new_goal)
+
+        log_info(f"AI-specified curiosity activated: {next_topic[:50]}...", prefix="🔍")
         return new_goal
 
     def _select_new_goal(self) -> CuriosityGoal:
