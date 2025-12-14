@@ -1,19 +1,12 @@
 """
 Pattern Project - Memory Extractor
-Extracts memories from conversations using topic-based clustering.
+Extracts memories from conversations using UNIFIED API extraction.
 
 ARCHITECTURE (Windowed Extraction System):
     The extractor is tightly coupled with the context window system.
     Turns flow: Context Window → Extraction → Memory Store → Gone from context
 
-    OLD SYSTEM (Threshold-Based) - DEPRECATED:
-        - Triggered when unprocessed turns >= 10
-        - Processed up to 50 turns at once
-        - Context window and extraction were independent
-        - Problem: Same turns could be in context AND queued for extraction
-        - Problem: Same facts extracted from different turn batches
-
-    NEW SYSTEM (Windowed):
+    WINDOWED SYSTEM:
         - Triggered when context window overflows (35 > 30)
         - Processes exactly the overflow amount (oldest 5 turns)
         - Context window and extraction are coordinated via processed_for_memory flag
@@ -24,20 +17,28 @@ ARCHITECTURE (Windowed Extraction System):
     not independently. This ensures each turn is extracted exactly once.
 
 Extraction Process:
-    The extractor uses a TWO-PHASE approach to create high-quality, consolidated memories:
+    UNIFIED EXTRACTION (Single API Call):
+        The extractor uses a SINGLE API call to Claude to extract BOTH types
+        of memories in one pass:
 
-    Phase 1 - Topic Segmentation:
-        Analyzes conversation turns to identify distinct topic clusters.
-        Example: 5 turns about debugging + 2 turns about lunch = 2 topic clusters
+        1. EPISODIC MEMORIES: Narrative memories about what happened (first-person)
+           - Topic identification, synthesis, importance, and type classification
+           - Example: "I helped Brian debug a Flask circular import issue"
 
-    Phase 2 - Memory Synthesis:
-        For each significant topic cluster, synthesizes ONE consolidated memory.
-        Example: 5 debugging turns → 1 memory capturing the key insight
+        2. FACTUAL MEMORIES: Concrete facts about the user (third-person)
+           - Biographical info, preferences, habits, relationships
+           - Example: "Brian is 45 years old"
 
-    Result: 5 overflow turns → 1-3 high-quality memories (not 1 per turn)
+    This REPLACED the previous multi-pass local LLM approach which used
+    5+ separate KoboldCpp calls:
+        OLD: Topic ID (local) → Turn Assignment (local) → Memory Content (local)
+             → Importance (local) → Type (local) → Facts (API) = 6 calls
+        NEW: Unified Extraction (API) = 1 call
 
-    Additionally, a parallel FACTUAL EXTRACTION pass extracts concrete facts
-    (e.g., "Brian is 45 years old") as separate memories.
+    The API model (Claude) is capable enough to handle all these tasks in
+    one comprehensive pass, improving quality and reducing latency.
+
+    Result: 5 overflow turns → 1-3 episodic + 0-6 factual memories per extraction
 """
 
 import re
@@ -57,20 +58,17 @@ from config import USER_NAME, AI_NAME
 
 
 # =============================================================================
-# PHASE 1: TOPIC SEGMENTATION (MULTI-PASS APPROACH)
+# LEGACY: PHASE 1 TOPIC SEGMENTATION (MULTI-PASS APPROACH)
 # =============================================================================
-# Topic identification is split into two simple LLM calls:
-#   Pass 1: Identify topics (natural language output)
-#   Pass 2: Assign turns to topics (simple JSON mapping)
-#   Significance: Calculated from turn count (no LLM needed)
+# DEPRECATED: These prompts were used with local LLMs (KoboldCpp) for multi-pass
+# extraction. They have been replaced by UNIFIED_EXTRACTION_PROMPT which handles
+# everything in a single API call to Claude.
 #
-# This approach is more reliable because:
-# - Each prompt has ONE simple task
-# - Less chance of schema errors
-# - Local LLM calls are free, so multiple calls cost nothing
-# - Easier to debug which step failed
+# Kept for reference and potential fallback scenarios.
+# =============================================================================
 
 # Pass 1: Identify what topics exist (natural language, no JSON)
+# LEGACY - Not used in unified extraction
 TOPIC_IDENTIFICATION_PROMPT = """You are analyzing a conversation. List the distinct topics discussed.
 
 Instructions:
@@ -89,8 +87,7 @@ Conversation:
 """
 
 # Pass 2: Classify each turn into a topic (Linear method - one decision at a time)
-# Uses letter-based turn labels (A, B, C...) to prevent LLM from hallucinating extra turns
-# The distinct symbol space (letters for turns, numbers for topics) reduces confusion
+# LEGACY - Not used in unified extraction
 TURN_ASSIGNMENT_PROMPT = """Classify each turn into one of the topics below.
 
 Topics:
@@ -110,20 +107,14 @@ Output only the JSON object:"""
 
 
 # =============================================================================
-# PHASE 2: MEMORY SYNTHESIS (MULTI-PASS APPROACH)
+# LEGACY: PHASE 2 MEMORY SYNTHESIS (MULTI-PASS APPROACH)
 # =============================================================================
-# Memory synthesis is split into three simple LLM calls:
-#   Pass 1: Write a 1-2 sentence memory summary (natural language)
-#   Pass 2: Rate importance 0-10 (single number)
-#   Pass 3: Classify type (single word)
-#   decay_category: Inferred from type + importance (no LLM needed)
-#
-# This approach is more reliable because:
-# - Each prompt has ONE simple task
-# - No complex JSON schema to follow
-# - Local LLM calls are free
+# DEPRECATED: These prompts were used with local LLMs (KoboldCpp) for multi-pass
+# extraction. They have been replaced by UNIFIED_EXTRACTION_PROMPT.
+# =============================================================================
 
 # Pass 1: Synthesize memory content (natural language, first-person)
+# LEGACY - Not used in unified extraction
 MEMORY_CONTENT_PROMPT = """Write a 1-2 sentence memory from this conversation.
 
 Instructions:
@@ -140,6 +131,7 @@ Conversation:
 Write your memory:"""
 
 # Pass 2: Rate importance (categorical - more reliable than numeric scale)
+# LEGACY - Not used in unified extraction
 MEMORY_IMPORTANCE_PROMPT = """Rate this memory's importance.
 
 Choose ONE:
@@ -152,6 +144,7 @@ Memory: {content}
 Respond with one word (HIGH, MEDIUM, or LOW):"""
 
 # Pass 3: Classify type (single word)
+# LEGACY - Not used in unified extraction
 MEMORY_TYPE_PROMPT = """Classify this memory into one category.
 
 Categories:
@@ -167,83 +160,115 @@ Respond with only one word (fact, preference, event, reflection, or observation)
 
 
 # =============================================================================
-# FACTUAL EXTRACTION PROMPTS (DUAL-TRACK SYSTEM)
+# UNIFIED EXTRACTION PROMPT (SINGLE API CALL)
 # =============================================================================
-# Factual extraction runs as a parallel pass alongside episodic extraction.
-# It focuses on extracting concrete facts rather than narrative summaries.
+# This prompt combines episodic and factual extraction into ONE API call.
+# The API model (Claude) is capable enough to handle multi-part extraction
+# in a single pass, saving time and API costs.
 #
-# Key differences from episodic extraction:
-# - Output style: Third-person assertions ("Brian is 45") not first-person narratives
-# - No topic clustering: Facts are extracted from the whole conversation at once
-# - More granular: One fact per statement, atomic facts
-# - Different decay: Facts generally persist longer than episodic observations
+# Outputs two sections:
+# 1. EPISODIC MEMORIES: Narrative memories about what happened (first-person)
+# 2. FACTUAL MEMORIES: Concrete facts about the user (third-person assertions)
 
-FACTUAL_EXTRACTION_PROMPT = """<task>
-Extract facts about {user_name} from this conversation. Focus on durable information that would be useful to remember in future conversations.
+UNIFIED_EXTRACTION_PROMPT = """<task>
+Analyze this conversation and extract TWO types of memories:
+1. EPISODIC: Narrative memories about what happened, discussions, or experiences (written as the AI "I")
+2. FACTUAL: Concrete facts about {user_name} that would be useful to remember
+
+You are an AI extracting memories from a conversation you had with {user_name}.
 </task>
 
-<critical_rules>
-1. ONLY extract facts {user_name} explicitly stated or confirmed
-2. AI suggestions are NOT user preferences unless {user_name} agreed
-3. If the AI suggested something and {user_name} pushed back or was uncertain, that is NOT a preference
-4. NEVER extract what the AI said, thought, or observed - only information about {user_name}
-5. Look for confirmation patterns: "yes", "I like", "I prefer", "that's right", agreement
-6. Look for rejection patterns: "maybe too", "not sure", "but", uncertainty, pushback
-</critical_rules>
+<episodic_instructions>
+For episodic memories:
+- Identify distinct topics/themes discussed (debugging, personal stories, technical decisions, etc.)
+- Write 1-2 sentence memories in FIRST PERSON as the AI ("I"), referring to the human as "{user_name}"
+- Focus on insights, shifts, moments of connection, or friction
+- Be specific: use real names, details, and context
+- Create ONE memory per significant topic (3+ turns of discussion)
+- Skip trivial small talk unless it reveals something meaningful
+</episodic_instructions>
 
-<what_to_extract>
-- {user_name}'s stated preferences, likes, and dislikes
-- Biographical information (age, location, job, relationships)
-- Technical choices and tools {user_name} uses
-- Habits and routines mentioned
-- Projects or goals {user_name} is working on
-- References to people, pets, or things {user_name} knows
-</what_to_extract>
+<factual_instructions>
+For factual memories:
+- ONLY extract facts {user_name} explicitly stated or confirmed
+- AI suggestions are NOT facts unless {user_name} agreed
+- Look for: preferences, biographical info, technical choices, habits, projects, relationships
+- Write as third-person assertions ("{user_name} is...", "{user_name} prefers...")
+- Ignore: AI observations, hypotheticals, rejected suggestions, emotional filler
+</factual_instructions>
 
-<what_to_ignore>
-- Anything the AI said or suggested (unless {user_name} confirmed it)
-- AI's observations, reactions, or opinions
-- Hypotheticals and "what ifs"
-- Emotional reactions and conversational filler
-- Preferences still being explored or debated
-</what_to_ignore>
+<importance_guide>
+- HIGH: Life decisions, identity insights, strong preferences, significant milestones
+- MEDIUM: Useful context, notable conversations, moderate preferences
+- LOW: Casual observations, minor details, brief exchanges
+</importance_guide>
+
+<type_guide>
+For episodic: fact, preference, event, reflection, observation
+For factual: fact, preference (only these two)
+</type_guide>
 
 <output_format>
-For each fact, output exactly this format using {user_name}'s name (not "the user"):
+Output in EXACTLY this format. Use ONLY this structure:
+
+===EPISODIC===
+MEMORY: [First-person narrative memory as the AI]
+IMPORTANCE: [HIGH/MEDIUM/LOW]
+TYPE: [fact/preference/event/reflection/observation]
+TOPIC: [Brief topic description]
+
+MEMORY: [Another episodic memory if applicable]
+IMPORTANCE: [HIGH/MEDIUM/LOW]
+TYPE: [fact/preference/event/reflection/observation]
+TOPIC: [Brief topic description]
+
+===FACTUAL===
 FACT: [{user_name} + third-person assertion]
 IMPORTANCE: [HIGH/MEDIUM/LOW]
 TYPE: [fact/preference]
 
-If no concrete facts are present, output only: NONE
+FACT: [Another fact if applicable]
+IMPORTANCE: [HIGH/MEDIUM/LOW]
+TYPE: [fact/preference]
+
+If no episodic memories, output: ===EPISODIC===
+NONE
+
+If no factual memories, output: ===FACTUAL===
+NONE
 </output_format>
 
 <examples>
-Example 1 - Correct extraction:
-Conversation: "{user_name}: I'm 32 and work as a data scientist"
+Example conversation: "{user_name}: I've been debugging this Flask app all day. The circular import is driving me crazy."
+AI: "Have you tried lazy imports?"
+{user_name}: "Yeah, that fixed it! I'm 32 by the way, started coding late."
+
+Example output:
+===EPISODIC===
+MEMORY: I helped {user_name} debug a circular import issue in their Flask app - lazy imports solved it. They mentioned starting coding later in life, which gives context to their learning journey.
+IMPORTANCE: MEDIUM
+TYPE: event
+TOPIC: Flask debugging and personal background
+
+===FACTUAL===
 FACT: {user_name} is 32 years old
 IMPORTANCE: MEDIUM
 TYPE: fact
-FACT: {user_name} works as a data scientist
+
+FACT: {user_name} started coding later in life
 IMPORTANCE: MEDIUM
 TYPE: fact
 
-Example 2 - Attribution error to avoid:
-Conversation: "Claude: Maybe try a minimalist design? {user_name}: Hmm, that might be too plain"
-WRONG: "{user_name} prefers minimalist design" (AI suggested it, user pushed back)
-CORRECT: Output NONE or note {user_name} finds minimalist design too plain
-
-Example 3 - User confirmation:
-Conversation: "Claude: So you prefer TypeScript? {user_name}: Yes, definitely over JavaScript"
-FACT: {user_name} prefers TypeScript over JavaScript
-IMPORTANCE: MEDIUM
-TYPE: preference
+FACT: {user_name} works with Flask
+IMPORTANCE: LOW
+TYPE: fact
 </examples>
 
 <conversation>
 {conversation}
 </conversation>
 
-Extract facts about {user_name} (output NONE if no concrete facts are present):"""
+Extract memories from this conversation:"""
 
 
 # =============================================================================
@@ -415,7 +440,7 @@ def infer_decay_category_factual(memory_type: str, importance: float) -> str:
 
 class MemoryExtractor:
     """
-    Extracts memories from conversations using topic-based clustering.
+    Extracts memories from conversations using a UNIFIED API call.
 
     ARCHITECTURE (Windowed Extraction):
         The extractor is coordinated with the context window system:
@@ -426,10 +451,14 @@ class MemoryExtractor:
         This ensures each turn is extracted exactly once, right as it
         leaves the active context window.
 
-    Extraction Process:
-        1. Topic Segmentation: Identify distinct topic clusters
-        2. Memory Synthesis: Create ONE consolidated memory per significant topic
-        3. Factual Extraction: Extract concrete facts as separate memories
+    Extraction Process (UNIFIED - Single API Call):
+        A single API call to Claude extracts BOTH types of memories:
+        1. EPISODIC: Narrative memories about what happened (first-person)
+        2. FACTUAL: Concrete facts about the user (third-person assertions)
+
+        This replaced the previous multi-pass local LLM approach which used
+        5+ separate calls. The API model is capable enough to handle the
+        combined extraction in one pass, saving time and improving quality.
 
     Triggers:
         - Context overflow: When unprocessed turns >= CONTEXT_OVERFLOW_TRIGGER (35)
@@ -550,17 +579,17 @@ class MemoryExtractor:
         """
         Extract memories from oldest unprocessed turns (windowed extraction).
 
-        This is the main entry point for memory extraction. Runs TWO extraction passes:
+        This is the main entry point for memory extraction. Uses a SINGLE API call
+        to extract BOTH types of memories:
 
-        1. EPISODIC EXTRACTION:
-           - Identifies topic clusters in the conversation
-           - Synthesizes narrative memories per significant topic
-           - Captures "what happened" - relationship texture and experiences
+        1. EPISODIC: Narrative memories about what happened (first-person)
+        2. FACTUAL: Concrete facts about the user (third-person assertions)
 
-        2. FACTUAL EXTRACTION:
-           - Scans conversation for concrete facts
-           - Extracts atomic assertions about people, places, things
-           - Captures "what is true" - factual scaffolding
+        UNIFIED EXTRACTION (Single API Call):
+            - Replaces the previous multi-pass local LLM approach
+            - Claude handles topic identification, memory synthesis, and fact
+              extraction in one comprehensive pass
+            - Improves quality and reduces latency
 
         WINDOWED EXTRACTION:
             - Processes only the OLDEST turns that exceed context_window_size
@@ -603,165 +632,98 @@ class MemoryExtractor:
                     return 0
 
                 log_info(
-                    f"Processing {len(turns)} overflow turns for dual-track extraction "
+                    f"Processing {len(turns)} overflow turns for unified extraction "
                     f"(keeping {self.context_window_size} in context)",
                     prefix="🧠"
                 )
 
                 # =============================================================
-                # TRACK 1: EPISODIC EXTRACTION
-                # Narrative memories about what happened
+                # UNIFIED EXTRACTION (Single API Call)
+                # Extracts BOTH episodic and factual memories in one pass
                 # =============================================================
-                log_info("Starting episodic extraction (narrative memories)...", prefix="📖")
+                log_info("Starting unified extraction (single API call)...", prefix="🔄")
 
-                # ─────────────────────────────────────────────────────────────
-                # PHASE 1: Topic Segmentation
-                # Identify distinct topic clusters in the conversation
-                # ─────────────────────────────────────────────────────────────
-                topics = self._identify_topics(turns)
-
-                if not topics:
-                    log_warning("Topic segmentation failed, falling back to single-topic mode")
-                    # Fallback: treat all turns as one topic
-                    topics = [TopicCluster(
-                        topic_id=1,
-                        description="General conversation",
-                        turn_ids=[t.id for t in turns],
-                        significance="major"
-                    )]
-
-                log_info(f"Identified {len(topics)} topic clusters", prefix="🧠")
-
-                # ─────────────────────────────────────────────────────────────
-                # PHASE 2: Memory Synthesis
-                # Create ONE memory per significant topic cluster
-                # ─────────────────────────────────────────────────────────────
                 session_id = tracker.current_session_id
                 episodic_created = 0
                 factual_created = 0
 
                 # Track which turns were successfully incorporated into memories
                 successfully_processed_turn_ids = set()
+                all_turn_ids = [t.id for t in turns]
+                all_turn_ids_set = set(all_turn_ids)
+                source_time = turns[-1].created_at if turns else datetime.now()
 
-                # Adaptive minor topic handling: for small batches, preserve all topics
-                # This ensures short but meaningful conversations create episodic memories
-                effective_skip_minor = self.skip_minor_topics
-                if len(turns) < self.small_batch_threshold:
-                    effective_skip_minor = False
-                    log_info(
-                        f"Small batch ({len(turns)} turns < {self.small_batch_threshold}) - "
-                        "preserving minor topics for episodic memory",
-                        prefix="🧠"
+                # Make the unified extraction call
+                episodic_memories, factual_memories = self._extract_unified(turns)
+
+                # ─────────────────────────────────────────────────────────────
+                # Process episodic memories
+                # ─────────────────────────────────────────────────────────────
+                for memory in episodic_memories[:self.max_episodic_per_extraction]:
+                    # Check importance floor - skip trivial memories
+                    if memory.importance < self.importance_floor:
+                        log_info(
+                            f"Skipping low-importance episodic memory: '{memory.content[:40]}...' "
+                            f"(importance: {memory.importance:.2f} < floor: {self.importance_floor})",
+                            prefix="⏭️"
+                        )
+                        continue
+
+                    memory_id = vector_store.add_memory(
+                        content=memory.content,
+                        source_conversation_ids=all_turn_ids,
+                        source_session_id=session_id,
+                        source_timestamp=source_time,
+                        importance=memory.importance,
+                        memory_type=memory.memory_type,
+                        decay_category=memory.decay_category,
+                        memory_category="episodic"
                     )
 
-                for topic in topics:
-                    # Check if we've hit the episodic memory cap for this extraction run
-                    if episodic_created >= self.max_episodic_per_extraction:
-                        log_info(f"Hit max episodic memories per extraction ({self.max_episodic_per_extraction})")
-                        break
-
-                    # Skip minor topics if configured (adaptive based on batch size)
-                    if effective_skip_minor and not topic.is_major():
-                        log_info(f"Skipping minor topic: {topic.description}")
-                        continue
-
-                    # Skip topics with too few turns (not enough context)
-                    if topic.turn_count() < self.min_turns_per_topic:
-                        log_info(f"Skipping topic with only {topic.turn_count()} turns: {topic.description}")
-                        continue
-
-                    # Get the actual turns for this topic
-                    topic_turns = [t for t in turns if t.id in topic.turn_ids]
-
-                    if not topic_turns:
-                        continue
-
-                    # Synthesize memory for this topic
-                    # Large topics may produce up to 2 memories
-                    max_memories_for_topic = 2 if topic.turn_count() >= self.large_topic_threshold else 1
-
-                    synthesized = self._synthesize_topic_memory(topic, topic_turns)
-
-                    if synthesized:
-                        # Check importance floor - skip trivial memories
-                        if synthesized.importance < self.importance_floor:
-                            log_info(
-                                f"Skipping low-importance memory for topic '{topic.description[:40]}...' "
-                                f"(importance: {synthesized.importance:.2f} < floor: {self.importance_floor})",
-                                prefix="⏭️"
-                            )
-                            continue
-
-                        # Determine source timestamp from the topic's turns
-                        source_time = topic_turns[-1].created_at if topic_turns else datetime.now()
-
-                        memory_id = vector_store.add_memory(
-                            content=synthesized.content,
-                            source_conversation_ids=topic.turn_ids,
-                            source_session_id=session_id,
-                            source_timestamp=source_time,
-                            importance=synthesized.importance,
-                            memory_type=synthesized.memory_type,
-                            decay_category=synthesized.decay_category,
-                            memory_category="episodic"  # Dual-track: narrative memories
+                    if memory_id:
+                        episodic_created += 1
+                        successfully_processed_turn_ids.update(all_turn_ids_set)
+                        topic_desc = memory.source_topic or "general"
+                        log_info(
+                            f"Created episodic memory for '{topic_desc[:30]}...' "
+                            f"(importance: {memory.importance:.2f})",
+                            prefix="📖"
                         )
-
-                        if memory_id:
-                            episodic_created += 1
-                            # Track turns that successfully became part of a memory
-                            successfully_processed_turn_ids.update(topic.turn_ids)
-                            log_info(
-                                f"Created episodic memory for topic '{topic.description[:40]}...' "
-                                f"(importance: {synthesized.importance:.2f})",
-                                prefix="📖"
-                            )
 
                 log_info(f"Episodic extraction complete: {episodic_created} memories", prefix="📖")
 
-                # =============================================================
-                # TRACK 2: FACTUAL EXTRACTION
-                # Concrete facts extracted from conversation
-                # =============================================================
-                log_info("Starting factual extraction (concrete facts)...", prefix="📌")
-
-                # Extract facts from the entire conversation batch
-                # No topic clustering needed - facts are extracted globally
-                facts = self._extract_facts(turns)
-
-                if facts:
-                    all_turn_ids_set = set(t.id for t in turns)
-                    source_time = turns[-1].created_at if turns else datetime.now()
-
-                    for fact in facts[:self.max_factual_per_extraction]:
-                        # Check importance floor
-                        if fact.importance < self.importance_floor:
-                            log_info(
-                                f"Skipping low-importance fact: '{fact.content[:40]}...' "
-                                f"(importance: {fact.importance:.2f})",
-                                prefix="⏭️"
-                            )
-                            continue
-
-                        memory_id = vector_store.add_memory(
-                            content=fact.content,
-                            source_conversation_ids=list(all_turn_ids_set),
-                            source_session_id=session_id,
-                            source_timestamp=source_time,
-                            importance=fact.importance,
-                            memory_type=fact.memory_type,
-                            decay_category=fact.decay_category,
-                            memory_category="factual"  # Dual-track: concrete facts
+                # ─────────────────────────────────────────────────────────────
+                # Process factual memories
+                # ─────────────────────────────────────────────────────────────
+                for fact in factual_memories[:self.max_factual_per_extraction]:
+                    # Check importance floor
+                    if fact.importance < self.importance_floor:
+                        log_info(
+                            f"Skipping low-importance fact: '{fact.content[:40]}...' "
+                            f"(importance: {fact.importance:.2f})",
+                            prefix="⏭️"
                         )
+                        continue
 
-                        if memory_id:
-                            factual_created += 1
-                            # Facts come from entire conversation, mark all turns
-                            successfully_processed_turn_ids.update(all_turn_ids_set)
-                            log_info(
-                                f"Created factual memory: '{fact.content[:50]}...' "
-                                f"(importance: {fact.importance:.2f})",
-                                prefix="📌"
-                            )
+                    memory_id = vector_store.add_memory(
+                        content=fact.content,
+                        source_conversation_ids=all_turn_ids,
+                        source_session_id=session_id,
+                        source_timestamp=source_time,
+                        importance=fact.importance,
+                        memory_type=fact.memory_type,
+                        decay_category=fact.decay_category,
+                        memory_category="factual"
+                    )
+
+                    if memory_id:
+                        factual_created += 1
+                        successfully_processed_turn_ids.update(all_turn_ids_set)
+                        log_info(
+                            f"Created factual memory: '{fact.content[:50]}...' "
+                            f"(importance: {fact.importance:.2f})",
+                            prefix="📌"
+                        )
 
                 log_info(f"Factual extraction complete: {factual_created} facts", prefix="📌")
 
@@ -809,25 +771,22 @@ class MemoryExtractor:
                 return 0
 
     # =========================================================================
-    # PHASE 1: TOPIC SEGMENTATION (MULTI-PASS)
+    # LEGACY: PHASE 1 TOPIC SEGMENTATION (MULTI-PASS)
+    # =========================================================================
+    # DEPRECATED: These methods were used for multi-pass local LLM extraction.
+    # They have been replaced by _extract_unified() for single API call extraction.
+    # Kept for reference and potential fallback scenarios.
     # =========================================================================
 
     def _identify_topics(self, turns: List[ConversationTurn]) -> List[TopicCluster]:
         """
-        Phase 1: Identify distinct topic clusters using a multi-pass approach.
+        LEGACY: Identify distinct topic clusters using a multi-pass approach.
 
-        Pass 1: Ask LLM to list topics (natural language, no JSON)
-        Pass 2: Ask LLM to assign turn labels to topics (simple JSON with letters)
-        Significance: Calculated from turn count (no LLM call needed)
+        DEPRECATED: This method used local LLM calls (KoboldCpp) for multi-pass
+        topic identification. It has been replaced by _extract_unified() which
+        handles everything in a single API call to Claude.
 
-        This multi-pass approach is more reliable than single-pass because:
-        - Each prompt has ONE simple task
-        - Less chance of schema errors
-        - Local LLM calls are free, so multiple calls cost nothing
-        - Easier to debug which step failed
-
-        Uses letter-based turn labels (A, B, C...) instead of numbers to prevent
-        the LLM from hallucinating extra turns by pattern-matching on examples.
+        Kept for potential fallback scenarios.
 
         Args:
             turns: List of conversation turns to analyze
@@ -1062,7 +1021,9 @@ class MemoryExtractor:
             return {}
 
     # =========================================================================
-    # PHASE 2: MEMORY SYNTHESIS
+    # LEGACY: PHASE 2 MEMORY SYNTHESIS
+    # =========================================================================
+    # DEPRECATED: See note in PHASE 1 section above.
     # =========================================================================
 
     def _synthesize_topic_memory(
@@ -1071,17 +1032,12 @@ class MemoryExtractor:
         turns: List[ConversationTurn]
     ) -> Optional[SynthesizedMemory]:
         """
-        Phase 2: Synthesize ONE consolidated memory using multi-pass approach.
+        LEGACY: Synthesize ONE consolidated memory using multi-pass approach.
 
-        Pass 1: Write a 1-2 sentence memory summary (natural language)
-        Pass 2: Rate importance 0-10 (single number)
-        Pass 3: Classify type (single word)
-        decay_category: Inferred from type + importance (no LLM call needed)
+        DEPRECATED: This method used local LLM calls for multi-pass memory
+        synthesis. It has been replaced by _extract_unified().
 
-        This multi-pass approach is more reliable than single-pass JSON because:
-        - Each prompt has ONE simple task
-        - No complex JSON schema to follow
-        - Local LLM calls are free
+        Kept for potential fallback scenarios.
 
         Args:
             topic: The topic cluster to synthesize
@@ -1250,17 +1206,20 @@ class MemoryExtractor:
         return "observation"  # Default
 
     # =========================================================================
-    # FACTUAL EXTRACTION (DUAL-TRACK SYSTEM)
+    # LEGACY: FACTUAL EXTRACTION (SEPARATE CALL)
+    # =========================================================================
+    # DEPRECATED: Now integrated into _extract_unified() for single API call.
     # =========================================================================
 
     def _extract_facts(self, turns: List[ConversationTurn]) -> List[ExtractedFact]:
         """
-        Extract concrete facts from conversation turns.
+        LEGACY: Extract concrete facts from conversation turns.
 
-        Unlike episodic extraction, factual extraction:
-        - Processes the entire conversation at once (no topic clustering)
-        - Extracts atomic facts as third-person assertions
-        - Uses a single LLM call with structured output parsing
+        DEPRECATED: This method made a separate API call for fact extraction.
+        It has been integrated into _extract_unified() which handles both
+        episodic and factual extraction in a single API call.
+
+        Kept for potential fallback scenarios.
 
         Args:
             turns: List of conversation turns to extract facts from
@@ -1380,6 +1339,268 @@ class MemoryExtractor:
                 memory_type=current_type,
                 decay_category=decay_category,
                 source_turn_ids=all_turn_ids
+            ))
+
+        return facts
+
+    # =========================================================================
+    # UNIFIED EXTRACTION (SINGLE API CALL)
+    # =========================================================================
+
+    def _extract_unified(
+        self,
+        turns: List[ConversationTurn]
+    ) -> Tuple[List[SynthesizedMemory], List[ExtractedFact]]:
+        """
+        Extract BOTH episodic and factual memories in a SINGLE API call.
+
+        This method replaces the previous multi-pass approach that used
+        5+ separate local LLM calls. The API model (Claude) is capable
+        enough to handle topic identification, memory synthesis, and fact
+        extraction in one comprehensive pass.
+
+        Args:
+            turns: List of conversation turns to extract from
+
+        Returns:
+            Tuple of (episodic_memories, factual_memories)
+        """
+        router = get_llm_router()
+
+        # Format conversation for extraction
+        conversation_text = self._format_turns_for_synthesis(turns)
+
+        log_info(f"Making unified extraction API call for {len(turns)} turns...", prefix="🔄")
+
+        # Single API call to extract both types of memories
+        unified_prompt = UNIFIED_EXTRACTION_PROMPT.format(
+            conversation=conversation_text,
+            user_name=USER_NAME
+        )
+
+        response = router.generate(
+            prompt=unified_prompt,
+            task_type=TaskType.EXTRACTION,  # Routes to API for unified extraction
+            temperature=0.3,  # Balanced for both synthesis and extraction
+            max_tokens=2048   # Allow room for multiple memories
+        )
+
+        if not response.success:
+            log_error(f"Unified extraction failed: {response.error}")
+            return [], []
+
+        # Parse the unified response
+        episodic, factual = self._parse_unified_response(response.text, turns)
+
+        log_info(
+            f"Unified extraction complete: {len(episodic)} episodic, {len(factual)} factual",
+            prefix="✅"
+        )
+
+        return episodic, factual
+
+    def _parse_unified_response(
+        self,
+        response_text: str,
+        turns: List[ConversationTurn]
+    ) -> Tuple[List[SynthesizedMemory], List[ExtractedFact]]:
+        """
+        Parse the unified extraction response into separate memory lists.
+
+        Expected format:
+        ===EPISODIC===
+        MEMORY: [content]
+        IMPORTANCE: [HIGH/MEDIUM/LOW]
+        TYPE: [type]
+        TOPIC: [topic description]
+
+        ===FACTUAL===
+        FACT: [content]
+        IMPORTANCE: [HIGH/MEDIUM/LOW]
+        TYPE: [fact/preference]
+
+        Args:
+            response_text: Raw LLM response
+            turns: Source turns (for turn ID tracking)
+
+        Returns:
+            Tuple of (episodic_memories, factual_memories)
+        """
+        episodic_memories = []
+        factual_memories = []
+        all_turn_ids = [t.id for t in turns]
+
+        text = response_text.strip()
+
+        # Split into episodic and factual sections
+        episodic_section = ""
+        factual_section = ""
+
+        if "===EPISODIC===" in text:
+            parts = text.split("===EPISODIC===", 1)
+            if len(parts) > 1:
+                remainder = parts[1]
+                if "===FACTUAL===" in remainder:
+                    episodic_section, factual_section = remainder.split("===FACTUAL===", 1)
+                else:
+                    episodic_section = remainder
+        elif "===FACTUAL===" in text:
+            factual_section = text.split("===FACTUAL===", 1)[1]
+
+        # Parse episodic memories
+        if episodic_section.strip() and "NONE" not in episodic_section.upper()[:50]:
+            episodic_memories = self._parse_episodic_section(episodic_section, all_turn_ids)
+
+        # Parse factual memories
+        if factual_section.strip() and "NONE" not in factual_section.upper()[:50]:
+            factual_memories = self._parse_factual_section(factual_section, all_turn_ids)
+
+        return episodic_memories, factual_memories
+
+    def _parse_episodic_section(
+        self,
+        section: str,
+        turn_ids: List[int]
+    ) -> List[SynthesizedMemory]:
+        """
+        Parse the episodic section of the unified response.
+
+        Args:
+            section: The episodic section text
+            turn_ids: Source turn IDs
+
+        Returns:
+            List of SynthesizedMemory objects
+        """
+        memories = []
+        lines = section.strip().split('\n')
+
+        current_content = None
+        current_importance = "MEDIUM"
+        current_type = "event"
+        current_topic = None
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+
+            # Check for MEMORY line
+            if line.upper().startswith("MEMORY:"):
+                # Save previous memory if exists
+                if current_content:
+                    importance_value = self._parse_importance_response(current_importance)
+                    decay_category = infer_decay_category(current_type, importance_value)
+                    memories.append(SynthesizedMemory(
+                        content=current_content,
+                        importance=importance_value,
+                        memory_type=current_type,
+                        decay_category=decay_category,
+                        source_turn_ids=turn_ids,
+                        source_topic=current_topic
+                    ))
+
+                # Start new memory
+                current_content = line[7:].strip()  # Remove "MEMORY:" prefix
+                current_importance = "MEDIUM"
+                current_type = "event"
+                current_topic = None
+
+            # Check for IMPORTANCE line
+            elif line.upper().startswith("IMPORTANCE:"):
+                current_importance = line[11:].strip()
+
+            # Check for TYPE line
+            elif line.upper().startswith("TYPE:"):
+                type_value = line[5:].strip().lower()
+                if type_value in ("fact", "preference", "event", "reflection", "observation"):
+                    current_type = type_value
+
+            # Check for TOPIC line
+            elif line.upper().startswith("TOPIC:"):
+                current_topic = line[6:].strip()
+
+        # Don't forget the last memory
+        if current_content:
+            importance_value = self._parse_importance_response(current_importance)
+            decay_category = infer_decay_category(current_type, importance_value)
+            memories.append(SynthesizedMemory(
+                content=current_content,
+                importance=importance_value,
+                memory_type=current_type,
+                decay_category=decay_category,
+                source_turn_ids=turn_ids,
+                source_topic=current_topic
+            ))
+
+        return memories
+
+    def _parse_factual_section(
+        self,
+        section: str,
+        turn_ids: List[int]
+    ) -> List[ExtractedFact]:
+        """
+        Parse the factual section of the unified response.
+
+        Args:
+            section: The factual section text
+            turn_ids: Source turn IDs
+
+        Returns:
+            List of ExtractedFact objects
+        """
+        facts = []
+        lines = section.strip().split('\n')
+
+        current_fact = None
+        current_importance = "MEDIUM"
+        current_type = "fact"
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+
+            # Check for FACT line
+            if line.upper().startswith("FACT:"):
+                # Save previous fact if exists
+                if current_fact:
+                    importance_value = self._parse_importance_response(current_importance)
+                    decay_category = infer_decay_category_factual(current_type, importance_value)
+                    facts.append(ExtractedFact(
+                        content=current_fact,
+                        importance=importance_value,
+                        memory_type=current_type,
+                        decay_category=decay_category,
+                        source_turn_ids=turn_ids
+                    ))
+
+                # Start new fact
+                current_fact = line[5:].strip()  # Remove "FACT:" prefix
+                current_importance = "MEDIUM"
+                current_type = "fact"
+
+            # Check for IMPORTANCE line
+            elif line.upper().startswith("IMPORTANCE:"):
+                current_importance = line[11:].strip()
+
+            # Check for TYPE line
+            elif line.upper().startswith("TYPE:"):
+                type_value = line[5:].strip().lower()
+                if type_value in ("fact", "preference"):
+                    current_type = type_value
+
+        # Don't forget the last fact
+        if current_fact:
+            importance_value = self._parse_importance_response(current_importance)
+            decay_category = infer_decay_category_factual(current_type, importance_value)
+            facts.append(ExtractedFact(
+                content=current_fact,
+                importance=importance_value,
+                memory_type=current_type,
+                decay_category=decay_category,
+                source_turn_ids=turn_ids
             ))
 
         return facts

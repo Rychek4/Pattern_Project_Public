@@ -49,8 +49,9 @@ KOBOLD_MAX_LENGTH = int(os.getenv("KOBOLD_MAX_LENGTH", "512"))
 
 # Routing
 LLM_PRIMARY_PROVIDER = os.getenv("LLM_PRIMARY_PROVIDER", "anthropic")  # 'anthropic' or 'kobold'
-LLM_EXTRACTION_PROVIDER = "kobold"  # Always use local for extraction
-LLM_FALLBACK_ENABLED = True  # Fall back to kobold if anthropic fails
+# LLM_EXTRACTION_PROVIDER - DEPRECATED: Unified extraction now uses API (single call)
+# Memory extraction was consolidated from 5+ local LLM calls to 1 API call for better quality
+LLM_FALLBACK_ENABLED = True  # Fall back to kobold if anthropic fails (not for extraction)
 
 # =============================================================================
 # DATABASE CONFIGURATION
