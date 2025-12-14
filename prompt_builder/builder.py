@@ -236,16 +236,10 @@ def create_default_builder() -> PromptBuilder:
         sources.append(CuriositySource())
         log_info("CuriositySource enabled", prefix="🔍")
 
-    # Legacy VisualSource is disabled by default
-    # The new visual capture system sends images directly to Claude via multimodal messages
-    # VisualSource (which used Gemini for text descriptions) is kept for potential fallback
-    # To enable legacy mode, set VISUAL_CAPTURE_MODE="legacy" (not currently implemented)
-    if getattr(config, 'VISUAL_CAPTURE_MODE', 'auto') == "legacy":
-        from prompt_builder.sources.visual import VisualSource
-        sources.append(VisualSource())
-        log_info("Legacy VisualSource enabled (Gemini text descriptions)", prefix="📷")
-    else:
-        log_info("VisualSource disabled (using direct Claude multimodal)", prefix="📷")
+    # Legacy VisualSource is disabled - the new visual capture system sends images
+    # directly to Claude via multimodal messages. VisualSource (which used Gemini
+    # for text descriptions) is kept in code for potential fallback but not loaded.
+    log_info("VisualSource disabled (using direct Claude multimodal)", prefix="📷")
 
     for source in sources:
         builder.register_source(source)
