@@ -226,6 +226,10 @@ class ChatWindow(QMainWindow):
         self._reminder_scheduler = None
         self._telegram_listener = None
 
+        # User settings
+        from core.user_settings import get_user_settings
+        self._user_settings = get_user_settings()
+
         self._setup_ui()
         self._setup_signals()
         self._setup_timers()
@@ -233,6 +237,7 @@ class ChatWindow(QMainWindow):
         self._setup_command_palette()
         self._setup_draft_manager()
         self._apply_style()
+        self._init_model_dropdown()
 
     def _setup_signals(self):
         """Connect signals to slots."""
@@ -341,6 +346,14 @@ class ChatWindow(QMainWindow):
         if not config.SYSTEM_PULSE_ENABLED:
             self.pulse_dropdown.hide()
         layout.addWidget(self.pulse_dropdown)
+
+        # Model switcher dropdown
+        self.model_dropdown = QComboBox()
+        self.model_dropdown.setFont(QFont("Consolas", 11))
+        self.model_dropdown.addItems(["Opus 4.5", "Sonnet 4.5"])
+        self.model_dropdown.setToolTip("Conversation model (affects new messages)")
+        self.model_dropdown.currentIndexChanged.connect(self._on_model_changed)
+        layout.addWidget(self.model_dropdown)
 
         layout.addStretch()
 
@@ -763,6 +776,39 @@ class ChatWindow(QMainWindow):
                 log_warning("PULSE DEBUG: _system_pulse_timer is None!")
         else:
             log_warning(f"PULSE DEBUG: Invalid seconds value {seconds} - not in mapping!")
+
+    def _init_model_dropdown(self):
+        """Initialize model dropdown based on saved user preference."""
+        saved_model = self._user_settings.conversation_model
+
+        # Map model ID to dropdown index
+        model_to_index = {
+            "claude-opus-4-5-20251101": 0,
+            "claude-sonnet-4-5-20250929": 1
+        }
+
+        index = model_to_index.get(saved_model, 1)  # Default to Sonnet (index 1)
+
+        # Block signals to avoid triggering _on_model_changed during initialization
+        self.model_dropdown.blockSignals(True)
+        self.model_dropdown.setCurrentIndex(index)
+        self.model_dropdown.blockSignals(False)
+
+    def _on_model_changed(self, index: int):
+        """Handle model dropdown change."""
+        # Map dropdown index to model ID
+        model_map = {
+            0: ("Opus 4.5", "claude-opus-4-5-20251101"),
+            1: ("Sonnet 4.5", "claude-sonnet-4-5-20250929")
+        }
+
+        name, model_id = model_map.get(index, ("Sonnet 4.5", "claude-sonnet-4-5-20250929"))
+
+        # Save to user settings
+        if self._user_settings:
+            self._user_settings.conversation_model = model_id
+            self._notification_manager.info(f"Switched to {name}")
+            log_info(f"Conversation model changed to {name}", prefix="🤖")
 
     def _get_timestamp(self) -> str:
         """Get current timestamp string."""

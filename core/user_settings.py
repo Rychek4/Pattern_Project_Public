@@ -31,6 +31,7 @@ class UserSettings:
     """All user-configurable settings."""
     tts: TTSSettings = None
     font_size: int = 12
+    conversation_model: str = "claude-sonnet-4-5-20250929"  # Default to Sonnet for first-time users
 
     def __post_init__(self):
         if self.tts is None:
@@ -86,6 +87,7 @@ class UserSettingsManager:
 
                 # Parse other settings
                 self._settings.font_size = data.get('font_size', 12)
+                self._settings.conversation_model = data.get('conversation_model', 'claude-sonnet-4-5-20250929')
 
                 log_info("User settings loaded", prefix="⚙️")
         except json.JSONDecodeError as e:
@@ -102,7 +104,8 @@ class UserSettingsManager:
                         'enabled': self._settings.tts.enabled,
                         'voice_id': self._settings.tts.voice_id
                     },
-                    'font_size': self._settings.font_size
+                    'font_size': self._settings.font_size,
+                    'conversation_model': self._settings.conversation_model
                 }
 
                 with open(self._settings_path, 'w') as f:
@@ -144,6 +147,17 @@ class UserSettingsManager:
         self._settings.font_size = value
         self._save()
 
+    @property
+    def conversation_model(self) -> str:
+        """Get the conversation model."""
+        return self._settings.conversation_model
+
+    @conversation_model.setter
+    def conversation_model(self, value: str) -> None:
+        """Set the conversation model."""
+        self._settings.conversation_model = value
+        self._save()
+
     def get_all(self) -> UserSettings:
         """Get a copy of all settings."""
         return UserSettings(
@@ -151,7 +165,8 @@ class UserSettingsManager:
                 enabled=self._settings.tts.enabled,
                 voice_id=self._settings.tts.voice_id
             ),
-            font_size=self._settings.font_size
+            font_size=self._settings.font_size,
+            conversation_model=self._settings.conversation_model
         )
 
 
