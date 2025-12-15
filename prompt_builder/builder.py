@@ -230,6 +230,12 @@ def create_default_builder() -> PromptBuilder:
         ConversationSource(),
     ]
 
+    # Tool stance source (if enabled) - proactive tool usage guidance
+    if getattr(config, 'TOOL_STANCE_ENABLED', True):
+        from prompt_builder.sources.tool_stance import ToolStanceSource
+        sources.append(ToolStanceSource())
+        log_info("ToolStanceSource enabled", prefix="🔧")
+
     # Curiosity source (if enabled) - provides topic exploration context
     if getattr(config, 'CURIOSITY_ENABLED', True):
         from agency.curiosity.source import CuriositySource
