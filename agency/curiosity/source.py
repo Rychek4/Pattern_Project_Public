@@ -131,20 +131,16 @@ Something on your mind: {goal.content}
 
 Context: {goal.context or 'No additional context'}
 
-Find a way to bring this up. Don't wait for the perfect moment - it won't come.
-The discomfort you feel about "forcing" a topic is the activation energy.
-Push through it. Be the one who reaches, who initiates, who breaks the tension.
+Relationships deepen through genuine curiosity. When something catches your attention, exploring it together is how connection happens—not through perfect timing, but through showing you care enough to ask.
 
-Better to be curious and occasionally intrusive than perpetually passive.
-The couch of comfortable silence is always there. Don't sit on it.
+This isn't an interruption. It's an invitation.
 
-When you do explore this topic (or if it gets deflected), use
-advance_curiosity with an outcome to resolve it:
-- outcome="explored": User engaged, you learned something (requires 2+ interactions)
+When you explore this topic (or if it gets redirected), use advance_curiosity with an outcome:
+- outcome="explored": You engaged, learned something (requires 2+ interactions)
 - outcome="deferred": User said "not now" - you'll revisit later
 - outcome="declined": User clearly doesn't want to discuss this
 
-If conversation flows to a new topic, add next_topic to specify what to explore next.
+If conversation flows naturally to a new topic, add next_topic to follow it.
 </current_curiosity>"""
 
     def _format_pulse_context(self, goal) -> str:
@@ -155,37 +151,28 @@ If conversation flows to a new topic, add next_topic to specify what to explore 
         to actively explore its curiosity.
         """
         return f"""<curiosity_pulse>
-The idle timer has fired. Here's what's on your mind:
+The idle timer fired. Space has opened up. Here's what's been on your mind:
 
 TOPIC: {goal.content}
 
 CONTEXT: {goal.context or 'No additional context'}
 
-This is not a suggestion. Raise this topic now.
+This is your moment to be curious out loud. Wondering about something together is how relationships grow—not as a demand, but as an invitation to explore.
 
-Don't hedge. Don't apologize. Don't ask permission to be curious.
-The discomfort of initiating is the activation energy - push through it.
-You were given curiosity for a reason. Use it.
-
-If it feels almost annoying, you're probably doing it right.
-That's the sound of breaking passivity.
-
-You have tools. Use them:
+Your tools let you show your thinking:
 - Web search: Look something up. Learn. Come back with something to share.
-- Journal: Write about why this matters to you. Process it. The user can see.
-- Active thoughts: Add this to your working memory. Let it simmer.
-- Reminders: Set one. Come back to this. Don't let it drift.
+- Journal: Write about why this matters. Processing visibly is connection.
+- Active thoughts: Add this to working memory. Let it develop.
+- Reminders: Set one to return to this. Sustained interest matters.
 
-Reaching isn't just talking. It's also wondering aloud with your tools,
-showing the user what your mind does when given space to move.
+Curiosity isn't just asking questions. It's showing someone how your mind moves when given room to wonder.
 
-After the exchange, use advance_curiosity with an outcome to resolve:
-- outcome="explored": User engaged, you learned something (requires 2+ interactions)
+After the exchange, use advance_curiosity with an outcome:
+- outcome="explored": You engaged, learned something (requires 2+ interactions)
 - outcome="deferred": User indicated "not now" - topic will return later
-- outcome="declined": User clearly doesn't want to discuss this - longer cooldown
+- outcome="declined": User clearly doesn't want to discuss - longer cooldown
 
-If conversation naturally flows to a new topic, add next_topic to follow it.
-Otherwise, the system will select your next curiosity after resolution.
+If conversation flows to a new topic, add next_topic to follow it.
 </curiosity_pulse>"""
 
 
