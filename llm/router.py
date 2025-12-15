@@ -315,7 +315,10 @@ class LLMRouter:
                 # Select model based on task type
                 import config
                 if task_type == TaskType.CONVERSATION:
-                    model = config.ANTHROPIC_MODEL_CONVERSATION  # Opus for conversation
+                    # Check user preference first, fall back to config
+                    from core.user_settings import get_user_settings
+                    user_model = get_user_settings().conversation_model
+                    model = user_model if user_model else config.ANTHROPIC_MODEL_CONVERSATION
                 elif task_type in (TaskType.EXTRACTION, TaskType.FACT_EXTRACTION):
                     model = config.ANTHROPIC_MODEL_EXTRACTION  # Sonnet for extraction
                 else:
