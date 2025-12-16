@@ -98,7 +98,10 @@ class ToolProcessor:
         Returns:
             ProcessedToolResponse with execution results and continuation info
         """
-        context = context or {}
+        # Use 'is None' check instead of 'or {}' because empty dict is falsy
+        # and 'or {}' would create a NEW dict, breaking context propagation
+        if context is None:
+            context = {}
 
         # If no tool calls, just return the text
         if not response.has_tool_calls():

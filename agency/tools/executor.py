@@ -81,7 +81,10 @@ class ToolExecutor:
         Returns:
             ToolResult with execution outcome
         """
-        context = context or {}
+        # Use 'is None' check instead of 'or {}' because empty dict is falsy
+        # and 'or {}' would create a NEW dict, breaking context propagation
+        if context is None:
+            context = {}
 
         handler_fn = self._handlers.get(tool_name)
         if not handler_fn:
