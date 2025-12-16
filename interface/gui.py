@@ -276,7 +276,7 @@ class ChatWindow(QMainWindow):
         # Chat display
         self.chat_display = QTextBrowser()
         self.chat_display.setOpenExternalLinks(True)  # Enable clicking links
-        self.chat_display.setFont(QFont("Consolas", 12))
+        self.chat_display.setFont(QFont("Consolas", self._user_settings.font_size))
         self.chat_display.setContextMenuPolicy(Qt.CustomContextMenu)
         self.chat_display.customContextMenuRequested.connect(self._show_chat_context_menu)
         layout.addWidget(self.chat_display, stretch=1)
@@ -355,6 +355,21 @@ class ChatWindow(QMainWindow):
         self.model_dropdown.currentIndexChanged.connect(self._on_model_changed)
         layout.addWidget(self.model_dropdown)
 
+        # Font size controls
+        self.font_decrease_btn = QPushButton("A-")
+        self.font_decrease_btn.setFont(QFont("Consolas", 10))
+        self.font_decrease_btn.setMaximumWidth(32)
+        self.font_decrease_btn.clicked.connect(self._decrease_font_size)
+        layout.addWidget(self.font_decrease_btn)
+
+        self.font_increase_btn = QPushButton("A+")
+        self.font_increase_btn.setFont(QFont("Consolas", 10))
+        self.font_increase_btn.setMaximumWidth(32)
+        self.font_increase_btn.clicked.connect(self._increase_font_size)
+        layout.addWidget(self.font_increase_btn)
+
+        self._update_font_tooltips()
+
         layout.addStretch()
 
         # Theme toggle button
@@ -385,7 +400,7 @@ class ChatWindow(QMainWindow):
 
         # Multi-line input with Enter to send, Shift+Enter for newline
         self.input_field = ChatInputWidget()
-        self.input_field.setFont(QFont("Consolas", 12))
+        self.input_field.setFont(QFont("Consolas", self._user_settings.font_size))
         self.input_field.send_requested.connect(self._send_message)
         layout.addWidget(self.input_field, stretch=1)
 
@@ -809,6 +824,31 @@ class ChatWindow(QMainWindow):
             self._user_settings.conversation_model = model_id
             self._notification_manager.info(f"Switched to {name}")
             log_info(f"Conversation model changed to {name}", prefix="🤖")
+
+    def _decrease_font_size(self):
+        """Decrease font size by 1pt (minimum 10pt)."""
+        current = self._user_settings.font_size
+        if current > 10:
+            self._apply_font_size(current - 1)
+
+    def _increase_font_size(self):
+        """Increase font size by 1pt (maximum 24pt)."""
+        current = self._user_settings.font_size
+        if current < 24:
+            self._apply_font_size(current + 1)
+
+    def _apply_font_size(self, size: int):
+        """Apply font size to chat display and input field."""
+        self._user_settings.font_size = size
+        self.chat_display.setFont(QFont("Consolas", size))
+        self.input_field.setFont(QFont("Consolas", size))
+        self._update_font_tooltips()
+
+    def _update_font_tooltips(self):
+        """Update tooltips on font buttons to show current size."""
+        size = self._user_settings.font_size
+        self.font_decrease_btn.setToolTip(f"Decrease font size ({size}pt)")
+        self.font_increase_btn.setToolTip(f"Increase font size ({size}pt)")
 
     def _get_timestamp(self) -> str:
         """Get current timestamp string."""
@@ -2181,7 +2221,7 @@ class SettingsDialog(QDialog):
         font_layout = QHBoxLayout()
         font_layout.addWidget(QLabel("Font Size:"))
         self.font_spin = QSpinBox()
-        self.font_spin.setRange(8, 24)
+        self.font_spin.setRange(10, 24)
         self.font_spin.setValue(self._user_settings.font_size)
         font_layout.addWidget(self.font_spin)
         layout.addLayout(font_layout)
@@ -2236,6 +2276,8 @@ class SettingsDialog(QDialog):
         self._user_settings.font_size = font_size
         if self.parent():
             self.parent().chat_display.setFont(QFont("Consolas", font_size))
+            self.parent().input_field.setFont(QFont("Consolas", font_size))
+            self.parent()._update_font_tooltips()
 
         # TTS settings
         tts_was_enabled = self._user_settings.tts_enabled
