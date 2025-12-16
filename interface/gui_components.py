@@ -430,8 +430,18 @@ class MarkdownRenderer:
         """Render bullet and numbered lists."""
         lines = text.split('\n')
         result = []
+        list_buffer = []  # Buffer for current list HTML (joined without newlines)
         in_list = False
         list_type = None
+
+        def flush_list():
+            """Flush the list buffer to result as a single string (no internal newlines)."""
+            nonlocal list_buffer, in_list, list_type
+            if list_buffer:
+                result.append(''.join(list_buffer))
+                list_buffer = []
+            in_list = False
+            list_type = None
 
         for line in lines:
             # Bullet list (- or *)
@@ -442,31 +452,31 @@ class MarkdownRenderer:
             if bullet_match:
                 if not in_list or list_type != 'ul':
                     if in_list:
-                        result.append('</ul>' if list_type == 'ul' else '</ol>')
-                    result.append('<ul style="margin: 4px 0; padding-left: 20px;">')
+                        list_buffer.append('</ul>' if list_type == 'ul' else '</ol>')
+                    list_buffer.append('<ul style="margin: 4px 0; padding-left: 20px;">')
                     in_list = True
                     list_type = 'ul'
-                result.append(f'<li>{bullet_match.group(2)}</li>')
+                list_buffer.append(f'<li>{bullet_match.group(2)}</li>')
             elif number_match:
                 if not in_list or list_type != 'ol':
                     if in_list:
-                        result.append('</ul>' if list_type == 'ul' else '</ol>')
-                    result.append('<ol style="margin: 4px 0; padding-left: 20px;">')
+                        list_buffer.append('</ul>' if list_type == 'ul' else '</ol>')
+                    list_buffer.append('<ol style="margin: 4px 0; padding-left: 20px;">')
                     in_list = True
                     list_type = 'ol'
-                result.append(f'<li>{number_match.group(3)}</li>')
+                list_buffer.append(f'<li>{number_match.group(3)}</li>')
             else:
                 # Skip blank lines when inside a list to prevent double-spacing
                 if in_list and line.strip() == '':
                     continue
                 if in_list:
-                    result.append('</ul>' if list_type == 'ul' else '</ol>')
-                    in_list = False
-                    list_type = None
+                    list_buffer.append('</ul>' if list_type == 'ul' else '</ol>')
+                    flush_list()
                 result.append(line)
 
         if in_list:
-            result.append('</ul>' if list_type == 'ul' else '</ol>')
+            list_buffer.append('</ul>' if list_type == 'ul' else '</ol>')
+            flush_list()
 
         return '\n'.join(result)
 
