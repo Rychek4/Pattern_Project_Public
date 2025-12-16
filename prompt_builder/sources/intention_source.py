@@ -96,22 +96,7 @@ class IntentionSource(ContextSource):
 
     def _build_empty_context(self) -> str:
         """Build context when there are no intentions."""
-        return """<your_intentions>
-These are your private intentions — the user cannot see them.
-You currently have no active reminders or goals.
-
-You can create intentions using these commands in your response:
-  [[REMIND: when | what to remember]]
-  Example: [[REMIND: in 2 hours | ask how their meeting went]]
-  Example: [[REMIND: tomorrow morning | check on their sleep]]
-  Example: [[REMIND: next session | follow up on anxiety discussion]]
-
-When you notice something worth following up on, create a reminder.
-This gives you continuity of care across conversations.
-
-Note: Time-based reminders automatically trigger a pulse prompt when due,
-even if the user hasn't messaged. You will receive an automated reminder pulse.
-</your_intentions>"""
+        return "<your_intentions>None active. Use [[REMIND: when | what]] to create reminders.</your_intentions>"
 
     def _build_context(self, summary: dict, now: datetime) -> str:
         """Build context with active intentions."""

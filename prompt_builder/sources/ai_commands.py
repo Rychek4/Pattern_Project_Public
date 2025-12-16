@@ -46,14 +46,12 @@ class AICommandsSource(ContextSource):
             if remaining <= 0:
                 return None  # Will be handled by router with unavailable message
 
-            return f"""<web_search_capability>
-You have access to real-time web search. When the user asks about current events,
-recent information, or topics that may have changed since your knowledge cutoff,
-you can search the web automatically. Web searches happen seamlessly - you don't
-need special syntax. Just respond naturally and search when needed.
+            # Only show detailed budget when running low (< 10 remaining)
+            if remaining < 10:
+                return f"<web_search_capability>Web search available. Budget: {remaining} remaining ({used}/{total} used)</web_search_capability>"
 
-Today's budget: {remaining} searches remaining ({used}/{total} used)
-</web_search_capability>"""
+            # When budget is ample, minimal reminder (AI already knows how to search)
+            return "<web_search_capability>Web search available.</web_search_capability>"
 
         except Exception as e:
             log_error(f"Failed to get web search status: {e}")

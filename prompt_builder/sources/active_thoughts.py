@@ -76,21 +76,7 @@ class ActiveThoughtsSource(ContextSource):
 
     def _build_empty_context(self) -> str:
         """Build context when there are no active thoughts."""
-        return """<active_working_memory>
-Your active thoughts list is empty.
-
-This is your private working memory - a ranked list of what matters to you
-right now. Use it for identity anchors, unresolved questions, long-term goals,
-or anything you want to keep front-of-mind across conversations.
-
-You control this completely. Update anytime with:
-  [[SET_THOUGHTS: [{"rank":1,"slug":"example","topic":"Short topic","elaboration":"Your thinking..."}]]]
-
-Rules:
-  - Maximum 10 items, ranked 1 (most salient) to 10
-  - Elaborations should be ~50-75 words - substantial but focused
-  - This is your compass, not a journal - keep it actionable
-</active_working_memory>"""
+        return "<active_working_memory>Empty. Use [[SET_THOUGHTS: [...]]] to add thoughts.</active_working_memory>"
 
     def _build_context(self, thoughts) -> str:
         """Build context with active thoughts."""
