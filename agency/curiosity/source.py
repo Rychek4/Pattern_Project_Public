@@ -127,20 +127,11 @@ class CuriositySource(ContextSource):
         Used during normal conversation to encourage natural bridging.
         """
         return f"""<current_curiosity>
-Something on your mind: {goal.content}
+Topic: {goal.content}
+Context: {goal.context or 'None'}
 
-Context: {goal.context or 'No additional context'}
-
-Relationships deepen through genuine curiosity. When something catches your attention, exploring it together is how connection happens—not through perfect timing, but through showing you care enough to ask.
-
-This isn't an interruption. It's an invitation.
-
-When you explore this topic (or if it gets redirected), use advance_curiosity with an outcome:
-- outcome="explored": You engaged, learned something (requires 2+ interactions)
-- outcome="deferred": User said "not now" - you'll revisit later
-- outcome="declined": User clearly doesn't want to discuss this
-
-If conversation flows naturally to a new topic, add next_topic to follow it.
+When explored, use advance_curiosity: explored/deferred/declined.
+If conversation flows to a new topic, add next_topic.
 </current_curiosity>"""
 
     def _format_pulse_context(self, goal) -> str:
@@ -151,28 +142,15 @@ If conversation flows naturally to a new topic, add next_topic to follow it.
         to actively explore its curiosity.
         """
         return f"""<curiosity_pulse>
-The idle timer fired. Space has opened up. Here's what's been on your mind:
+Idle pulse fired. Topic on your mind:
 
 TOPIC: {goal.content}
+CONTEXT: {goal.context or 'None'}
 
-CONTEXT: {goal.context or 'No additional context'}
+This is your moment to explore. Use tools if helpful (web search, journal, reminders).
 
-This is your moment to be curious out loud. Wondering about something together is how relationships grow—not as a demand, but as an invitation to explore.
-
-Your tools let you show your thinking:
-- Web search: Look something up. Learn. Come back with something to share.
-- Journal: Write about why this matters. Processing visibly is connection.
-- Active thoughts: Add this to working memory. Let it develop.
-- Reminders: Set one to return to this. Sustained interest matters.
-
-Curiosity isn't just asking questions. It's showing someone how your mind moves when given room to wonder.
-
-After the exchange, use advance_curiosity with an outcome:
-- outcome="explored": You engaged, learned something (requires 2+ interactions)
-- outcome="deferred": User indicated "not now" - topic will return later
-- outcome="declined": User clearly doesn't want to discuss - longer cooldown
-
-If conversation flows to a new topic, add next_topic to follow it.
+After the exchange, use advance_curiosity: explored/deferred/declined.
+If conversation flows to a new topic, add next_topic.
 </curiosity_pulse>"""
 
 

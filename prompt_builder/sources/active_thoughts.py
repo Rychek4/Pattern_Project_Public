@@ -25,8 +25,11 @@ class ActiveThoughtsSource(ContextSource):
     The AI has complete control over this list - it can add, edit,
     rerank, or delete thoughts at any time using [[SET_THOUGHTS: ...]].
 
-    Maximum 10 items to force prioritization.
+    Maximum 10 items stored, top 3 displayed in prompts to reduce token usage.
     """
+
+    # Maximum thoughts to display in prompts (storage limit remains 10)
+    MAX_DISPLAY = 3
 
     @property
     def source_name(self) -> str:
@@ -63,9 +66,10 @@ class ActiveThoughtsSource(ContextSource):
                 include_always=True,
                 metadata={
                     "thought_count": len(thoughts),
+                    "displayed_count": min(len(thoughts), self.MAX_DISPLAY),
                     "thoughts": [
                         {"rank": t.rank, "slug": t.slug, "topic": t.topic}
-                        for t in thoughts
+                        for t in thoughts[:self.MAX_DISPLAY]
                     ]
                 }
             )
@@ -79,14 +83,18 @@ class ActiveThoughtsSource(ContextSource):
         return "<active_working_memory>Empty. Use [[SET_THOUGHTS: [...]]] to add thoughts.</active_working_memory>"
 
     def _build_context(self, thoughts) -> str:
-        """Build context with active thoughts."""
+        """Build context with active thoughts (displays top 3 only)."""
+        # Only display top N thoughts to reduce token usage
+        display_thoughts = thoughts[:self.MAX_DISPLAY]
+        total_count = len(thoughts)
+
         lines = [
             "<active_working_memory>",
-            "Your active thoughts - ranked by what matters most to you right now:",
+            f"Your top {len(display_thoughts)} active thoughts (of {total_count} total):",
             "",
         ]
 
-        for thought in thoughts:
+        for thought in display_thoughts:
             lines.append(f"{thought.rank}. [{thought.slug}] {thought.topic}")
             # Indent elaboration and wrap in quotes for clarity
             elaboration_lines = thought.elaboration.split('\n')
