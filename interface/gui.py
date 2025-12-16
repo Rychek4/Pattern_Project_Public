@@ -1081,22 +1081,13 @@ class ChatWindow(QMainWindow):
             preview = text[:50] + "..." if len(text) > 50 else text
             log_info(f"TTS triggered for: {preview}", prefix="🔊")
 
-            # Run TTS in background thread to not block UI
-            def play_tts_async():
-                try:
-                    from subprocess_mgmt.audio_player import play_tts
-                    voice_id = get_tts_voice_id()
-                    log_info(f"TTS sending to audio player (voice: {voice_id})", prefix="🔊")
-                    result = play_tts(text, voice_id)
-                    if result:
-                        log_info("TTS request accepted by audio player", prefix="🔊")
-                    else:
-                        log_warning("TTS request rejected by audio player")
-                except Exception as e:
-                    log_warning(f"TTS playback error: {e}")
-
-            tts_thread = threading.Thread(target=play_tts_async, daemon=True)
-            tts_thread.start()
+            # Play TTS (runs in background thread internally)
+            try:
+                from tts.player import play_tts
+                voice_id = get_tts_voice_id()
+                play_tts(text, voice_id)
+            except Exception as e:
+                log_warning(f"TTS playback error: {e}")
 
         except Exception as e:
             log_warning(f"TTS trigger error: {e}")
@@ -2280,38 +2271,10 @@ class SettingsDialog(QDialog):
             self.parent()._update_font_tooltips()
 
         # TTS settings
-        tts_was_enabled = self._user_settings.tts_enabled
-        tts_now_enabled = self.tts_enabled_check.isChecked()
-
-        self._user_settings.tts_enabled = tts_now_enabled
+        self._user_settings.tts_enabled = self.tts_enabled_check.isChecked()
         self._user_settings.tts_voice_id = self.voice_id_input.text().strip()
 
-        # Start/stop audio player subprocess based on TTS toggle
-        if tts_now_enabled and not tts_was_enabled:
-            self._start_audio_player()
-        elif not tts_now_enabled and tts_was_enabled:
-            self._stop_audio_player()
-
-        log_info(f"Settings applied - TTS: {tts_now_enabled}, Voice: {self._user_settings.tts_voice_id}", prefix="⚙️")
-
-    def _start_audio_player(self):
-        """Start the audio player subprocess."""
-        try:
-            from subprocess_mgmt.audio_player import register_audio_player, start_audio_player
-            register_audio_player(enabled=True)
-            start_audio_player()
-            log_info("Audio player started", prefix="🔊")
-        except Exception as e:
-            log_error(f"Failed to start audio player: {e}")
-
-    def _stop_audio_player(self):
-        """Stop the audio player subprocess."""
-        try:
-            from subprocess_mgmt.audio_player import stop_audio_player
-            stop_audio_player()
-            log_info("Audio player stopped", prefix="🔊")
-        except Exception as e:
-            log_error(f"Failed to stop audio player: {e}")
+        log_info(f"Settings applied - TTS: {self._user_settings.tts_enabled}, Voice: {self._user_settings.tts_voice_id}", prefix="⚙️")
 
 
 # Global GUI instance
@@ -2459,17 +2422,6 @@ def run_gui():
 
     print("GUI ready!")
 
-    # Initialize TTS audio player if enabled in user settings
-    try:
-        from core.user_settings import is_tts_enabled
-        if is_tts_enabled():
-            from subprocess_mgmt.audio_player import register_audio_player, start_audio_player
-            register_audio_player(enabled=True)
-            start_audio_player()
-            log_info("TTS audio player started (from saved settings)", prefix="🔊")
-    except Exception as e:
-        log_warning(f"Failed to initialize TTS: {e}")
-
     # Run event loop
     exit_code = app.exec_()
 
@@ -2490,10 +2442,10 @@ def run_gui():
     from agency.visual_capture import release_webcam
     release_webcam()
 
-    # Stop TTS audio player if running
+    # Stop TTS if playing
     try:
-        from subprocess_mgmt.audio_player import stop_audio_player
-        stop_audio_player()
+        from tts.player import stop_tts
+        stop_tts()
     except Exception:
         pass  # Ignore errors during shutdown
 
