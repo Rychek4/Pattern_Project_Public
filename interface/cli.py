@@ -161,8 +161,8 @@ class ChatCLI:
                 # Display dev mode prompt assembly info
                 self._display_dev_prompt_assembly(assembled)
 
-                # Get conversation history for LLM
-                history = conversation_mgr.get_api_messages(limit=30)
+                # Get conversation history for LLM (uses saved context count from shutdown)
+                history = conversation_mgr.get_api_messages()
 
                 # Get tool definitions for native tool use
                 from agency.tools import get_tool_definitions, process_with_tools
@@ -553,8 +553,8 @@ class ChatCLI:
                 additional_context={"is_pulse": True}
             )
 
-            # Get conversation history
-            history = conversation_mgr.get_api_messages(limit=30)
+            # Get conversation history (uses saved context count from shutdown)
+            history = conversation_mgr.get_api_messages()
 
             # Add the pulse prompt as the message to respond to
             # (role="user" is an API constraint, but content clarifies it's automated)
@@ -684,8 +684,8 @@ class ChatCLI:
                 system_prompt=""
             )
 
-            # Get conversation history
-            history = conversation_mgr.get_api_messages(limit=30)
+            # Get conversation history (uses saved context count from shutdown)
+            history = conversation_mgr.get_api_messages()
             history.append({"role": "user", "content": reminder_prompt})
 
             # Get tool definitions for native tool use
@@ -811,8 +811,8 @@ class ChatCLI:
                 system_prompt=""
             )
 
-            # Get conversation history
-            history = conversation_mgr.get_api_messages(limit=30)
+            # Get conversation history (uses saved context count from shutdown)
+            history = conversation_mgr.get_api_messages()
 
             # Get tool definitions for native tool use
             tools = get_tool_definitions()

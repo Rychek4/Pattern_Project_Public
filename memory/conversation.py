@@ -199,7 +199,7 @@ class ConversationManager:
             if turn.role in ("user", "assistant") and turn.content and turn.content.strip()
         ]
 
-    def get_api_messages(self, limit: int = 30) -> List[Dict[str, str]]:
+    def get_api_messages(self, limit: Optional[int] = None) -> List[Dict[str, str]]:
         """
         Get conversation history formatted for LLM API with semantic timestamps.
 
@@ -210,17 +210,39 @@ class ConversationManager:
         - Spans all sessions (cross-session continuity)
         - Excludes processed turns (coordinates with memory extraction)
         - Adds timestamps at format-time (NOT stored in database)
+        - Loads saved context count from previous shutdown (30-40 range)
 
         The timestamps are computed from the stored created_at field, ensuring
         the database remains clean and memory extraction receives raw content.
 
+        CONTEXT PERSISTENCE:
+        On shutdown, the system saves the current unprocessed message count.
+        On boot, this method loads that count to ensure no messages are lost
+        between the context window (30) and extraction trigger (40).
+
         Args:
-            limit: Maximum turns to return (default: 30, matching CONTEXT_WINDOW_SIZE)
+            limit: Maximum turns to return. If None, uses saved context count
+                   from previous shutdown (clamped to 30-40 range).
 
         Returns:
             List of {"role": ..., "content": "(timestamp) message"} dicts
         """
         from core.temporal import format_fuzzy_relative_time
+        from core.database import get_database
+        from config import CONTEXT_WINDOW_SIZE, CONTEXT_OVERFLOW_TRIGGER
+
+        # Determine the limit to use
+        if limit is None:
+            # Load saved context count from state (persisted at shutdown)
+            db = get_database()
+            saved_count = db.get_state("context_message_count")
+
+            if saved_count is not None:
+                # Clamp to valid range [CONTEXT_WINDOW_SIZE, CONTEXT_OVERFLOW_TRIGGER]
+                limit = max(CONTEXT_WINDOW_SIZE, min(CONTEXT_OVERFLOW_TRIGGER, int(saved_count)))
+            else:
+                # First boot or no saved state - use default window size
+                limit = CONTEXT_WINDOW_SIZE
 
         # Use get_context_window for cross-session, excludes-processed behavior
         turns = self.get_context_window(limit=limit)
