@@ -445,7 +445,8 @@ def temporal_context_to_semantic(context: TemporalContext) -> str:
     lines = [format_semantic_current_time(context.current_time)]
 
     # Add exact time for functional/scheduling purposes
-    exact_time = context.current_time.strftime("%-I:%M %p")
+    # Use %I and lstrip to avoid platform-specific %-I format specifier
+    exact_time = context.current_time.strftime("%I:%M %p").lstrip("0")
     lines.append(f"Exact time: {exact_time}")
 
     # Add session duration if available
