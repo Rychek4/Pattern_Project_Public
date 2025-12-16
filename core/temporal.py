@@ -433,16 +433,20 @@ def temporal_context_to_semantic(context: TemporalContext) -> str:
     """
     Convert temporal context to semantic/natural language for prompts.
 
-    Returns a simple, human-like time description rather than precise timestamps.
+    Returns a human-like time description with exact time for functional purposes.
     Includes session duration and gap since last session when available.
 
     Args:
         context: The temporal context to convert
 
     Returns:
-        Semantic description with current time, session duration, and session gap.
+        Semantic description with current time, exact time, session duration, and session gap.
     """
     lines = [format_semantic_current_time(context.current_time)]
+
+    # Add exact time for functional/scheduling purposes
+    exact_time = context.current_time.strftime("%-I:%M %p")
+    lines.append(f"Exact time: {exact_time}")
 
     # Add session duration if available
     if context.session_started_at:
