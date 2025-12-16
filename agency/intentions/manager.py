@@ -12,6 +12,7 @@ from core.database import get_database
 from core.logger import log_info, log_error
 from concurrency.locks import get_lock_manager
 from concurrency.db_retry import db_retry
+import config
 
 
 class IntentionType(Enum):
@@ -79,6 +80,38 @@ class IntentionManager:
 
     def __init__(self):
         self._lock_manager = get_lock_manager()
+
+    def _emit_dev_update(self, event: str):
+        """Emit intentions update to dev window if enabled."""
+        if not config.DEV_MODE_ENABLED:
+            return
+
+        try:
+            from interface.dev_window import emit_intentions_update
+
+            # Get all active intentions
+            intentions_list = []
+            active = self.get_all_active_intentions()
+            for intention in active:
+                intentions_list.append({
+                    "id": intention.id,
+                    "type": intention.type,
+                    "content": intention.content,
+                    "context": intention.context,
+                    "trigger_type": intention.trigger_type,
+                    "trigger_at": intention.trigger_at.isoformat() if intention.trigger_at else None,
+                    "status": intention.status,
+                    "priority": intention.priority,
+                    "created_at": intention.created_at.isoformat() if intention.created_at else None,
+                    "triggered_at": intention.triggered_at.isoformat() if intention.triggered_at else None,
+                    "completed_at": intention.completed_at.isoformat() if intention.completed_at else None,
+                    "outcome": intention.outcome,
+                })
+
+            emit_intentions_update(intentions_list, event=event)
+        except Exception:
+            # Don't fail intention operations if dev window update fails
+            pass
 
     @db_retry()
     def create_intention(
@@ -154,6 +187,7 @@ class IntentionManager:
 
             if intention_id:
                 log_info(f"Created intention [{intention_id}]: {content[:50]}...", prefix="💭")
+                self._emit_dev_update("created")
 
             return intention_id
 
@@ -243,6 +277,7 @@ class IntentionManager:
             )
 
             log_info(f"Triggered intention [{intention_id}]", prefix="⏰")
+            self._emit_dev_update("triggered")
             return True
 
     @db_retry()
@@ -278,6 +313,7 @@ class IntentionManager:
             )
 
             log_info(f"Completed intention [{intention_id}]", prefix="✓")
+            self._emit_dev_update("completed")
             return True
 
     @db_retry()
@@ -311,6 +347,7 @@ class IntentionManager:
             )
 
             log_info(f"Dismissed intention [{intention_id}]", prefix="✗")
+            self._emit_dev_update("dismissed")
             return True
 
     @db_retry()

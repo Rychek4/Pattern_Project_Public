@@ -104,6 +104,14 @@ class CuriosityData:
     event: str = ""  # "initial", "resolved", "activated"
 
 
+@dataclass
+class IntentionData:
+    """Data about intentions (reminders/goals)."""
+    intentions: List[Dict[str, Any]] = field(default_factory=list)  # All active intentions
+    timestamp: str = ""
+    event: str = ""  # "created", "triggered", "completed", "dismissed", "initial"
+
+
 class DevWindowSignals(QObject):
     """Signals for updating the dev window from other threads."""
     prompt_assembly = pyqtSignal(object)  # PromptAssemblyData
@@ -112,6 +120,7 @@ class DevWindowSignals(QObject):
     memory_recall = pyqtSignal(object)  # MemoryRecallData
     active_thoughts_updated = pyqtSignal(object)  # ActiveThoughtsData
     curiosity_updated = pyqtSignal(object)  # CuriosityData
+    intentions_updated = pyqtSignal(object)  # IntentionData
     clear_all = pyqtSignal()
 
 
@@ -141,6 +150,7 @@ class DevWindow(QMainWindow):
         self.signals.memory_recall.connect(self._on_memory_recall)
         self.signals.active_thoughts_updated.connect(self._on_active_thoughts_updated)
         self.signals.curiosity_updated.connect(self._on_curiosity_updated)
+        self.signals.intentions_updated.connect(self._on_intentions_updated)
         self.signals.clear_all.connect(self._clear_all)
 
     def _setup_ui(self):
@@ -171,6 +181,7 @@ class DevWindow(QMainWindow):
         self._create_memory_tab()
         self._create_active_thoughts_tab()
         self._create_curiosity_tab()
+        self._create_intentions_tab()
 
         # Status bar
         self.status_label = QLabel("Dev mode active")
@@ -325,6 +336,24 @@ class DevWindow(QMainWindow):
 
         self.tabs.addTab(tab, "Curiosity")
 
+    def _create_intentions_tab(self):
+        """Create the Intentions tab."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # Info label
+        info = QLabel("Shows the AI's intentions (reminders, goals)")
+        info.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 11px;")
+        layout.addWidget(info)
+
+        # Content area
+        self.intentions_display = QTextBrowser()
+        self.intentions_display.setFont(QFont("Consolas", 10))
+        self.intentions_display.setOpenExternalLinks(False)
+        layout.addWidget(self.intentions_display)
+
+        self.tabs.addTab(tab, "Intentions")
+
     def _apply_style(self):
         """Apply dark theme styling."""
         self.setStyleSheet(f"""
@@ -435,6 +464,16 @@ class DevWindow(QMainWindow):
         goal_desc = data.current_goal.get("content", "none")[:40] if data.current_goal else "none"
         self._update_status(f"Curiosity {data.event}: {goal_desc}")
 
+    def _on_intentions_updated(self, data: IntentionData):
+        """Handle intentions update."""
+        html = self._format_intentions(data)
+        self.intentions_display.append(html)
+        if self.auto_scroll_check.isChecked():
+            self.intentions_display.verticalScrollBar().setValue(
+                self.intentions_display.verticalScrollBar().maximum()
+            )
+        self._update_status(f"Intentions {data.event}: {len(data.intentions)} total")
+
     def _clear_all(self):
         """Clear all displays."""
         self.prompt_display.clear()
@@ -443,6 +482,7 @@ class DevWindow(QMainWindow):
         self.memory_display.clear()
         self.active_thoughts_display.clear()
         self.curiosity_display.clear()
+        self.intentions_display.clear()
         self._update_status("Cleared all")
 
     def _update_status(self, message: str):
@@ -832,6 +872,145 @@ class DevWindow(QMainWindow):
         lines.append('</div>')
         return ''.join(lines)
 
+    def _format_intentions(self, data: IntentionData) -> str:
+        """Format intentions data as HTML."""
+        # Event colors
+        event_colors = {
+            "created": COLORS["success"],
+            "triggered": COLORS["warning"],
+            "completed": COLORS["info"],
+            "dismissed": COLORS["text_dim"],
+            "initial": COLORS["purple"],
+        }
+        event_color = event_colors.get(data.event, COLORS["text"])
+
+        lines = [
+            f'<div style="margin-bottom: 15px; padding: 10px; background-color: {COLORS["surface_alt"]}; border-radius: 5px;">',
+            f'<div style="color: {event_color}; font-weight: bold; margin-bottom: 8px;">'
+            f'Intentions {data.event.title()} - {data.timestamp}</div>',
+        ]
+
+        if not data.intentions:
+            lines.append(
+                f'<div style="color: {COLORS["text_dim"]}; font-style: italic;">No active intentions</div>'
+            )
+        else:
+            # Group by status
+            triggered = [i for i in data.intentions if i.get("status") == "triggered"]
+            pending = [i for i in data.intentions if i.get("status") == "pending"]
+            completed = [i for i in data.intentions if i.get("status") == "completed"]
+            dismissed = [i for i in data.intentions if i.get("status") == "dismissed"]
+
+            lines.append(
+                f'<div style="color: {COLORS["text_dim"]}; margin-bottom: 10px;">'
+                f'Total: {len(data.intentions)} | Triggered: {len(triggered)} | '
+                f'Pending: {len(pending)} | Completed: {len(completed)} | Dismissed: {len(dismissed)}</div>'
+            )
+
+            # Show triggered intentions first (most important)
+            if triggered:
+                lines.append(
+                    f'<div style="color: {COLORS["warning"]}; font-weight: bold; margin-top: 10px;">⏰ TRIGGERED:</div>'
+                )
+                for intention in triggered:
+                    lines.append(self._format_intention_item(intention, COLORS["warning"]))
+
+            # Then pending
+            if pending:
+                lines.append(
+                    f'<div style="color: {COLORS["info"]}; font-weight: bold; margin-top: 10px;">⏳ PENDING:</div>'
+                )
+                for intention in pending:
+                    lines.append(self._format_intention_item(intention, COLORS["info"]))
+
+            # Recently completed/dismissed (show max 5)
+            if completed:
+                lines.append(
+                    f'<div style="color: {COLORS["success"]}; font-weight: bold; margin-top: 10px;">✓ RECENTLY COMPLETED:</div>'
+                )
+                for intention in completed[:5]:
+                    lines.append(self._format_intention_item(intention, COLORS["success"]))
+
+            if dismissed:
+                lines.append(
+                    f'<div style="color: {COLORS["text_dim"]}; font-weight: bold; margin-top: 10px;">✗ RECENTLY DISMISSED:</div>'
+                )
+                for intention in dismissed[:5]:
+                    lines.append(self._format_intention_item(intention, COLORS["text_dim"]))
+
+        lines.append('</div>')
+        return ''.join(lines)
+
+    def _format_intention_item(self, intention: Dict[str, Any], border_color: str) -> str:
+        """Format a single intention item as HTML."""
+        int_id = intention.get("id", "?")
+        int_type = intention.get("type", "unknown")
+        content = intention.get("content", "")[:100].replace("<", "&lt;").replace(">", "&gt;")
+        if len(intention.get("content", "")) > 100:
+            content += "..."
+
+        context = intention.get("context", "")
+        trigger_type = intention.get("trigger_type", "")
+        trigger_at = intention.get("trigger_at", "")
+        created_at = intention.get("created_at", "")
+        priority = intention.get("priority", 5)
+        status = intention.get("status", "unknown")
+
+        # Build the item display
+        lines = [
+            f'<div style="margin: 5px 0; padding: 8px; border-left: 3px solid {border_color};">',
+            f'<div style="color: {border_color}; font-weight: bold;">'
+            f'[I-{int_id}] {int_type.upper()} (priority: {priority})</div>',
+            f'<div style="color: {COLORS["text"]}; margin-top: 3px;">{content}</div>',
+        ]
+
+        # Show trigger info
+        trigger_info = []
+        if trigger_type == "time" and trigger_at:
+            trigger_info.append(f"triggers at: {trigger_at}")
+        elif trigger_type == "next_session":
+            trigger_info.append("triggers: next session")
+
+        if created_at:
+            trigger_info.append(f"created: {created_at}")
+
+        if trigger_info:
+            lines.append(
+                f'<div style="color: {COLORS["text_dim"]}; font-size: 11px; margin-top: 3px;">'
+                f'{" | ".join(trigger_info)}</div>'
+            )
+
+        # Show context if available
+        if context:
+            context_escaped = context[:80].replace("<", "&lt;").replace(">", "&gt;")
+            if len(context) > 80:
+                context_escaped += "..."
+            lines.append(
+                f'<div style="color: {COLORS["text_dim"]}; font-size: 11px; font-style: italic; margin-top: 3px;">'
+                f'Context: {context_escaped}</div>'
+            )
+
+        # Show outcome for completed/dismissed
+        if status in ["completed", "dismissed"]:
+            outcome = intention.get("outcome", "")
+            completed_at = intention.get("completed_at", "")
+            if outcome:
+                outcome_escaped = outcome[:80].replace("<", "&lt;").replace(">", "&gt;")
+                if len(outcome) > 80:
+                    outcome_escaped += "..."
+                lines.append(
+                    f'<div style="color: {COLORS["text_dim"]}; font-size: 11px; margin-top: 3px;">'
+                    f'Outcome: {outcome_escaped}</div>'
+                )
+            if completed_at:
+                lines.append(
+                    f'<div style="color: {COLORS["text_dim"]}; font-size: 10px; margin-top: 2px;">'
+                    f'Completed: {completed_at}</div>'
+                )
+
+        lines.append('</div>')
+        return ''.join(lines)
+
 
 # Global instance
 _dev_window: Optional[DevWindow] = None
@@ -849,6 +1028,7 @@ def init_dev_window(parent=None) -> DevWindow:
     # Load initial state for tabs that need it
     load_initial_active_thoughts()
     load_initial_curiosity()
+    load_initial_intentions()
     return _dev_window
 
 
@@ -943,6 +1123,49 @@ def load_initial_curiosity():
     except Exception as e:
         # Log the error instead of silently swallowing it
         log_error(f"Failed to load initial curiosity state: {e}", prefix="🔍")
+
+
+def load_initial_intentions():
+    """Load current intentions into the dev window on startup."""
+    if not _dev_window or not config.DEV_MODE_ENABLED:
+        return
+
+    try:
+        from agency.intentions import get_intention_manager
+
+        manager = get_intention_manager()
+
+        # Get all intentions (active and recently completed/dismissed)
+        all_intentions = []
+
+        # Get active intentions (pending + triggered)
+        active = manager.get_all_active_intentions()
+        for intention in active:
+            all_intentions.append({
+                "id": intention.id,
+                "type": intention.type,
+                "content": intention.content,
+                "context": intention.context,
+                "trigger_type": intention.trigger_type,
+                "trigger_at": intention.trigger_at.isoformat() if intention.trigger_at else None,
+                "status": intention.status,
+                "priority": intention.priority,
+                "created_at": intention.created_at.isoformat() if intention.created_at else None,
+                "triggered_at": intention.triggered_at.isoformat() if intention.triggered_at else None,
+                "completed_at": intention.completed_at.isoformat() if intention.completed_at else None,
+                "outcome": intention.outcome,
+            })
+
+        # Emit to dev window
+        data = IntentionData(
+            intentions=all_intentions,
+            timestamp="(initial load)",
+            event="initial"
+        )
+        _dev_window.signals.intentions_updated.emit(data)
+    except Exception:
+        # Don't fail dev window initialization if this fails
+        pass
 
 
 def emit_prompt_assembly(context_blocks: List[Dict[str, Any]], total_tokens: int = 0):
@@ -1059,3 +1282,14 @@ def emit_curiosity_update(
         event=event
     )
     _dev_window.signals.curiosity_updated.emit(data)
+
+
+def emit_intentions_update(intentions: List[Dict[str, Any]], event: str = "updated"):
+    """Emit intentions update to dev window if active."""
+    if _dev_window and config.DEV_MODE_ENABLED:
+        data = IntentionData(
+            intentions=intentions,
+            timestamp=datetime.now().strftime("%H:%M:%S.%f")[:-3],
+            event=event
+        )
+        _dev_window.signals.intentions_updated.emit(data)
