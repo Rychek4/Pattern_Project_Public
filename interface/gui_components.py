@@ -304,6 +304,8 @@ class MarkdownRenderer:
             result = self._render_lists(result)
             result = self._render_pulse_command(result)
 
+        # Collapse excessive newlines (3+ becomes 2) to prevent over-spacing
+        result = re.sub(r'\n{3,}', '\n\n', result)
         # Convert newlines (do this last, after list processing)
         result = result.replace('\n', '<br/>')
 
