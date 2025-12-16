@@ -1336,6 +1336,21 @@ class ChatWindow(QMainWindow):
                 user_message = self._build_message_with_pasted_image(user_input, pasted_image)
             else:
                 user_message = self._capture_visuals_for_message(user_input)
+
+            # Inject relevant memories as prefix to user message (API-only, not stored in DB)
+            relevant_memories = assembled.session_context.get("relevant_memories")
+            if relevant_memories:
+                content = user_message.get("content")
+                if isinstance(content, str):
+                    # Simple text content - prepend memories
+                    user_message["content"] = f"{relevant_memories}\n\n{content}"
+                elif isinstance(content, list):
+                    # Multimodal content - find text block and prepend
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            block["text"] = f"{relevant_memories}\n\n{block.get('text', '')}"
+                            break
+
             history.append(user_message)
 
             # Get LLM response with native tool use
@@ -1738,6 +1753,18 @@ class ChatWindow(QMainWindow):
             else:
                 # Text-only message
                 user_message = {"role": "user", "content": message.text}
+
+            # Inject relevant memories as prefix to user message (API-only, not stored in DB)
+            relevant_memories = assembled.session_context.get("relevant_memories")
+            if relevant_memories:
+                content = user_message.get("content")
+                if isinstance(content, str):
+                    user_message["content"] = f"{relevant_memories}\n\n{content}"
+                elif isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            block["text"] = f"{relevant_memories}\n\n{block.get('text', '')}"
+                            break
 
             history.append(user_message)
 

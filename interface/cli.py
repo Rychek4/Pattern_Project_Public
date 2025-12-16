@@ -164,6 +164,13 @@ class ChatCLI:
                 # Get conversation history for LLM (uses saved context count from shutdown)
                 history = conversation_mgr.get_api_messages()
 
+                # Inject relevant memories as prefix to user message (API-only, not stored in DB)
+                # This keeps memories close to the question they're relevant to
+                relevant_memories = assembled.session_context.get("relevant_memories")
+                if relevant_memories and history:
+                    # Prefix the memories to the last message (the current user input)
+                    history[-1]["content"] = f"{relevant_memories}\n\n{history[-1]['content']}"
+
                 # Get tool definitions for native tool use
                 from agency.tools import get_tool_definitions, process_with_tools
                 tools = get_tool_definitions()
@@ -813,6 +820,11 @@ class ChatCLI:
 
             # Get conversation history (uses saved context count from shutdown)
             history = conversation_mgr.get_api_messages()
+
+            # Inject relevant memories as prefix to user message (API-only, not stored in DB)
+            relevant_memories = assembled.session_context.get("relevant_memories")
+            if relevant_memories and history:
+                history[-1]["content"] = f"{relevant_memories}\n\n{history[-1]['content']}"
 
             # Get tool definitions for native tool use
             tools = get_tool_definitions()

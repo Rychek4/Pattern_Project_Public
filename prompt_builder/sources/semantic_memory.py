@@ -399,8 +399,9 @@ class SemanticMemorySource(ContextSource):
         if not all_results:
             return None
 
-        # Format using Option B: separated sections for clarity
-        lines = ["<recalled_context>"]
+        # Format memories for injection into user message (not system prompt)
+        # This places relevant memories closer to the user's question
+        lines = ["<relevant_memories>"]
         promotion_candidates = []
 
         # Section 1: Factual memories ("What I know")
@@ -428,27 +429,29 @@ class SemanticMemorySource(ContextSource):
                     promotion_candidates.append(result)
             lines.append("")
 
-        lines.append("</recalled_context>")
+        lines.append("</relevant_memories>")
 
         # Store promotion candidates in session context for later processing
         if promotion_candidates:
             session_context["promotion_candidates"] = promotion_candidates
 
-        return ContextBlock(
-            source_name=self.source_name,
-            content="\n".join(lines),
-            priority=self.priority,
-            include_always=False,
-            metadata={
-                "memory_count": len(all_results),
-                "episodic_count": len(episodic_results),
-                "factual_count": len(factual_results),
-                "promotion_candidates": len(promotion_candidates),
-                "top_score": max((r.combined_score for r in all_results), default=0),
-                "warmth_cache_size": self._warmth_cache.get_stats()["total_entries"],
-                "topic_warmed_count": topic_warmed_count
-            }
-        )
+        # Store formatted memories in session_context for injection into user message
+        # This is NOT added to system prompt - it will be prefixed to the user message
+        # at the entry point (CLI, HTTP API, etc.) to keep memories close to the question
+        formatted_memories = "\n".join(lines)
+        session_context["relevant_memories"] = formatted_memories
+        session_context["relevant_memories_metadata"] = {
+            "memory_count": len(all_results),
+            "episodic_count": len(episodic_results),
+            "factual_count": len(factual_results),
+            "promotion_candidates": len(promotion_candidates),
+            "top_score": max((r.combined_score for r in all_results), default=0),
+            "warmth_cache_size": self._warmth_cache.get_stats()["total_entries"],
+            "topic_warmed_count": topic_warmed_count
+        }
+
+        # Return None - memories are injected into user message, not system prompt
+        return None
 
     def _apply_warmth_and_rerank(
         self,
