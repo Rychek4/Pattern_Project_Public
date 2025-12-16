@@ -51,7 +51,6 @@ from agency.visual_capture import is_visual_capture_available, release_webcam
 from agency.system_pulse import init_system_pulse_timer, get_system_pulse_timer
 from agency.intentions import init_reminder_scheduler, get_reminder_scheduler
 from subprocess_mgmt.manager import init_subprocess_manager, get_subprocess_manager
-from subprocess_mgmt.audio_player import register_audio_player
 from subprocess_mgmt.chat_overlay import register_chat_overlay
 from prompt_builder import init_prompt_builder
 
@@ -180,7 +179,6 @@ def initialize_system() -> bool:
 
     # Initialize subprocess manager and register subprocesses
     init_subprocess_manager()
-    register_audio_player(enabled=config.SUBPROCESS_AUDIO_ENABLED)
     register_chat_overlay(enabled=config.SUBPROCESS_OVERLAY_ENABLED)
 
     # Initialize HTTP server if enabled
@@ -316,8 +314,6 @@ def start_background_services() -> None:
     log_subsection("Subprocess monitor started")
 
     # Start registered subprocesses
-    if config.SUBPROCESS_AUDIO_ENABLED:
-        subprocess_mgr.start("audio_player")
     if config.SUBPROCESS_OVERLAY_ENABLED:
         subprocess_mgr.start("chat_overlay")
 
