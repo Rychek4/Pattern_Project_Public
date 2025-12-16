@@ -199,6 +199,41 @@ class ConversationManager:
             if turn.role in ("user", "assistant") and turn.content and turn.content.strip()
         ]
 
+    def get_api_messages(self, limit: int = 30) -> List[Dict[str, str]]:
+        """
+        Get conversation history formatted for LLM API with semantic timestamps.
+
+        This is the PRIMARY method for getting conversation context for API calls.
+        It replaces the old dual-system (recent_conversation + raw messages).
+
+        KEY BEHAVIORS:
+        - Spans all sessions (cross-session continuity)
+        - Excludes processed turns (coordinates with memory extraction)
+        - Adds timestamps at format-time (NOT stored in database)
+
+        The timestamps are computed from the stored created_at field, ensuring
+        the database remains clean and memory extraction receives raw content.
+
+        Args:
+            limit: Maximum turns to return (default: 30, matching CONTEXT_WINDOW_SIZE)
+
+        Returns:
+            List of {"role": ..., "content": "(timestamp) message"} dicts
+        """
+        from core.temporal import format_fuzzy_relative_time
+
+        # Use get_context_window for cross-session, excludes-processed behavior
+        turns = self.get_context_window(limit=limit)
+
+        return [
+            {
+                "role": turn.role,
+                "content": f"({format_fuzzy_relative_time(turn.created_at)}) {turn.content}"
+            }
+            for turn in turns
+            if turn.role in ("user", "assistant") and turn.content and turn.content.strip()
+        ]
+
     @db_retry()
     def get_context_window(
         self,

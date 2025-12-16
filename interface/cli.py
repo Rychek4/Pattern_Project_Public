@@ -162,7 +162,7 @@ class ChatCLI:
                 self._display_dev_prompt_assembly(assembled)
 
                 # Get conversation history for LLM
-                history = conversation_mgr.get_recent_history(limit=30)
+                history = conversation_mgr.get_api_messages(limit=30)
 
                 # Get tool definitions for native tool use
                 from agency.tools import get_tool_definitions, process_with_tools
@@ -554,7 +554,7 @@ class ChatCLI:
             )
 
             # Get conversation history
-            history = conversation_mgr.get_recent_history(limit=30)
+            history = conversation_mgr.get_api_messages(limit=30)
 
             # Add the pulse prompt as the message to respond to
             # (role="user" is an API constraint, but content clarifies it's automated)
@@ -685,7 +685,7 @@ class ChatCLI:
             )
 
             # Get conversation history
-            history = conversation_mgr.get_recent_history(limit=30)
+            history = conversation_mgr.get_api_messages(limit=30)
             history.append({"role": "user", "content": reminder_prompt})
 
             # Get tool definitions for native tool use
@@ -812,7 +812,7 @@ class ChatCLI:
             )
 
             # Get conversation history
-            history = conversation_mgr.get_recent_history(limit=30)
+            history = conversation_mgr.get_api_messages(limit=30)
 
             # Get tool definitions for native tool use
             tools = get_tool_definitions()

@@ -55,8 +55,8 @@ def create_app() -> Flask:
                 input_type="text"
             )
 
-            # Get history
-            history = conversation_mgr.get_recent_history(limit=20)
+            # Get history with semantic timestamps
+            history = conversation_mgr.get_api_messages(limit=20)
 
             # Get response
             router = get_llm_router()
