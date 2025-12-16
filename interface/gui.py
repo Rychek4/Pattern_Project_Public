@@ -1318,7 +1318,8 @@ class ChatWindow(QMainWindow):
 
             # Get conversation history BEFORE storing the new turn
             # This prevents duplication when we append the user message below
-            history = self._conversation_mgr.get_api_messages(limit=30)
+            # Uses saved context count from shutdown
+            history = self._conversation_mgr.get_api_messages()
 
             # Store user message for persistence (after getting history)
             if self._conversation_mgr:
@@ -1722,8 +1723,8 @@ class ChatWindow(QMainWindow):
                 system_prompt=""
             )
 
-            # Get conversation history
-            history = self._conversation_mgr.get_api_messages(limit=30)
+            # Get conversation history (uses saved context count from shutdown)
+            history = self._conversation_mgr.get_api_messages()
 
             # Build user message - include Telegram image if present
             # NOTE: We do NOT capture local screen/webcam for Telegram (see docstring)
@@ -1884,8 +1885,8 @@ class ChatWindow(QMainWindow):
                 additional_context={"is_pulse": True}
             )
 
-            # Get conversation history
-            history = self._conversation_mgr.get_api_messages(limit=30)
+            # Get conversation history (uses saved context count from shutdown)
+            history = self._conversation_mgr.get_api_messages()
 
             # Add the pulse prompt as the message to respond to
             # (role="user" is an API constraint, but content clarifies it's automated)
@@ -2034,8 +2035,8 @@ class ChatWindow(QMainWindow):
                 system_prompt=""
             )
 
-            # Get conversation history
-            history = self._conversation_mgr.get_api_messages(limit=30)
+            # Get conversation history (uses saved context count from shutdown)
+            history = self._conversation_mgr.get_api_messages()
 
             # Add the reminder prompt as the message to respond to
             history.append({"role": "user", "content": reminder_prompt})

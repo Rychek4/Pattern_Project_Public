@@ -571,6 +571,35 @@ class MemoryExtractor:
         finally:
             self._extraction_in_progress.clear()
 
+    def wait_for_completion(self, timeout: float = 5.0) -> bool:
+        """
+        Wait for any in-progress extraction to complete.
+
+        Used during shutdown to ensure extraction finishes before saving
+        the context message count, preventing state inconsistency.
+
+        Args:
+            timeout: Maximum seconds to wait (default: 5.0)
+
+        Returns:
+            True if no extraction was running or it completed within timeout,
+            False if extraction was still running after timeout.
+        """
+        import time
+
+        if not self._extraction_in_progress.is_set():
+            return True  # Nothing running
+
+        # Wait for flag to clear
+        start = time.time()
+        while self._extraction_in_progress.is_set():
+            if time.time() - start > timeout:
+                log_warning("Memory extraction still running at shutdown timeout")
+                return False
+            time.sleep(0.1)
+
+        return True
+
     # =========================================================================
     # MAIN EXTRACTION ENTRY POINT
     # =========================================================================
