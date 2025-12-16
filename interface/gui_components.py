@@ -456,6 +456,9 @@ class MarkdownRenderer:
                     list_type = 'ol'
                 result.append(f'<li>{number_match.group(3)}</li>')
             else:
+                # Skip blank lines when inside a list to prevent double-spacing
+                if in_list and line.strip() == '':
+                    continue
                 if in_list:
                     result.append('</ul>' if list_type == 'ul' else '</ol>')
                     in_list = False
