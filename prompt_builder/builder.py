@@ -205,7 +205,9 @@ def create_default_builder() -> PromptBuilder:
     import config
     from prompt_builder.sources.core_memory import CoreMemorySource
     from prompt_builder.sources.semantic_memory import SemanticMemorySource
-    from prompt_builder.sources.conversation import ConversationSource
+    # ConversationSource DEPRECATED: Now using API messages with timestamps directly
+    # Conversation context is provided via get_api_messages() in the messages array
+    # instead of duplicating it in the system prompt. See memory/conversation.py
     from prompt_builder.sources.temporal import TemporalSource
     from prompt_builder.sources.system_pulse import SystemPulseSource
     from prompt_builder.sources.ai_commands import AICommandsSource
@@ -218,6 +220,9 @@ def create_default_builder() -> PromptBuilder:
     log_section("Initializing PromptBuilder", "🔧")
 
     # Register sources in priority order (though they're sorted anyway)
+    # NOTE: ConversationSource removed - conversation context now provided via
+    # get_api_messages() in the messages array with semantic timestamps.
+    # This eliminates duplicate tokens and provides unified time awareness.
     sources = [
         DevModeSource(),        # Dev mode awareness (priority 5) - first if enabled
         CoreMemorySource(),     # Core identity (priority 10)
@@ -227,7 +232,6 @@ def create_default_builder() -> PromptBuilder:
         AICommandsSource(),
         TemporalSource(),
         SemanticMemorySource(),
-        ConversationSource(),
     ]
 
     # Tool stance source (if enabled) - proactive tool usage guidance
