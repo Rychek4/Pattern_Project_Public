@@ -38,6 +38,36 @@ class ConversationManager:
     def __init__(self):
         self._lock_manager = get_lock_manager()
 
+        # Prefixes that AI may echo from prompt metadata but shouldn't persist
+        # These become stale and conflict with real semantic timestamps
+        self._temporal_prefixes_to_strip = [
+            "(Just now) ",
+        ]
+
+    def _sanitize_assistant_content(self, content: str) -> str:
+        """
+        Remove AI-generated temporal markers that shouldn't persist.
+
+        The AI sometimes echoes prompt metadata like "(Just now)" at the start
+        of responses. These become stale and create contradictory timestamps
+        when combined with the real semantic timestamps added at retrieval time.
+
+        Args:
+            content: The assistant's response content
+
+        Returns:
+            Sanitized content with temporal prefixes removed
+        """
+        for prefix in self._temporal_prefixes_to_strip:
+            if content.startswith(prefix):
+                from core.logger import log_info
+                log_info(
+                    f"Sanitized '{prefix.strip()}' prefix from assistant response",
+                    prefix="🧹"
+                )
+                return content[len(prefix):]
+        return content
+
     @db_retry()
     def add_turn(
         self,
@@ -71,6 +101,10 @@ class ConversationManager:
                 prefix="⚠️"
             )
             return None
+
+        # Sanitize assistant responses to remove echoed temporal markers
+        if role == "assistant":
+            content = self._sanitize_assistant_content(content)
 
         with self._lock_manager.acquire("conversation"):
             db = get_database()
