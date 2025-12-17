@@ -5,11 +5,30 @@ No subprocess, no Flask server - just a background thread.
 """
 
 import os
+import re
 import threading
 from typing import Optional
 
 import config
 from core.logger import log_info, log_warning, log_error
+
+
+def _sanitize_for_tts(text: str) -> str:
+    """
+    Remove *action* blocks from text before TTS playback.
+
+    The LLM often wraps emoted actions in single asterisks like *smiles warmly*.
+    These should be displayed visually but not spoken aloud.
+
+    Note: **bold** text (double asterisks) is preserved.
+    """
+    # Pattern matches *text* but not **text**
+    # Same pattern used in gui.py _format_action_text
+    pattern = r'(?<!\*)\*(?!\*)([^*]+)\*(?!\*)'
+    sanitized = re.sub(pattern, '', text)
+    # Clean up any double spaces left behind
+    sanitized = re.sub(r'  +', ' ', sanitized)
+    return sanitized.strip()
 
 
 class TTSPlayer:
@@ -52,11 +71,17 @@ class TTSPlayer:
 
         voice = voice_id or config.ELEVENLABS_DEFAULT_VOICE_ID
 
+        # Sanitize text: remove *action* blocks before speaking
+        sanitized_text = _sanitize_for_tts(text)
+        if not sanitized_text:
+            log_info("TTS skipped: no text after removing actions", prefix="🔊")
+            return True  # Not an error, just nothing to say
+
         # Run in background thread
         with self._lock:
             self._playback_thread = threading.Thread(
                 target=self._play_audio,
-                args=(text, voice),
+                args=(sanitized_text, voice),
                 daemon=True
             )
             self._playback_thread.start()
@@ -71,13 +96,13 @@ class TTSPlayer:
             preview = text[:50] + "..." if len(text) > 50 else text
             log_info(f"TTS playing: {preview}", prefix="🔊")
 
-            audio = self._client.generate(
+            # ElevenLabs SDK 1.0+ API
+            audio_stream = self._client.text_to_speech.stream(
                 text=text,
-                voice=voice_id,
-                model=config.ELEVENLABS_MODEL,
-                stream=True
+                voice_id=voice_id,
+                model_id=config.ELEVENLABS_MODEL,
             )
-            stream(audio)
+            stream(audio_stream)
 
             log_info("TTS playback complete", prefix="🔊")
 

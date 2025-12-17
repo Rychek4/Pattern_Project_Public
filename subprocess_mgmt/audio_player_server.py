@@ -112,12 +112,11 @@ def _play_audio_stream(text: str, voice_id: str, model: str):
             return
 
         log_server("Calling ElevenLabs API to generate audio...")
-        # Generate streaming audio
-        audio_stream = client.generate(
+        # Generate streaming audio (ElevenLabs SDK 1.0+ API)
+        audio_stream = client.text_to_speech.stream(
             text=text,
-            voice=voice_id,
-            model=model,
-            stream=True
+            voice_id=voice_id,
+            model_id=model,
         )
         log_server("Got audio stream from ElevenLabs, starting playback...")
 
