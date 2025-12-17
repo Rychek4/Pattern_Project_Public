@@ -2442,10 +2442,10 @@ def run_gui():
     from agency.visual_capture import release_webcam
     release_webcam()
 
-    # Stop TTS if playing
+    # Shutdown TTS system (stops playback and terminates worker process)
     try:
-        from tts.player import stop_tts
-        stop_tts()
+        from tts.player import shutdown_tts
+        shutdown_tts()
     except Exception:
         pass  # Ignore errors during shutdown
 
