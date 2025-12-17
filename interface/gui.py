@@ -219,8 +219,9 @@ class ChatWindow(QMainWindow):
         self._is_first_message_of_session = True  # Track for next_session reminder triggers
 
         # Streaming state
-        self._streaming_msg_id: Optional[str] = None  # ID of current streaming message div
+        self._streaming_msg_id: Optional[str] = None  # ID of current streaming message
         self._streaming_text: str = ""  # Accumulated text during streaming
+        self._streaming_content_position: Optional[int] = None  # Cursor position where content starts
 
         # Message storage for navigation
         self._messages: List[MessageData] = []
@@ -1105,69 +1106,56 @@ class ChatWindow(QMainWindow):
             log_warning(f"TTS trigger error: {e}")
 
     def _on_stream_start(self, timestamp: str):
-        """Handle start of streaming response - create message placeholder."""
-        import html as html_module
-
+        """Handle start of streaming response - create message header and track position."""
         # Generate unique ID for this streaming message
         self._streaming_msg_id = str(uuid.uuid4())
         self._streaming_text = ""
 
-        # Create placeholder message div
+        # Create the message header (timestamp + AI label)
         color = self._theme.assistant
-        msg_html = f"""
-        <div style='margin-bottom: 10px;' data-msg-id='{self._streaming_msg_id}' id='streaming-msg'>
+        header_html = f"""
+        <div style='margin-bottom: 10px;'>
             <span style='color:{self._theme.timestamp};'>[{timestamp}]</span>
             <span style='color:{color}; font-weight:bold;'>AI:</span>
             <br/>
-            <span style='color:{self._theme.text}; margin-left: 20px;' id='streaming-content'></span>
         </div>
         """
-        self.chat_display.append(msg_html)
+        self.chat_display.append(header_html)
+
+        # Record cursor position where streaming content will be inserted
+        # This position-based approach avoids fragile regex matching on normalized HTML
+        cursor = self.chat_display.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        self._streaming_content_position = cursor.position()
+
         self.chat_display.moveCursor(QTextCursor.End)
 
     def _on_stream_chunk(self, chunk: str):
-        """Handle incoming text chunk - append to streaming message."""
+        """Handle incoming text chunk - update streaming content using cursor position."""
         import html as html_module
 
-        if not self._streaming_msg_id:
+        if not self._streaming_msg_id or self._streaming_content_position is None:
             return
 
         self._streaming_text += chunk
 
-        # Update the streaming message content
-        # We use a simple approach: rebuild the content each time
-        # For large responses, this could be optimized with JavaScript injection
+        # Format accumulated text for display (simple HTML escaping during streaming)
         escaped_text = html_module.escape(self._streaming_text)
-        # Simple newline to <br> conversion for basic formatting during streaming
         display_text = escaped_text.replace('\n', '<br/>')
 
-        # Find and update the streaming content span
-        # QTextBrowser doesn't support getElementById, so we use a workaround:
-        # We track the cursor position and update the document directly
-
-        # Get the document and find the last div (our streaming message)
+        # Use cursor-based update: select from content start to end, replace
+        # This avoids fragile regex matching on Qt-normalized HTML
         cursor = self.chat_display.textCursor()
-        cursor.movePosition(QTextCursor.End)
+        cursor.setPosition(self._streaming_content_position)
+        cursor.movePosition(QTextCursor.End, QTextCursor.KeepAnchor)
+        cursor.removeSelectedText()
 
-        # Clear from the streaming message start and rewrite
-        # This is a simplified approach - find the streaming div and update it
-        doc = self.chat_display.document()
-        html_content = doc.toHtml()
-
-        # Find and replace the streaming content
-        # Look for the marker and update content after it
-        marker_start = f"data-msg-id='{self._streaming_msg_id}'"
-        if marker_start in html_content:
-            # Find the content span and update it
-            import re
-            pattern = rf"(data-msg-id='{self._streaming_msg_id}'.*?margin-left: 20px;'>)(.*?)(</span>\s*</div>)"
-            replacement = rf"\g<1>{display_text}\g<3>"
-            new_html = re.sub(pattern, replacement, html_content, flags=re.DOTALL)
-            self.chat_display.setHtml(new_html)
-            self.chat_display.moveCursor(QTextCursor.End)
+        # Insert the updated content
+        cursor.insertHtml(f"<span style='color:{self._theme.text};'>{display_text}</span>")
+        self.chat_display.moveCursor(QTextCursor.End)
 
     def _on_stream_complete(self, full_text: str):
-        """Handle streaming complete - finalize message and trigger TTS for remaining text."""
+        """Handle streaming complete - finalize with markdown rendering."""
         if not self._streaming_msg_id:
             return
 
@@ -1184,21 +1172,21 @@ class ChatWindow(QMainWindow):
         # Apply full markdown rendering to the final message
         formatted_content = self._markdown_renderer.render(full_text, "assistant")
 
-        # Update the final message with proper formatting
-        doc = self.chat_display.document()
-        html_content = doc.toHtml()
-        marker_start = f"data-msg-id='{self._streaming_msg_id}'"
-        if marker_start in html_content:
-            import re
-            pattern = rf"(data-msg-id='{self._streaming_msg_id}'.*?margin-left: 20px;'>)(.*?)(</span>\s*</div>)"
-            replacement = rf"\g<1>{formatted_content}\g<3>"
-            new_html = re.sub(pattern, replacement, html_content, flags=re.DOTALL)
-            self.chat_display.setHtml(new_html)
+        # Use cursor-based update for final content (same approach as chunks)
+        if self._streaming_content_position is not None:
+            cursor = self.chat_display.textCursor()
+            cursor.setPosition(self._streaming_content_position)
+            cursor.movePosition(QTextCursor.End, QTextCursor.KeepAnchor)
+            cursor.removeSelectedText()
+
+            # Insert the final markdown-rendered content
+            cursor.insertHtml(f"<span style='color:{self._theme.text};'>{formatted_content}</span>")
             self.chat_display.moveCursor(QTextCursor.End)
 
         # Clear streaming state
         self._streaming_msg_id = None
         self._streaming_text = ""
+        self._streaming_content_position = None
 
     def _send_message(self):
         """Handle sending a message."""

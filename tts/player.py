@@ -311,6 +311,9 @@ class TTSPlayer:
         self._client = None
         self._lock = threading.Lock()
 
+        # Rate limiting for ElevenLabs API (max 5 concurrent, use 3 for safety margin)
+        self._api_semaphore = threading.Semaphore(3)
+
         # Multiprocessing components (lazy initialized)
         self._worker_process: Optional[Process] = None
         self._audio_queue: Optional[Queue] = None
@@ -517,42 +520,60 @@ class TTSPlayer:
 
     def _fetch_and_queue_pcm(self, text: str, voice_id: str):
         """Background thread: Fetch PCM audio from ElevenLabs and queue for playback."""
-        try:
-            preview = text[:40] + "..." if len(text) > 40 else text
-            log_info(f"TTS streaming: {preview}", prefix="[TTS]")
+        preview = text[:40] + "..." if len(text) > 40 else text
+        log_info(f"TTS streaming: {preview}", prefix="[TTS]")
 
-            from elevenlabs import VoiceSettings
+        from elevenlabs import VoiceSettings
 
-            # Use PCM format for streaming (24kHz, 16-bit)
-            audio_generator = self._client.text_to_speech.convert(
-                text=text,
-                voice_id=voice_id,
-                model_id=config.ELEVENLABS_MODEL,
-                output_format="pcm_24000",  # 24kHz PCM for streaming
-                voice_settings=VoiceSettings(
-                    stability=0.5,
-                    similarity_boost=0.75,
-                    style=0.5,
-                    use_speaker_boost=True,
-                ),
-            )
+        # Use semaphore to limit concurrent API requests (ElevenLabs limit is 5)
+        with self._api_semaphore:
+            max_retries = 3
+            backoff_seconds = [1.0, 2.0, 4.0]  # Exponential backoff
 
-            # Collect PCM chunks
-            pcm_data = b''.join(chunk for chunk in audio_generator)
+            for attempt in range(max_retries):
+                try:
+                    # Use PCM format for streaming (24kHz, 16-bit)
+                    audio_generator = self._client.text_to_speech.convert(
+                        text=text,
+                        voice_id=voice_id,
+                        model_id=config.ELEVENLABS_MODEL,
+                        output_format="pcm_24000",  # 24kHz PCM for streaming
+                        voice_settings=VoiceSettings(
+                            stability=0.5,
+                            similarity_boost=0.75,
+                            style=0.5,
+                            use_speaker_boost=True,
+                        ),
+                    )
 
-            if not pcm_data:
-                log_warning("ElevenLabs returned empty audio", prefix="[TTS]")
-                return
+                    # Collect PCM chunks
+                    pcm_data = b''.join(chunk for chunk in audio_generator)
 
-            # Normalize and convert to WAV format for pygame
-            wav_buffer = normalize_audio(pcm_data, sample_rate=ELEVENLABS_PCM_24K_SAMPLE_RATE)
+                    if not pcm_data:
+                        log_warning("ElevenLabs returned empty audio", prefix="[TTS]")
+                        return
 
-            # Queue as PCM type for the worker
-            self._audio_queue.put((AUDIO_TYPE_PCM, wav_buffer))
-            log_info("TTS sentence queued", prefix="[TTS]")
+                    # Normalize and convert to WAV format for pygame
+                    wav_buffer = normalize_audio(pcm_data, sample_rate=ELEVENLABS_PCM_24K_SAMPLE_RATE)
 
-        except Exception as e:
-            log_error(f"TTS streaming failed: {e}", prefix="[TTS]")
+                    # Queue as PCM type for the worker
+                    self._audio_queue.put((AUDIO_TYPE_PCM, wav_buffer))
+                    log_info("TTS sentence queued", prefix="[TTS]")
+                    return  # Success, exit retry loop
+
+                except Exception as e:
+                    error_str = str(e)
+                    # Check for rate limit error (429)
+                    is_rate_limit = "429" in error_str or "too_many_concurrent_requests" in error_str.lower()
+
+                    if is_rate_limit and attempt < max_retries - 1:
+                        wait_time = backoff_seconds[attempt]
+                        log_warning(f"TTS rate limited, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})", prefix="[TTS]")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        log_error(f"TTS streaming failed: {e}", prefix="[TTS]")
+                        return
 
     def stop(self):
         """Stop current playback."""
