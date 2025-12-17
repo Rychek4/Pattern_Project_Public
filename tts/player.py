@@ -7,7 +7,7 @@ Architecture:
 - Watchdog Thread: Monitors worker heartbeat, auto-restarts if frozen
 
 Audio Pipeline:
-  ElevenLabs PCM -> DC Offset Removal -> Normalize -16dBFS -> Fade In/Out -> WAV -> pygame
+  ElevenLabs MP3 -> pygame (direct playback)
 """
 
 import io
@@ -187,19 +187,19 @@ def _worker_process(audio_queue: Queue, heartbeat: Value, shutdown_event):
 
             # Check for audio in queue (non-blocking with timeout)
             try:
-                wav_data = audio_queue.get(timeout=HEARTBEAT_INTERVAL)
+                audio_data = audio_queue.get(timeout=HEARTBEAT_INTERVAL)
             except:
                 # Queue empty, loop continues (heartbeat updated)
                 continue
 
-            if wav_data is None:
+            if audio_data is None:
                 # Shutdown signal
                 break
 
-            # Play the audio
+            # Play the audio (MP3 format from ElevenLabs)
             try:
-                wav_buffer = io.BytesIO(wav_data)
-                pygame.mixer.music.load(wav_buffer)
+                audio_buffer = io.BytesIO(audio_data)
+                pygame.mixer.music.load(audio_buffer)
                 pygame.mixer.music.set_volume(MASTER_VOLUME)
                 pygame.mixer.music.play()
 
@@ -413,32 +413,35 @@ class TTSPlayer:
         return True
 
     def _fetch_and_queue_audio(self, text: str, voice_id: str):
-        """Background thread: Fetch audio from ElevenLabs, normalize, and queue."""
+        """Background thread: Fetch audio from ElevenLabs and queue for playback."""
         try:
             preview = text[:50] + "..." if len(text) > 50 else text
             log_info(f"TTS fetching: {preview}", prefix="[TTS]")
 
-            # Get PCM audio from ElevenLabs
+            # Get MP3 audio from ElevenLabs (PCM formats require Pro tier)
+            from elevenlabs import VoiceSettings
             audio_generator = self._client.text_to_speech.convert(
                 text=text,
                 voice_id=voice_id,
                 model_id=config.ELEVENLABS_MODEL,
-                output_format="pcm_44100",  # Raw 16-bit PCM at 44.1kHz
+                output_format="mp3_44100_128",
+                voice_settings=VoiceSettings(
+                    stability=0.5,
+                    similarity_boost=0.75,
+                    style=0.5,
+                    use_speaker_boost=True,
+                ),
             )
 
             # Collect all chunks
-            pcm_data = b''.join(chunk for chunk in audio_generator)
+            mp3_data = b''.join(chunk for chunk in audio_generator)
 
-            if not pcm_data:
+            if not mp3_data:
                 log_warning("ElevenLabs returned empty audio", prefix="[TTS]")
                 return
 
-            # Normalize audio (DC offset, -16dBFS, fades) and convert to WAV
-            wav_buffer = normalize_audio(pcm_data, ELEVENLABS_PCM_SAMPLE_RATE)
-            wav_data = wav_buffer.getvalue()
-
-            # Queue for playback
-            self._audio_queue.put(wav_data)
+            # Queue MP3 directly for playback (pygame handles MP3 natively)
+            self._audio_queue.put(mp3_data)
             log_info("TTS audio queued for playback", prefix="[TTS]")
 
         except Exception as e:
