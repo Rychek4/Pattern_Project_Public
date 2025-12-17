@@ -80,6 +80,10 @@ class MessageSignals(QObject):
     pulse_interval_change = pyqtSignal(int)  # new interval in seconds
     show_notification = pyqtSignal(str, str)  # message, level (info/success/warning/error)
     tool_executing = pyqtSignal(str)  # tool name being executed
+    # Streaming signals
+    stream_start = pyqtSignal(str)  # timestamp - start of streaming response
+    stream_chunk = pyqtSignal(str)  # text chunk to append
+    stream_complete = pyqtSignal(str)  # full_text - streaming finished
 
 
 class ChatInputWidget(QTextEdit):
@@ -214,6 +218,10 @@ class ChatWindow(QMainWindow):
         self._message_queue = queue.Queue()
         self._is_first_message_of_session = True  # Track for next_session reminder triggers
 
+        # Streaming state
+        self._streaming_msg_id: Optional[str] = None  # ID of current streaming message div
+        self._streaming_text: str = ""  # Accumulated text during streaming
+
         # Message storage for navigation
         self._messages: List[MessageData] = []
 
@@ -247,6 +255,10 @@ class ChatWindow(QMainWindow):
         self.signals.response_complete.connect(self._on_response_complete)
         self.signals.pulse_interval_change.connect(self.set_pulse_interval_by_seconds)
         self.signals.show_notification.connect(self._show_notification)
+        # Streaming signal connections
+        self.signals.stream_start.connect(self._on_stream_start)
+        self.signals.stream_chunk.connect(self._on_stream_chunk)
+        self.signals.stream_complete.connect(self._on_stream_complete)
         self.signals.tool_executing.connect(self._on_tool_executing)
 
         # Theme change signal
@@ -1092,6 +1104,102 @@ class ChatWindow(QMainWindow):
         except Exception as e:
             log_warning(f"TTS trigger error: {e}")
 
+    def _on_stream_start(self, timestamp: str):
+        """Handle start of streaming response - create message placeholder."""
+        import html as html_module
+
+        # Generate unique ID for this streaming message
+        self._streaming_msg_id = str(uuid.uuid4())
+        self._streaming_text = ""
+
+        # Create placeholder message div
+        color = self._theme.assistant
+        msg_html = f"""
+        <div style='margin-bottom: 10px;' data-msg-id='{self._streaming_msg_id}' id='streaming-msg'>
+            <span style='color:{self._theme.timestamp};'>[{timestamp}]</span>
+            <span style='color:{color}; font-weight:bold;'>AI:</span>
+            <br/>
+            <span style='color:{self._theme.text}; margin-left: 20px;' id='streaming-content'></span>
+        </div>
+        """
+        self.chat_display.append(msg_html)
+        self.chat_display.moveCursor(QTextCursor.End)
+
+    def _on_stream_chunk(self, chunk: str):
+        """Handle incoming text chunk - append to streaming message."""
+        import html as html_module
+
+        if not self._streaming_msg_id:
+            return
+
+        self._streaming_text += chunk
+
+        # Update the streaming message content
+        # We use a simple approach: rebuild the content each time
+        # For large responses, this could be optimized with JavaScript injection
+        escaped_text = html_module.escape(self._streaming_text)
+        # Simple newline to <br> conversion for basic formatting during streaming
+        display_text = escaped_text.replace('\n', '<br/>')
+
+        # Find and update the streaming content span
+        # QTextBrowser doesn't support getElementById, so we use a workaround:
+        # We track the cursor position and update the document directly
+
+        # Get the document and find the last div (our streaming message)
+        cursor = self.chat_display.textCursor()
+        cursor.movePosition(QTextCursor.End)
+
+        # Clear from the streaming message start and rewrite
+        # This is a simplified approach - find the streaming div and update it
+        doc = self.chat_display.document()
+        html_content = doc.toHtml()
+
+        # Find and replace the streaming content
+        # Look for the marker and update content after it
+        marker_start = f"data-msg-id='{self._streaming_msg_id}'"
+        if marker_start in html_content:
+            # Find the content span and update it
+            import re
+            pattern = rf"(data-msg-id='{self._streaming_msg_id}'.*?margin-left: 20px;'>)(.*?)(</span>\s*</div>)"
+            replacement = rf"\g<1>{display_text}\g<3>"
+            new_html = re.sub(pattern, replacement, html_content, flags=re.DOTALL)
+            self.chat_display.setHtml(new_html)
+            self.chat_display.moveCursor(QTextCursor.End)
+
+    def _on_stream_complete(self, full_text: str):
+        """Handle streaming complete - finalize message and trigger TTS for remaining text."""
+        if not self._streaming_msg_id:
+            return
+
+        # Store message for search
+        timestamp = self._get_timestamp()
+        msg_data = MessageData(
+            id=self._streaming_msg_id,
+            role="assistant",
+            content=full_text,
+            timestamp=timestamp
+        )
+        self._messages.append(msg_data)
+
+        # Apply full markdown rendering to the final message
+        formatted_content = self._markdown_renderer.render(full_text, "assistant")
+
+        # Update the final message with proper formatting
+        doc = self.chat_display.document()
+        html_content = doc.toHtml()
+        marker_start = f"data-msg-id='{self._streaming_msg_id}'"
+        if marker_start in html_content:
+            import re
+            pattern = rf"(data-msg-id='{self._streaming_msg_id}'.*?margin-left: 20px;'>)(.*?)(</span>\s*</div>)"
+            replacement = rf"\g<1>{formatted_content}\g<3>"
+            new_html = re.sub(pattern, replacement, html_content, flags=re.DOTALL)
+            self.chat_display.setHtml(new_html)
+            self.chat_display.moveCursor(QTextCursor.End)
+
+        # Clear streaming state
+        self._streaming_msg_id = None
+        self._streaming_text = ""
+
     def _send_message(self):
         """Handle sending a message."""
         text = self.input_field.toPlainText().strip()
@@ -1314,8 +1422,11 @@ class ChatWindow(QMainWindow):
             return {"role": "user", "content": text}
 
     def _process_message(self, user_input: str, pasted_image: Optional[QImage] = None):
-        """Process a message in background thread."""
+        """Process a message in background thread with streaming response."""
         import time
+        from core.sentence_splitter import SentenceBuffer
+        from tts.player import queue_tts_sentence
+        from core.user_settings import is_tts_enabled, get_tts_voice_id
 
         try:
             # Check for cancellation early
@@ -1324,13 +1435,12 @@ class ChatWindow(QMainWindow):
                 return
 
             # Build prompt (no base prompt - emergent personality from context)
-            # Pass is_session_start flag to trigger next_session reminders on first message
             assembled = self._prompt_builder.build(
                 user_input=user_input,
                 system_prompt="",
                 additional_context={"is_session_start": self._is_first_message_of_session}
             )
-            self._is_first_message_of_session = False  # Only first message triggers session start
+            self._is_first_message_of_session = False
 
             # Emit prompt assembly to dev window
             if config.DEV_MODE_ENABLED:
@@ -1344,15 +1454,13 @@ class ChatWindow(QMainWindow):
                     }
                     for block in assembled.context_blocks
                 ]
-                total_tokens = len(assembled.full_system_prompt) // 4  # Rough estimate
+                total_tokens = len(assembled.full_system_prompt) // 4
                 emit_prompt_assembly(blocks_data, total_tokens)
 
             # Get conversation history BEFORE storing the new turn
-            # This prevents duplication when we append the user message below
-            # Uses saved context count from shutdown
             history = self._conversation_mgr.get_api_messages()
 
-            # Store user message for persistence (after getting history)
+            # Store user message for persistence
             if self._conversation_mgr:
                 self._conversation_mgr.add_turn(
                     role="user",
@@ -1360,23 +1468,19 @@ class ChatWindow(QMainWindow):
                     input_type="text"
                 )
 
-            # Capture visuals and build multimodal message if in auto mode
-            # This adds the current user input with any captured images
-            # If a pasted image was provided, include it
+            # Build user message (with visuals if applicable)
             if pasted_image and not pasted_image.isNull():
                 user_message = self._build_message_with_pasted_image(user_input, pasted_image)
             else:
                 user_message = self._capture_visuals_for_message(user_input)
 
-            # Inject relevant memories as prefix to user message (API-only, not stored in DB)
+            # Inject relevant memories
             relevant_memories = assembled.session_context.get("relevant_memories")
             if relevant_memories:
                 content = user_message.get("content")
                 if isinstance(content, str):
-                    # Simple text content - prepend memories
                     user_message["content"] = f"{relevant_memories}\n\n{content}"
                 elif isinstance(content, list):
-                    # Multimodal content - find text block and prepend
                     for block in content:
                         if isinstance(block, dict) and block.get("type") == "text":
                             block["text"] = f"{relevant_memories}\n\n{block.get('text', '')}"
@@ -1384,26 +1488,88 @@ class ChatWindow(QMainWindow):
 
             history.append(user_message)
 
-            # Get LLM response with native tool use
+            # Get tools
             from llm.router import TaskType
-            from agency.tools import get_tool_definitions, process_with_tools
+            from agency.tools import get_tool_definitions, get_tool_processor
 
             tools = get_tool_definitions()
 
-            start_time = time.time()
-            response = self._llm_router.chat(
+            # Start streaming
+            timestamp = self._get_timestamp()
+            self.signals.stream_start.emit(timestamp)
+
+            # Initialize sentence buffer for TTS
+            sentence_buffer = SentenceBuffer()
+            tts_enabled = is_tts_enabled()
+            voice_id = get_tts_voice_id() if tts_enabled else None
+
+            # Stream the response
+            final_state = None
+            for chunk, state in self._llm_router.chat_stream(
                 messages=history,
                 system_prompt=assembled.full_system_prompt,
                 task_type=TaskType.CONVERSATION,
                 temperature=0.7,
                 tools=tools
-            )
-            pass1_duration = (time.time() - start_time) * 1000
+            ):
+                # Check for cancellation
+                if self._cancel_requested:
+                    self.signals.show_notification.emit("Request cancelled", "warning")
+                    break
 
-            if response.success:
+                final_state = state
+
+                # Emit chunk to GUI
+                if chunk:
+                    self.signals.stream_chunk.emit(chunk)
+
+                    # Process for TTS - detect sentences
+                    if tts_enabled:
+                        sentences = sentence_buffer.add_chunk(chunk)
+                        for sentence_text, is_speakable in sentences:
+                            if is_speakable and sentence_text.strip():
+                                queue_tts_sentence(sentence_text, voice_id)
+
+            # Check if streaming completed successfully
+            if final_state is None or final_state.stop_reason == "error":
+                self.signals.update_status.emit("Streaming error", StatusManager.STATUS_ERROR)
+                self.signals.stream_complete.emit("")
+                return
+
+            # Flush any remaining TTS content
+            if tts_enabled:
+                remaining = sentence_buffer.flush()
+                for sentence_text, is_speakable in remaining:
+                    if is_speakable and sentence_text.strip():
+                        queue_tts_sentence(sentence_text, voice_id)
+
+            # Get the full streamed text
+            streamed_text = final_state.text
+            final_text = streamed_text
+
+            # Check for tool calls and process them
+            if final_state.has_tool_calls():
+                # Process tool calls using non-streaming continuation
+                # Convert streaming state to response format for tool processing
+                from llm.router import LLMResponse, LLMProvider
+
+                # Build a response object from streaming state
+                response = LLMResponse(
+                    text=final_state.text,
+                    success=True,
+                    provider=LLMProvider.ANTHROPIC,
+                    tokens_in=final_state.input_tokens,
+                    tokens_out=final_state.output_tokens,
+                    stop_reason=final_state.stop_reason,
+                    tool_calls=final_state.tool_calls,
+                    raw_content=final_state.raw_content,
+                    web_searches_used=final_state.web_searches_used,
+                    citations=final_state.citations
+                )
+
                 max_passes = getattr(config, 'COMMAND_MAX_PASSES', 3)
 
-                # Set up dev window callbacks for tool/response tracking
+                # Set up dev callbacks
                 dev_callbacks = None
                 if config.DEV_MODE_ENABLED:
                     from interface.dev_window import emit_response_pass, emit_command_executed
@@ -1412,7 +1578,8 @@ class ChatWindow(QMainWindow):
                         "emit_command_executed": emit_command_executed
                     }
 
-                # Use shared helper to process response with native tools
+                # Process tools (uses non-streaming for continuations)
+                from agency.tools import process_with_tools
                 result = process_with_tools(
                     llm_router=self._llm_router,
                     response=response,
@@ -1426,18 +1593,27 @@ class ChatWindow(QMainWindow):
 
                 final_text = result.final_text
 
-                # Store response
-                self._conversation_mgr.add_turn(
-                    role="assistant",
-                    content=final_text,
-                    input_type="text"
-                )
+                # If tool processing added more text, queue it for TTS
+                if tts_enabled and final_text != streamed_text:
+                    additional_text = final_text[len(streamed_text):]
+                    if additional_text.strip():
+                        # Process additional text through sentence buffer
+                        add_buffer = SentenceBuffer()
+                        sentences = add_buffer.add_chunk(additional_text)
+                        sentences.extend(add_buffer.flush())
+                        for sentence_text, is_speakable in sentences:
+                            if is_speakable and sentence_text.strip():
+                                queue_tts_sentence(sentence_text, voice_id)
 
-                # Emit to GUI
-                timestamp = self._get_timestamp()
-                self.signals.new_message.emit("assistant", final_text, timestamp)
-            else:
-                self.signals.update_status.emit(f"Error: {response.error}", StatusManager.STATUS_ERROR)
+            # Store response
+            self._conversation_mgr.add_turn(
+                role="assistant",
+                content=final_text,
+                input_type="text"
+            )
+
+            # Finalize streaming display
+            self.signals.stream_complete.emit(final_text)
 
         except Exception as e:
             error_msg = f"Message processing error: {str(e)}"
@@ -1445,6 +1621,7 @@ class ChatWindow(QMainWindow):
             log_error(f"Exception in _process_message: {error_msg}")
             log_error(f"Traceback:\n{tb}")
             self.signals.update_status.emit(f"Error: {str(e)}", StatusManager.STATUS_ERROR)
+            self.signals.stream_complete.emit("")
 
         finally:
             self.signals.response_complete.emit()

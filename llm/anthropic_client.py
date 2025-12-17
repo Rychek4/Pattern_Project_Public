@@ -3,7 +3,7 @@ Pattern Project - Anthropic Claude Client
 Client for Claude API (frontier reasoning)
 """
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Generator, Iterator
 from dataclasses import dataclass, field
 
 from core.logger import log_info, log_error, log_success
@@ -43,6 +43,41 @@ class AnthropicResponse:
 
     def has_tool_calls(self) -> bool:
         """Check if response contains tool calls (excluding web_search)."""
+        return len(self.tool_calls) > 0
+
+
+@dataclass
+class StreamingState:
+    """Tracks state during streaming response."""
+    text: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    tool_calls: List[ToolCall] = field(default_factory=list)
+    raw_content: List[Any] = field(default_factory=list)
+    stop_reason: Optional[str] = None
+    web_searches_used: int = 0
+    citations: List[WebSearchCitation] = field(default_factory=list)
+    # Track partial tool call being built
+    _current_tool_id: Optional[str] = None
+    _current_tool_name: Optional[str] = None
+    _current_tool_input_json: str = ""
+
+    def to_response(self) -> AnthropicResponse:
+        """Convert streaming state to final AnthropicResponse."""
+        return AnthropicResponse(
+            text=self.text,
+            input_tokens=self.input_tokens,
+            output_tokens=self.output_tokens,
+            success=True,
+            stop_reason=self.stop_reason,
+            web_searches_used=self.web_searches_used,
+            citations=self.citations,
+            tool_calls=self.tool_calls,
+            raw_content=self.raw_content
+        )
+
+    def has_tool_calls(self) -> bool:
+        """Check if any tool calls have been collected."""
         return len(self.tool_calls) > 0
 
 
@@ -288,6 +323,194 @@ class AnthropicClient:
                 success=False,
                 error=error_msg
             )
+
+    def chat_stream(
+        self,
+        messages: List[Dict[str, Any]],
+        system_prompt: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+        temperature: float = 0.7,
+        stop_sequences: Optional[List[str]] = None,
+        enable_web_search: bool = False,
+        web_search_max_uses: Optional[int] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        model: Optional[str] = None
+    ) -> Generator[tuple[str, StreamingState], None, None]:
+        """
+        Stream a chat completion request, yielding text chunks as they arrive.
+
+        Yields:
+            Tuple of (text_chunk, streaming_state) for each text delta.
+            The streaming_state accumulates the full response and tool calls.
+
+        The final StreamingState can be converted to AnthropicResponse via .to_response()
+        """
+        import json
+
+        if max_tokens is None:
+            max_tokens = self.max_tokens
+
+        try:
+            client = self._get_client()
+
+            # Build request parameters (same as chat())
+            request_params = {
+                "model": model or self.model,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "messages": messages
+            }
+
+            if system_prompt:
+                request_params["system"] = system_prompt
+
+            if stop_sequences:
+                request_params["stop_sequences"] = stop_sequences
+
+            # Build tools list
+            all_tools = []
+            if tools:
+                all_tools.extend(tools)
+
+            if enable_web_search:
+                web_search_tool = {
+                    "type": "web_search_20250305",
+                    "name": "web_search",
+                }
+                if web_search_max_uses is not None:
+                    web_search_tool["max_uses"] = web_search_max_uses
+                all_tools.append(web_search_tool)
+
+            if all_tools:
+                request_params["tools"] = all_tools
+
+            # Initialize streaming state
+            state = StreamingState()
+
+            # Use the streaming API
+            with client.messages.stream(**request_params) as stream:
+                current_block_type = None
+                current_block_index = -1
+
+                for event in stream:
+                    event_type = getattr(event, "type", None)
+
+                    if event_type == "message_start":
+                        # Extract input token count from message start
+                        message = getattr(event, "message", None)
+                        if message:
+                            usage = getattr(message, "usage", None)
+                            if usage:
+                                state.input_tokens = getattr(usage, "input_tokens", 0)
+
+                    elif event_type == "content_block_start":
+                        # New content block starting
+                        content_block = getattr(event, "content_block", None)
+                        current_block_index = getattr(event, "index", -1)
+
+                        if content_block:
+                            block_type = getattr(content_block, "type", None)
+                            current_block_type = block_type
+
+                            if block_type == "tool_use":
+                                # Starting a tool call
+                                state._current_tool_id = getattr(content_block, "id", "")
+                                state._current_tool_name = getattr(content_block, "name", "")
+                                state._current_tool_input_json = ""
+
+                                if state._current_tool_name == "web_search":
+                                    state.web_searches_used += 1
+                                    log_info(f"Web search invoked ({state.web_searches_used})", prefix="🔍")
+
+                    elif event_type == "content_block_delta":
+                        delta = getattr(event, "delta", None)
+                        if delta:
+                            delta_type = getattr(delta, "type", None)
+
+                            if delta_type == "text_delta":
+                                # Text chunk arrived
+                                text_chunk = getattr(delta, "text", "")
+                                if text_chunk:
+                                    state.text += text_chunk
+                                    yield (text_chunk, state)
+
+                            elif delta_type == "input_json_delta":
+                                # Tool input JSON chunk
+                                partial_json = getattr(delta, "partial_json", "")
+                                if partial_json:
+                                    state._current_tool_input_json += partial_json
+
+                    elif event_type == "content_block_stop":
+                        # Content block finished
+                        if current_block_type == "tool_use" and state._current_tool_name:
+                            # Finalize the tool call
+                            tool_input = {}
+                            if state._current_tool_input_json:
+                                try:
+                                    tool_input = json.loads(state._current_tool_input_json)
+                                except json.JSONDecodeError:
+                                    log_error(f"Failed to parse tool input JSON", prefix="[Stream]")
+
+                            if state._current_tool_name != "web_search":
+                                state.tool_calls.append(ToolCall(
+                                    id=state._current_tool_id or "",
+                                    name=state._current_tool_name,
+                                    input=tool_input
+                                ))
+                                log_info(f"Tool call: {state._current_tool_name}", prefix="🔧")
+
+                            # Add to raw_content
+                            state.raw_content.append({
+                                "type": "tool_use",
+                                "id": state._current_tool_id or "",
+                                "name": state._current_tool_name,
+                                "input": tool_input
+                            })
+
+                            # Reset tool tracking
+                            state._current_tool_id = None
+                            state._current_tool_name = None
+                            state._current_tool_input_json = ""
+
+                        elif current_block_type == "text":
+                            # Add text block to raw_content
+                            state.raw_content.append({
+                                "type": "text",
+                                "text": state.text
+                            })
+
+                        current_block_type = None
+
+                    elif event_type == "message_delta":
+                        # Message-level updates (stop reason, output tokens)
+                        delta = getattr(event, "delta", None)
+                        if delta:
+                            state.stop_reason = getattr(delta, "stop_reason", None)
+
+                        usage = getattr(event, "usage", None)
+                        if usage:
+                            state.output_tokens = getattr(usage, "output_tokens", 0)
+
+                    elif event_type == "message_stop":
+                        # Stream complete
+                        pass
+
+        except Exception as e:
+            error_msg = str(e)
+            log_error(f"Streaming error: {error_msg}", prefix="[Stream]")
+
+            # Handle specific error types
+            if "authentication" in error_msg.lower() or "api key" in error_msg.lower():
+                error_msg = "Invalid API key"
+            elif "rate" in error_msg.lower():
+                error_msg = "Rate limit exceeded"
+            elif "overloaded" in error_msg.lower():
+                error_msg = "API overloaded, try again later"
+
+            # Yield error state
+            error_state = StreamingState()
+            error_state.stop_reason = "error"
+            yield ("", error_state)
 
     def generate(
         self,
