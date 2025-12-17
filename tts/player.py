@@ -15,17 +15,22 @@ from core.logger import log_info, log_warning, log_error
 
 def _sanitize_for_tts(text: str) -> str:
     """
-    Remove *action* blocks from text before TTS playback.
+    Remove content that should be displayed but not spoken.
 
-    The LLM often wraps emoted actions in single asterisks like *smiles warmly*.
-    These should be displayed visually but not spoken aloud.
+    Removes:
+    - *action* blocks: LLM emoted actions like *smiles warmly*
+    - (Just now): Temporal context marker echoed by the LLM
 
     Note: **bold** text (double asterisks) is preserved.
     """
-    # Pattern matches *text* but not **text**
+    # Remove *action* blocks (but not **bold**)
     # Same pattern used in gui.py _format_action_text
     pattern = r'(?<!\*)\*(?!\*)([^*]+)\*(?!\*)'
     sanitized = re.sub(pattern, '', text)
+
+    # Remove temporal context marker the LLM may echo
+    sanitized = sanitized.replace("(Just now)", "")
+
     # Clean up any double spaces left behind
     sanitized = re.sub(r'  +', ' ', sanitized)
     return sanitized.strip()
