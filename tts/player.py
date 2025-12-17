@@ -31,6 +31,7 @@ from core.logger import log_info, log_warning, log_error
 # CONFIGURATION
 # =============================================================================
 ELEVENLABS_PCM_SAMPLE_RATE = 44100  # ElevenLabs pcm_44100 format
+ELEVENLABS_PCM_24K_SAMPLE_RATE = 24000  # For streaming (pcm_24000)
 PYGAME_SAMPLE_RATE = 44100
 PYGAME_CHANNELS = 1
 PYGAME_BUFFER = 512
@@ -42,6 +43,10 @@ MASTER_VOLUME = 0.4
 
 WATCHDOG_TIMEOUT = 30.0  # Seconds before considering worker frozen
 HEARTBEAT_INTERVAL = 1.0  # Worker heartbeat frequency
+
+# Audio type markers for worker process
+AUDIO_TYPE_MP3 = "mp3"
+AUDIO_TYPE_PCM = "pcm"
 
 
 # =============================================================================
@@ -165,6 +170,7 @@ def _worker_process(audio_queue: Queue, heartbeat: Value, shutdown_event):
     Dedicated pygame playback process.
 
     Isolated from main process to prevent pygame hangs from affecting the app.
+    Handles both MP3 (legacy) and PCM (streaming) audio formats.
     """
     import pygame
 
@@ -187,31 +193,55 @@ def _worker_process(audio_queue: Queue, heartbeat: Value, shutdown_event):
 
             # Check for audio in queue (non-blocking with timeout)
             try:
-                audio_data = audio_queue.get(timeout=HEARTBEAT_INTERVAL)
+                queue_item = audio_queue.get(timeout=HEARTBEAT_INTERVAL)
             except:
                 # Queue empty, loop continues (heartbeat updated)
                 continue
 
-            if audio_data is None:
+            if queue_item is None:
                 # Shutdown signal
                 break
 
-            # Play the audio (MP3 format from ElevenLabs)
+            # Determine audio type
+            if isinstance(queue_item, tuple) and len(queue_item) == 2:
+                audio_type, audio_data = queue_item
+            else:
+                # Legacy format: raw audio data (MP3)
+                audio_type = AUDIO_TYPE_MP3
+                audio_data = queue_item
+
             try:
-                audio_buffer = io.BytesIO(audio_data)
-                pygame.mixer.music.load(audio_buffer)
-                pygame.mixer.music.set_volume(MASTER_VOLUME)
-                pygame.mixer.music.play()
+                if audio_type == AUDIO_TYPE_PCM:
+                    # PCM audio: use pygame.mixer.Sound for direct playback
+                    # Audio data is already WAV-wrapped from normalize_audio()
+                    sound = pygame.mixer.Sound(audio_data)
+                    sound.set_volume(MASTER_VOLUME)
+                    channel = sound.play()
 
-                # Wait for playback to complete
-                while pygame.mixer.music.get_busy():
-                    heartbeat.value = time.time()  # Keep heartbeat alive during playback
-                    pygame.time.wait(100)
+                    # Wait for playback to complete
+                    while channel and channel.get_busy():
+                        heartbeat.value = time.time()
+                        pygame.time.wait(50)  # Shorter wait for more responsive streaming
 
-                    # Check for shutdown during playback
-                    if shutdown_event.is_set():
-                        pygame.mixer.music.stop()
-                        break
+                        if shutdown_event.is_set():
+                            channel.stop()
+                            break
+
+                else:
+                    # MP3 audio: use pygame.mixer.music (legacy path)
+                    audio_buffer = io.BytesIO(audio_data)
+                    pygame.mixer.music.load(audio_buffer)
+                    pygame.mixer.music.set_volume(MASTER_VOLUME)
+                    pygame.mixer.music.play()
+
+                    # Wait for playback to complete
+                    while pygame.mixer.music.get_busy():
+                        heartbeat.value = time.time()
+                        pygame.time.wait(100)
+
+                        if shutdown_event.is_set():
+                            pygame.mixer.music.stop()
+                            break
 
             except Exception as e:
                 log_error(f"Playback error: {e}", prefix="[TTS-Worker]")
@@ -447,6 +477,83 @@ class TTSPlayer:
         except Exception as e:
             log_error(f"TTS fetch/process failed: {e}", prefix="[TTS]")
 
+    def queue_sentence(self, sentence: str, voice_id: Optional[str] = None) -> bool:
+        """
+        Queue a single sentence for TTS playback using PCM streaming format.
+
+        This is the streaming-optimized method that uses PCM format for
+        lower latency compared to MP3.
+
+        Args:
+            sentence: Single sentence to speak
+            voice_id: Optional voice ID (uses default if not specified)
+
+        Returns:
+            True if sentence was queued, False if failed
+        """
+        client = self._get_client()
+        if not client:
+            return False
+
+        if not self._ensure_initialized():
+            return False
+
+        voice = voice_id or config.ELEVENLABS_DEFAULT_VOICE_ID
+
+        # Sanitize text
+        sanitized = _sanitize_for_tts(sentence)
+        if not sanitized:
+            return True  # Not an error, just nothing to say
+
+        # Fetch and queue in background thread
+        thread = threading.Thread(
+            target=self._fetch_and_queue_pcm,
+            args=(sanitized, voice),
+            daemon=True
+        )
+        thread.start()
+
+        return True
+
+    def _fetch_and_queue_pcm(self, text: str, voice_id: str):
+        """Background thread: Fetch PCM audio from ElevenLabs and queue for playback."""
+        try:
+            preview = text[:40] + "..." if len(text) > 40 else text
+            log_info(f"TTS streaming: {preview}", prefix="[TTS]")
+
+            from elevenlabs import VoiceSettings
+
+            # Use PCM format for streaming (24kHz, 16-bit)
+            audio_generator = self._client.text_to_speech.convert(
+                text=text,
+                voice_id=voice_id,
+                model_id=config.ELEVENLABS_MODEL,
+                output_format="pcm_24000",  # 24kHz PCM for streaming
+                voice_settings=VoiceSettings(
+                    stability=0.5,
+                    similarity_boost=0.75,
+                    style=0.5,
+                    use_speaker_boost=True,
+                ),
+            )
+
+            # Collect PCM chunks
+            pcm_data = b''.join(chunk for chunk in audio_generator)
+
+            if not pcm_data:
+                log_warning("ElevenLabs returned empty audio", prefix="[TTS]")
+                return
+
+            # Normalize and convert to WAV format for pygame
+            wav_buffer = normalize_audio(pcm_data, sample_rate=ELEVENLABS_PCM_24K_SAMPLE_RATE)
+
+            # Queue as PCM type for the worker
+            self._audio_queue.put((AUDIO_TYPE_PCM, wav_buffer))
+            log_info("TTS sentence queued", prefix="[TTS]")
+
+        except Exception as e:
+            log_error(f"TTS streaming failed: {e}", prefix="[TTS]")
+
     def stop(self):
         """Stop current playback."""
         if self._audio_queue is not None:
@@ -551,6 +658,23 @@ def play_tts(text: str, voice_id: Optional[str] = None) -> bool:
 def stop_tts():
     """Stop current TTS playback."""
     get_tts_player().stop()
+
+
+def queue_tts_sentence(sentence: str, voice_id: Optional[str] = None) -> bool:
+    """
+    Queue a single sentence for TTS playback (streaming-optimized).
+
+    This uses PCM format for lower latency. Sentences are played
+    sequentially in the order they're queued.
+
+    Args:
+        sentence: Single sentence to speak
+        voice_id: Optional voice ID
+
+    Returns:
+        True if queued successfully
+    """
+    return get_tts_player().queue_sentence(sentence, voice_id)
 
 
 def is_tts_available() -> bool:

@@ -4,13 +4,15 @@ Routes requests to appropriate LLM provider based on task type
 """
 
 from enum import Enum
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Generator
 from dataclasses import dataclass
 
 from core.logger import log_info, log_warning, log_error, log_success
 from core.prompt_logger import log_api_request
 from llm.kobold_client import KoboldClient, KoboldResponse, get_kobold_client
-from llm.anthropic_client import AnthropicClient, AnthropicResponse, ToolCall, get_anthropic_client
+from llm.anthropic_client import (
+    AnthropicClient, AnthropicResponse, ToolCall, StreamingState, get_anthropic_client
+)
 
 
 class LLMProvider(Enum):
@@ -252,6 +254,90 @@ class LLMRouter:
             log_warning(f"{provider.value} failed for CONVERSATION task - not falling back to preserve quality")
 
         return response
+
+    def chat_stream(
+        self,
+        messages: List[Dict[str, Any]],
+        system_prompt: Optional[str] = None,
+        task_type: TaskType = TaskType.CONVERSATION,
+        max_tokens: Optional[int] = None,
+        temperature: float = 0.7,
+        tools: Optional[List[Dict[str, Any]]] = None
+    ) -> Generator[tuple[str, StreamingState], None, None]:
+        """
+        Stream a chat request, yielding text chunks as they arrive.
+
+        Only supports Anthropic provider (streaming not available for Kobold).
+
+        Args:
+            messages: List of message dicts
+            system_prompt: Optional system prompt
+            task_type: Type of task for routing
+            max_tokens: Maximum tokens to generate
+            temperature: Sampling temperature
+            tools: Optional list of tool definitions
+
+        Yields:
+            Tuple of (text_chunk, streaming_state)
+        """
+        # Streaming only supported for Anthropic
+        provider = LLMProvider.ANTHROPIC
+
+        # Check web search availability
+        enable_web_search = False
+        web_search_max_uses = None
+        web_search_unavailable_msg = None
+
+        if task_type == TaskType.CONVERSATION:
+            enable_web_search, web_search_max_uses, web_search_unavailable_msg = (
+                self._check_web_search_availability()
+            )
+
+        # Modify system prompt if web search unavailable
+        final_system_prompt = system_prompt
+        if web_search_unavailable_msg and system_prompt:
+            final_system_prompt = f"{system_prompt}\n\n{web_search_unavailable_msg}"
+        elif web_search_unavailable_msg:
+            final_system_prompt = web_search_unavailable_msg
+
+        # Select model based on task type
+        import config
+        if task_type == TaskType.CONVERSATION:
+            from core.user_settings import get_user_settings
+            user_model = get_user_settings().conversation_model
+            model = user_model if user_model else config.ANTHROPIC_MODEL_CONVERSATION
+        elif task_type in (TaskType.EXTRACTION, TaskType.FACT_EXTRACTION):
+            model = config.ANTHROPIC_MODEL_EXTRACTION
+        else:
+            model = config.ANTHROPIC_MODEL
+
+        try:
+            client = self._get_anthropic()
+            final_state = None
+
+            for chunk, state in client.chat_stream(
+                messages=messages,
+                system_prompt=final_system_prompt,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                enable_web_search=enable_web_search,
+                web_search_max_uses=web_search_max_uses,
+                tools=tools,
+                model=model
+            ):
+                final_state = state
+                yield (chunk, state)
+
+            # Record web search usage after streaming complete
+            if final_state and final_state.web_searches_used > 0:
+                self._record_web_search_usage(final_state.web_searches_used)
+
+        except Exception as e:
+            log_error(f"Streaming error: {e}")
+            # Yield error state
+            error_state = StreamingState()
+            error_state.stop_reason = "error"
+            yield ("", error_state)
 
     def _check_web_search_availability(self) -> tuple[bool, Optional[int], Optional[str]]:
         """
