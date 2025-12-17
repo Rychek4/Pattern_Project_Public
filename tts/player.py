@@ -96,18 +96,19 @@ class TTSPlayer:
     def _play_audio(self, text: str, voice_id: str):
         """Internal: Generate and stream audio."""
         try:
-            from elevenlabs import stream
+            from elevenlabs import play
 
             preview = text[:50] + "..." if len(text) > 50 else text
             log_info(f"TTS playing: {preview}", prefix="🔊")
 
-            # ElevenLabs SDK 1.0+ API
-            audio_stream = self._client.text_to_speech.stream(
+            # ElevenLabs SDK 1.0+ API - use convert for full audio, play with sounddevice
+            audio_stream = self._client.text_to_speech.convert(
                 text=text,
                 voice_id=voice_id,
                 model_id=config.ELEVENLABS_MODEL,
             )
-            stream(audio_stream)
+            # use_ffmpeg=False uses sounddevice+soundfile instead of mpv/ffplay
+            play(audio_stream, use_ffmpeg=False)
 
             log_info("TTS playback complete", prefix="🔊")
 
@@ -125,18 +126,16 @@ class TTSPlayer:
         # Check for elevenlabs
         try:
             from elevenlabs.client import ElevenLabs
-            from elevenlabs import stream
+            from elevenlabs import play
         except ImportError:
             return False
 
-        # Check for audio backend
+        # Check for audio backend (sounddevice + soundfile for use_ffmpeg=False)
         try:
             import sounddevice
+            import soundfile
         except ImportError:
-            try:
-                import pyaudio
-            except ImportError:
-                return False
+            return False
 
         # Check for API key
         if not os.getenv("Eleven_Labs_API"):

@@ -28,6 +28,7 @@ numpy>=1.24.0
 # Text-to-Speech (ElevenLabs)
 elevenlabs>=1.0.0
 sounddevice>=0.4.6
+soundfile>=0.12.0
 
 # Telegram Bot API
 python-telegram-bot>=21.0
