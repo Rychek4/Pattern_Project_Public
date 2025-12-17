@@ -281,7 +281,7 @@ SUBPROCESS_MAX_RESTART_ATTEMPTS = 3
 # Or via API: https://api.elevenlabs.io/v1/voices
 ELEVENLABS_API_KEY = os.getenv("Eleven_Labs_API", "")
 ELEVENLABS_DEFAULT_VOICE_ID = "MKHH3pSZhHPPzypDhMoU"  # Default voice
-ELEVENLABS_MODEL = "eleven_monolingual_v1"  # TTS model
+ELEVENLABS_MODEL = "eleven_multilingual_v2"  # TTS model
 ELEVENLABS_AUDIO_PORT = 5003  # Port for audio player subprocess
 
 # User settings file for TTS preferences (enabled, voice_id)
