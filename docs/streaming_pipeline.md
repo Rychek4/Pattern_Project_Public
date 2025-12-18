@@ -232,7 +232,7 @@ class MessageSignals(QObject):
 
 ### ElevenLabs Settings (`config.py`)
 ```python
-ELEVENLABS_MODEL = "eleven_multilingual_v2"
+ELEVENLABS_MODEL = "eleven_turbo_v2_5"
 ELEVENLABS_DEFAULT_VOICE_ID = "your_voice_id"
 ```
 
