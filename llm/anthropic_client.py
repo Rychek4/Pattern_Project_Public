@@ -387,6 +387,9 @@ class AnthropicClient:
             # Initialize streaming state
             state = StreamingState()
 
+            # DIAGNOSTIC: Track chunks yielded to detect tool-only responses
+            text_chunks_yielded = 0
+
             # Use the streaming API
             with client.messages.stream(**request_params) as stream:
                 current_block_type = None
@@ -394,6 +397,21 @@ class AnthropicClient:
 
                 for event in stream:
                     event_type = getattr(event, "type", None)
+
+                    # DIAGNOSTIC: Log every SSE event to trace streaming behavior
+                    if event_type == "content_block_start":
+                        content_block = getattr(event, "content_block", None)
+                        block_type = getattr(content_block, "type", None) if content_block else None
+                        log_info(f"SSE content_block_start: type={block_type}", prefix="📡")
+                    elif event_type == "content_block_stop":
+                        log_info(f"SSE content_block_stop: was_type={current_block_type}", prefix="📡")
+                    elif event_type == "message_delta":
+                        delta = getattr(event, "delta", None)
+                        stop_reason = getattr(delta, "stop_reason", None) if delta else None
+                        if stop_reason:
+                            log_info(f"SSE message_delta: stop_reason={stop_reason}", prefix="📡")
+                    elif event_type == "message_stop":
+                        log_info(f"SSE message_stop: text_chunks_yielded={text_chunks_yielded}, tool_calls={len(state.tool_calls)}", prefix="📡")
 
                     if event_type == "message_start":
                         # Extract input token count from message start
@@ -432,6 +450,7 @@ class AnthropicClient:
                                 text_chunk = getattr(delta, "text", "")
                                 if text_chunk:
                                     state.text += text_chunk
+                                    text_chunks_yielded += 1
                                     yield (text_chunk, state)
 
                             elif delta_type == "input_json_delta":
@@ -494,6 +513,29 @@ class AnthropicClient:
                     elif event_type == "message_stop":
                         # Stream complete
                         pass
+
+            # ============================================================
+            # CRITICAL FIX: Always yield final state after stream completes
+            # ============================================================
+            # The streaming loop above only yields on text_delta events.
+            # When Claude responds with tool calls (with or without text),
+            # the generator may yield 0 chunks if tools come before text.
+            # This leaves the caller with final_state=None, breaking the flow.
+            #
+            # By always yielding the final state here, we guarantee:
+            # 1. Tool-only responses are properly returned
+            # 2. Tool calls accumulated in state.tool_calls are accessible
+            # 3. The stop_reason and token counts are available
+            # 4. The caller's final_state is NEVER None for successful streams
+            # ============================================================
+            if text_chunks_yielded == 0:
+                log_info(f"STREAMING FIX: No text chunks yielded, but stream completed. "
+                         f"Tool calls: {len(state.tool_calls)}, text_len: {len(state.text)}, "
+                         f"stop_reason: {state.stop_reason}", prefix="📡")
+
+            log_info(f"STREAMING FIX: Yielding final state (text_chunks_yielded={text_chunks_yielded}, "
+                     f"tool_calls={len(state.tool_calls)}, stop_reason={state.stop_reason})", prefix="📡")
+            yield ("", state)
 
         except Exception as e:
             import traceback
