@@ -52,7 +52,6 @@ class ToolProcessingResult:
         passes_executed: Number of API calls made
         telegram_sent: True if send_telegram was executed successfully (any pass)
         pulse_interval_changed: True if pulse interval was changed (any pass)
-        conversation_style_changed: True if conversation style was changed (any pass)
         total_duration_ms: Total processing time in milliseconds
     """
     final_text: str
@@ -60,7 +59,6 @@ class ToolProcessingResult:
     passes_executed: int = 1
     telegram_sent: bool = False
     pulse_interval_changed: bool = False
-    conversation_style_changed: bool = False
     total_duration_ms: float = 0.0
 
 
@@ -109,7 +107,6 @@ class ToolResponseHelper:
         history: List[Dict[str, Any]],
         max_passes: int = 5,
         pulse_callback: Optional[Callable[[int], None]] = None,
-        style_callback: Optional[Callable[[str], None]] = None,
         dev_mode_callbacks: Optional[Dict[str, Callable]] = None,
         pass1_duration: float = 0.0
     ) -> ToolProcessingResult:
@@ -122,8 +119,6 @@ class ToolResponseHelper:
             max_passes: Maximum number of tool execution passes
             pulse_callback: Optional callback for pulse interval changes.
                             Called with interval in seconds when AI changes pulse.
-            style_callback: Optional callback for conversation style changes.
-                            Called with style name when AI changes style.
             dev_mode_callbacks: Optional dict of callbacks for dev window:
                 - emit_response_pass: (pass_num, provider, text, tokens_in, tokens_out, duration_ms, tools, ...) -> None
                 - emit_command_executed: (name, query, result, error, needs_continuation) -> None
@@ -143,7 +138,6 @@ class ToolResponseHelper:
         # Track across all passes
         telegram_sent = False
         pulse_interval_changed = False
-        conversation_style_changed = False
         start_time = time.time()
 
         for pass_num in range(1, max_passes + 1):
@@ -174,13 +168,6 @@ class ToolResponseHelper:
                 else:
                     log_warning("PULSE DEBUG: No pulse_callback provided!")
 
-            # Handle conversation style change from this pass
-            if processed.has_conversation_style_change():
-                conversation_style_changed = True
-                log_info(f"Style change detected: {processed.conversation_style_change}", prefix="💬")
-                if style_callback:
-                    style_callback(processed.conversation_style_change)
-
             # Track telegram sends across all passes
             if processed.telegram_sent:
                 telegram_sent = True
@@ -193,7 +180,6 @@ class ToolResponseHelper:
                     passes_executed=pass_num,
                     telegram_sent=telegram_sent,
                     pulse_interval_changed=pulse_interval_changed,
-                    conversation_style_changed=conversation_style_changed,
                     total_duration_ms=(time.time() - start_time) * 1000
                 )
 
@@ -226,7 +212,6 @@ class ToolResponseHelper:
                     passes_executed=pass_num,
                     telegram_sent=telegram_sent,
                     pulse_interval_changed=pulse_interval_changed,
-                    conversation_style_changed=conversation_style_changed,
                     total_duration_ms=(time.time() - start_time) * 1000
                 )
 
@@ -240,7 +225,6 @@ class ToolResponseHelper:
             passes_executed=max_passes,
             telegram_sent=telegram_sent,
             pulse_interval_changed=pulse_interval_changed,
-            conversation_style_changed=conversation_style_changed,
             total_duration_ms=(time.time() - start_time) * 1000
         )
 
@@ -288,7 +272,6 @@ def process_with_tools(
     system_prompt: str,
     max_passes: int = 5,
     pulse_callback: Optional[Callable[[int], None]] = None,
-    style_callback: Optional[Callable[[str], None]] = None,
     tools: Optional[List[Dict[str, Any]]] = None,
     dev_mode_callbacks: Optional[Dict[str, Callable]] = None
 ) -> ToolProcessingResult:
@@ -304,7 +287,6 @@ def process_with_tools(
         system_prompt: System prompt
         max_passes: Maximum tool execution passes
         pulse_callback: Optional callback for pulse interval changes
-        style_callback: Optional callback for conversation style changes
         tools: Optional tool definitions
         dev_mode_callbacks: Optional dict of callbacks for dev window:
             - emit_response_pass: For Response Pipeline tab
@@ -323,6 +305,5 @@ def process_with_tools(
         history=history,
         max_passes=max_passes,
         pulse_callback=pulse_callback,
-        style_callback=style_callback,
         dev_mode_callbacks=dev_mode_callbacks
     )

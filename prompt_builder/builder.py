@@ -240,12 +240,6 @@ def create_default_builder() -> PromptBuilder:
         sources.append(ToolStanceSource())
         log_info("ToolStanceSource enabled", prefix="🔧")
 
-    # Conversation style source (if enabled) - casual, deep, funny, teacher modes
-    if getattr(config, 'CONVERSATION_STYLE_ENABLED', True):
-        from prompt_builder.sources.conversation_style import ConversationStyleSource
-        sources.append(ConversationStyleSource())
-        log_info("ConversationStyleSource enabled", prefix="💬")
-
     # Curiosity source (if enabled) - provides topic exploration context
     if getattr(config, 'CURIOSITY_ENABLED', True):
         from agency.curiosity.source import CuriositySource
