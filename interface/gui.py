@@ -1426,19 +1426,27 @@ class ChatWindow(QMainWindow):
         from tts.player import queue_tts_sentence
         from core.user_settings import is_tts_enabled, get_tts_voice_id
 
+        # DIAGNOSTIC: Log entry point
+        log_info("=== _process_message START ===", prefix="📨")
+        log_info(f"Input length: {len(user_input)} chars", prefix="📨")
+        log_info(f"Has pasted image: {pasted_image is not None and not pasted_image.isNull()}", prefix="📨")
+
         try:
             # Check for cancellation early
             if self._cancel_requested:
                 self.signals.show_notification.emit("Request cancelled", "warning")
+                log_info("Cancelled early", prefix="📨")
                 return
 
             # Build prompt (no base prompt - emergent personality from context)
+            log_info("Building prompt...", prefix="📨")
             assembled = self._prompt_builder.build(
                 user_input=user_input,
                 system_prompt="",
                 additional_context={"is_session_start": self._is_first_message_of_session}
             )
             self._is_first_message_of_session = False
+            log_info(f"Prompt built: {len(assembled.full_system_prompt)} chars system prompt", prefix="📨")
 
             # Emit prompt assembly to dev window
             if config.DEV_MODE_ENABLED:
@@ -1456,21 +1464,33 @@ class ChatWindow(QMainWindow):
                 emit_prompt_assembly(blocks_data, total_tokens)
 
             # Get conversation history BEFORE storing the new turn
+            log_info("Getting conversation history...", prefix="📨")
             history = self._conversation_mgr.get_api_messages()
+            log_info(f"Got {len(history)} messages in history", prefix="📨")
 
-            # Store user message for persistence
+            # Store user message for persistence (NOTE: this may trigger memory extraction!)
+            log_info("Storing user turn (may trigger extraction)...", prefix="📨")
             if self._conversation_mgr:
                 self._conversation_mgr.add_turn(
                     role="user",
                     content=user_input,
                     input_type="text"
                 )
+            log_info("User turn stored", prefix="📨")
 
             # Build user message (with visuals if applicable)
+            log_info("Building user message...", prefix="📨")
             if pasted_image and not pasted_image.isNull():
                 user_message = self._build_message_with_pasted_image(user_input, pasted_image)
+                log_info("Built message with pasted image", prefix="📨")
             else:
                 user_message = self._capture_visuals_for_message(user_input)
+                # Log what type of message was built
+                content = user_message.get("content", "")
+                if isinstance(content, list):
+                    log_info(f"Built multimodal message with {len(content)} content blocks", prefix="📨")
+                else:
+                    log_info(f"Built text-only message ({len(content)} chars)", prefix="📨")
 
             # Inject relevant memories
             relevant_memories = assembled.session_context.get("relevant_memories")
@@ -1485,16 +1505,20 @@ class ChatWindow(QMainWindow):
                             break
 
             history.append(user_message)
+            log_info(f"History now has {len(history)} messages (after appending user message)", prefix="📨")
 
             # Get tools
             from llm.router import TaskType
             from agency.tools import get_tool_definitions, get_tool_processor
 
             tools = get_tool_definitions()
+            log_info(f"Got {len(tools)} tool definitions", prefix="📨")
 
             # Start streaming
+            log_info("Emitting stream_start signal...", prefix="📨")
             timestamp = self._get_timestamp()
             self.signals.stream_start.emit(timestamp)
+            log_info("Starting streaming API call...", prefix="📨")
 
             # Initialize sentence buffer for TTS
             sentence_buffer = SentenceBuffer()
@@ -1529,10 +1553,21 @@ class ChatWindow(QMainWindow):
                                 queue_tts_sentence(sentence_text, voice_id)
 
             # Check if streaming completed successfully
-            if final_state is None or final_state.stop_reason == "error":
+            log_info("Streaming loop exited, checking result...", prefix="📨")
+            if final_state is None:
+                log_error("final_state is None - streaming yielded nothing!", prefix="📨")
                 self.signals.update_status.emit("Streaming error", StatusManager.STATUS_ERROR)
                 self.signals.stream_complete.emit("")
                 return
+            elif final_state.stop_reason == "error":
+                error_msg = getattr(final_state, '_error_message', 'unknown error')
+                log_error(f"Streaming ended with error: {error_msg}", prefix="📨")
+                log_error(f"final_state.text length: {len(final_state.text) if final_state.text else 0}", prefix="📨")
+                self.signals.update_status.emit("Streaming error", StatusManager.STATUS_ERROR)
+                self.signals.stream_complete.emit("")
+                return
+
+            log_info(f"Streaming completed successfully: {len(final_state.text)} chars, stop_reason={final_state.stop_reason}", prefix="📨")
 
             # Flush any remaining TTS content
             if tts_enabled:
@@ -1604,6 +1639,7 @@ class ChatWindow(QMainWindow):
                                 queue_tts_sentence(sentence_text, voice_id)
 
             # Store response
+            log_info(f"Storing assistant response ({len(final_text)} chars)", prefix="📨")
             self._conversation_mgr.add_turn(
                 role="assistant",
                 content=final_text,
@@ -1611,17 +1647,22 @@ class ChatWindow(QMainWindow):
             )
 
             # Finalize streaming display
+            log_info("Emitting stream_complete with final text", prefix="📨")
             self.signals.stream_complete.emit(final_text)
+            log_info("=== _process_message COMPLETE ===", prefix="📨")
 
         except Exception as e:
             error_msg = f"Message processing error: {str(e)}"
             tb = traceback.format_exc()
-            log_error(f"Exception in _process_message: {error_msg}")
-            log_error(f"Traceback:\n{tb}")
+            log_error(f"=== _process_message EXCEPTION ===", prefix="📨")
+            log_error(f"Exception in _process_message: {error_msg}", prefix="📨")
+            log_error(f"Exception type: {type(e).__name__}", prefix="📨")
+            log_error(f"Traceback:\n{tb}", prefix="📨")
             self.signals.update_status.emit(f"Error: {str(e)}", StatusManager.STATUS_ERROR)
             self.signals.stream_complete.emit("")
 
         finally:
+            log_info("_process_message finally block - emitting response_complete", prefix="📨")
             self.signals.response_complete.emit()
 
     def _process_native_tools_response(

@@ -311,9 +311,31 @@ class LLMRouter:
         else:
             model = config.ANTHROPIC_MODEL
 
+        # DIAGNOSTIC: Log streaming request details
+        log_info(f"=== STREAM REQUEST START ===", prefix="🔍")
+        log_info(f"Model: {model}, Task: {task_type.value}", prefix="🔍")
+        log_info(f"Messages count: {len(messages)}", prefix="🔍")
+        log_info(f"Tools enabled: {tools is not None and len(tools) > 0}", prefix="🔍")
+        log_info(f"Web search: {enable_web_search}", prefix="🔍")
+
+        # Log message structure (not full content for privacy)
+        for i, msg in enumerate(messages):
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                content_preview = content[:100] + "..." if len(content) > 100 else content
+                log_info(f"  [{i}] {role}: {len(content)} chars - {content_preview}", prefix="🔍")
+            elif isinstance(content, list):
+                # Multimodal content
+                block_types = [b.get("type", "?") for b in content if isinstance(b, dict)]
+                log_info(f"  [{i}] {role}: multimodal with {len(content)} blocks: {block_types}", prefix="🔍")
+            else:
+                log_info(f"  [{i}] {role}: unknown content type {type(content)}", prefix="🔍")
+
         try:
             client = self._get_anthropic()
             final_state = None
+            chunk_count = 0
 
             for chunk, state in client.chat_stream(
                 messages=messages,
@@ -326,17 +348,34 @@ class LLMRouter:
                 model=model
             ):
                 final_state = state
+                chunk_count += 1
+                if chunk_count == 1:
+                    log_info(f"First chunk received", prefix="🔍")
                 yield (chunk, state)
+
+            # DIAGNOSTIC: Log streaming completion
+            log_info(f"=== STREAM REQUEST COMPLETE ===", prefix="🔍")
+            log_info(f"Total chunks: {chunk_count}", prefix="🔍")
+            if final_state:
+                log_info(f"Stop reason: {final_state.stop_reason}", prefix="🔍")
+                log_info(f"Text length: {len(final_state.text)} chars", prefix="🔍")
+                log_info(f"Tool calls: {len(final_state.tool_calls)}", prefix="🔍")
+                if final_state.stop_reason == "error":
+                    error_msg = getattr(final_state, '_error_message', 'unknown')
+                    log_error(f"Stream ended with error: {error_msg}", prefix="🔍")
 
             # Record web search usage after streaming complete
             if final_state and final_state.web_searches_used > 0:
                 self._record_web_search_usage(final_state.web_searches_used)
 
         except Exception as e:
-            log_error(f"Streaming error: {e}")
+            import traceback
+            log_error(f"Router streaming error: {e}", prefix="🔍")
+            log_error(f"Router traceback:\n{traceback.format_exc()}", prefix="🔍")
             # Yield error state
             error_state = StreamingState()
             error_state.stop_reason = "error"
+            error_state._error_message = str(e)
             yield ("", error_state)
 
     def _check_web_search_availability(self) -> tuple[bool, Optional[int], Optional[str]]:

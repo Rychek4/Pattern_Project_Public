@@ -370,10 +370,22 @@ def build_multimodal_content(
     """
     content = []
 
+    # DIAGNOSTIC: Log multimodal build
+    log_info(f"Building multimodal content: text={len(text)} chars, images={len(images) if images else 0}", prefix="👁️")
+
     # Add images first (Claude processes them before text)
     if images:
-        for img in images:
-            content.append(img.to_api_format())
+        for i, img in enumerate(images):
+            try:
+                api_format = img.to_api_format()
+                # Log image details (not the actual data)
+                source = api_format.get("source", {})
+                data_len = len(source.get("data", "")) if source else 0
+                media_type = source.get("media_type", "unknown") if source else "unknown"
+                log_info(f"  Image {i}: type={media_type}, source={img.source_type}, data_len={data_len}", prefix="👁️")
+                content.append(api_format)
+            except Exception as e:
+                log_error(f"  Image {i}: Failed to convert to API format: {e}", prefix="👁️")
 
     # Add text content
     content.append({
@@ -381,6 +393,7 @@ def build_multimodal_content(
         "text": text
     })
 
+    log_info(f"Multimodal content built: {len(content)} blocks total", prefix="👁️")
     return content
 
 

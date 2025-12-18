@@ -141,8 +141,18 @@ class ConversationManager:
         # Check if memory extraction threshold reached (outside the lock)
         # Import here to avoid circular imports
         from memory.extractor import get_memory_extractor
+        from core.logger import log_info
+        import time
+
+        log_info(f"Turn {turn_id} stored, checking for memory extraction...", prefix="📜")
+        extraction_start = time.time()
+
         extractor = get_memory_extractor()
         extractor.check_and_extract()
+
+        extraction_duration = (time.time() - extraction_start) * 1000
+        if extraction_duration > 100:  # Only log if it took more than 100ms
+            log_info(f"Memory extraction check took {extraction_duration:.0f}ms", prefix="📜")
 
         return turn_id
 
@@ -263,7 +273,11 @@ class ConversationManager:
         """
         from core.temporal import format_fuzzy_relative_time
         from core.database import get_database
+        from core.logger import log_info
         from config import CONTEXT_WINDOW_SIZE, CONTEXT_OVERFLOW_TRIGGER
+
+        # DIAGNOSTIC: Log entry
+        log_info("=== get_api_messages START ===", prefix="📜")
 
         # Determine the limit to use
         if limit is None:
@@ -274,14 +288,21 @@ class ConversationManager:
             if saved_count is not None:
                 # Clamp to valid range [CONTEXT_WINDOW_SIZE, CONTEXT_OVERFLOW_TRIGGER]
                 limit = max(CONTEXT_WINDOW_SIZE, min(CONTEXT_OVERFLOW_TRIGGER, int(saved_count)))
+                log_info(f"Using saved context count: {saved_count} -> clamped to {limit}", prefix="📜")
             else:
                 # First boot or no saved state - use default window size
                 limit = CONTEXT_WINDOW_SIZE
+                log_info(f"No saved context count, using default: {limit}", prefix="📜")
+        else:
+            log_info(f"Using provided limit: {limit}", prefix="📜")
 
         # Use get_context_window for cross-session, excludes-processed behavior
+        log_info(f"Fetching context window (limit={limit})...", prefix="📜")
         turns = self.get_context_window(limit=limit)
+        log_info(f"Got {len(turns)} raw turns from context window", prefix="📜")
 
-        return [
+        # Format and filter
+        result = [
             {
                 "role": turn.role,
                 "content": f"({format_fuzzy_relative_time(turn.created_at)}) {turn.content}"
@@ -289,6 +310,16 @@ class ConversationManager:
             for turn in turns
             if turn.role in ("user", "assistant") and turn.content and turn.content.strip()
         ]
+
+        log_info(f"Formatted {len(result)} messages for API (after filtering)", prefix="📜")
+
+        # Log role distribution
+        user_count = sum(1 for m in result if m["role"] == "user")
+        assistant_count = sum(1 for m in result if m["role"] == "assistant")
+        log_info(f"Role distribution: {user_count} user, {assistant_count} assistant", prefix="📜")
+
+        log_info("=== get_api_messages END ===", prefix="📜")
+        return result
 
     @db_retry()
     def get_context_window(
