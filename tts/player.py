@@ -311,8 +311,18 @@ class TTSPlayer:
         self._client = None
         self._lock = threading.Lock()
 
-        # Rate limiting for ElevenLabs API (max 5 concurrent, use 3 for safety margin)
-        self._api_semaphore = threading.Semaphore(3)
+        # Rate limiting for ElevenLabs API (max 5 concurrent)
+        self._api_semaphore = threading.Semaphore(5)
+
+        # Sequence tracking for ordered playback
+        # Ensures sentences play in the order they were queued, not the order
+        # they return from the API (shorter sentences return faster)
+        self._sequence_lock = threading.Lock()
+        self._sequence_counter = 0  # Assigned when sentence is queued
+        self._next_expected_seq = 0  # Next sequence number to release to playback
+        self._reorder_buffer: dict = {}  # {seq_num: (audio_type, audio_data)}
+        self._sequence_timestamps: dict = {}  # {seq_num: queue_time} for timeout
+        self._sequence_timeout = 12.0  # Seconds before skipping a hung sequence
 
         # Multiprocessing components (lazy initialized)
         self._worker_process: Optional[Process] = None
@@ -485,7 +495,9 @@ class TTSPlayer:
         Queue a single sentence for TTS playback using PCM streaming format.
 
         This is the streaming-optimized method that uses PCM format for
-        lower latency compared to MP3.
+        lower latency compared to MP3. Sentences are guaranteed to play
+        in the order they were queued, even if shorter sentences return
+        from the API faster.
 
         Args:
             sentence: Single sentence to speak
@@ -508,20 +520,26 @@ class TTSPlayer:
         if not sanitized:
             return True  # Not an error, just nothing to say
 
-        # Fetch and queue in background thread
+        # Assign sequence number (atomic under lock)
+        with self._sequence_lock:
+            seq_num = self._sequence_counter
+            self._sequence_counter += 1
+            self._sequence_timestamps[seq_num] = time.time()
+
+        # Fetch and queue in background thread with sequence number
         thread = threading.Thread(
             target=self._fetch_and_queue_pcm,
-            args=(sanitized, voice),
+            args=(sanitized, voice, seq_num),
             daemon=True
         )
         thread.start()
 
         return True
 
-    def _fetch_and_queue_pcm(self, text: str, voice_id: str):
+    def _fetch_and_queue_pcm(self, text: str, voice_id: str, seq_num: int):
         """Background thread: Fetch PCM audio from ElevenLabs and queue for playback."""
         preview = text[:40] + "..." if len(text) > 40 else text
-        log_info(f"TTS streaming: {preview}", prefix="[TTS]")
+        log_info(f"TTS streaming: seq={seq_num}, {preview}", prefix="[TTS]")
 
         from elevenlabs import VoiceSettings
 
@@ -550,15 +568,16 @@ class TTSPlayer:
                     pcm_data = b''.join(chunk for chunk in audio_generator)
 
                     if not pcm_data:
-                        log_warning("ElevenLabs returned empty audio", prefix="[TTS]")
+                        log_warning(f"ElevenLabs returned empty audio for seq={seq_num}", prefix="[TTS]")
+                        # Mark as failed so we don't block subsequent sentences
+                        self._deliver_in_order(seq_num, None)
                         return
 
                     # Normalize and convert to WAV format for pygame
                     wav_buffer = normalize_audio(pcm_data, sample_rate=ELEVENLABS_PCM_24K_SAMPLE_RATE)
 
-                    # Queue as PCM type for the worker
-                    self._audio_queue.put((AUDIO_TYPE_PCM, wav_buffer))
-                    log_info("TTS sentence queued", prefix="[TTS]")
+                    # Deliver to reorder buffer for sequenced playback
+                    self._deliver_in_order(seq_num, (AUDIO_TYPE_PCM, wav_buffer))
                     return  # Success, exit retry loop
 
                 except Exception as e:
@@ -568,15 +587,70 @@ class TTSPlayer:
 
                     if is_rate_limit and attempt < max_retries - 1:
                         wait_time = backoff_seconds[attempt]
-                        log_warning(f"TTS rate limited, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})", prefix="[TTS]")
+                        log_warning(f"TTS rate limited seq={seq_num}, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})", prefix="[TTS]")
                         time.sleep(wait_time)
                         continue
                     else:
-                        log_error(f"TTS streaming failed: {e}", prefix="[TTS]")
+                        log_error(f"TTS streaming failed seq={seq_num}: {e}", prefix="[TTS]")
+                        # Mark as failed so we don't block subsequent sentences
+                        self._deliver_in_order(seq_num, None)
                         return
 
+    def _deliver_in_order(self, seq_num: int, audio_data: Optional[tuple]):
+        """
+        Buffer audio and release to playback queue in sequence order.
+
+        This ensures sentences are played in the order they were queued,
+        even if shorter sentences return from the API faster than longer ones.
+
+        Args:
+            seq_num: Sequence number assigned when sentence was queued
+            audio_data: (AUDIO_TYPE_PCM, wav_buffer) tuple, or None if failed
+        """
+        with self._sequence_lock:
+            # Add to reorder buffer
+            self._reorder_buffer[seq_num] = audio_data
+
+            # Check for timed-out sequences that are blocking the queue
+            current_time = time.time()
+            while self._next_expected_seq in self._sequence_timestamps:
+                queue_time = self._sequence_timestamps[self._next_expected_seq]
+                elapsed = current_time - queue_time
+
+                if self._next_expected_seq in self._reorder_buffer:
+                    # This sequence is ready - release it
+                    item = self._reorder_buffer.pop(self._next_expected_seq)
+                    self._sequence_timestamps.pop(self._next_expected_seq, None)
+
+                    if item is not None:
+                        self._audio_queue.put(item)
+                        log_info(f"TTS released seq={self._next_expected_seq}", prefix="[TTS]")
+                    else:
+                        log_info(f"TTS skipped failed seq={self._next_expected_seq}", prefix="[TTS]")
+
+                    self._next_expected_seq += 1
+
+                elif elapsed > self._sequence_timeout:
+                    # This sequence has timed out - skip it
+                    log_warning(f"TTS timeout: skipping seq={self._next_expected_seq} after {elapsed:.1f}s", prefix="[TTS]")
+                    self._sequence_timestamps.pop(self._next_expected_seq, None)
+                    self._next_expected_seq += 1
+
+                else:
+                    # Still waiting for this sequence, and it hasn't timed out
+                    if audio_data is not None:
+                        log_info(f"TTS buffered seq={seq_num}, waiting for seq={self._next_expected_seq}", prefix="[TTS]")
+                    break
+
     def stop(self):
-        """Stop current playback."""
+        """Stop current playback and reset sequence state."""
+        # Reset sequence tracking to start fresh
+        with self._sequence_lock:
+            self._sequence_counter = 0
+            self._next_expected_seq = 0
+            self._reorder_buffer.clear()
+            self._sequence_timestamps.clear()
+
         if self._audio_queue is not None:
             # Clear the queue
             try:
