@@ -855,6 +855,9 @@ class ToolExecutor:
         settings = get_user_settings()
         settings.conversation_style = style
 
+        # Store in context for caller to handle UI signaling
+        ctx["conversation_style_change"] = style
+
         # Human-readable descriptions
         style_descriptions = {
             "none": "default (no style guidance)",
