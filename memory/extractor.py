@@ -528,17 +528,23 @@ class MemoryExtractor:
 
         Thread-safe: Uses an event flag to prevent multiple concurrent extractions.
         """
+        # DIAGNOSTIC: Log entry
+        log_info("check_and_extract called", prefix="🧠")
+
         # Quick check without hitting the database if extraction is already running
         if self._extraction_in_progress.is_set():
+            log_info("Extraction already in progress, skipping", prefix="🧠")
             return
 
         try:
             conversation_mgr = get_conversation_manager()
             unprocessed_count = conversation_mgr.get_unprocessed_count()
+            log_info(f"Unprocessed count: {unprocessed_count}, trigger: {self.overflow_trigger}", prefix="🧠")
 
             if unprocessed_count >= self.overflow_trigger:
                 # Mark extraction as in progress before starting thread
                 if self._extraction_in_progress.is_set():
+                    log_info("Race condition: extraction started by another thread", prefix="🧠")
                     return  # Another thread beat us to it
                 self._extraction_in_progress.set()
 
@@ -552,24 +558,42 @@ class MemoryExtractor:
                 )
 
                 # Run extraction in background thread (fire-and-forget)
+                log_info("Starting extraction in background thread...", prefix="🧠")
                 thread = threading.Thread(
                     target=self._run_extraction,
                     daemon=True,
                     name="MemoryExtraction"
                 )
                 thread.start()
+                log_info(f"Extraction thread started (thread={thread.name})", prefix="🧠")
+            else:
+                log_info("No extraction needed (below threshold)", prefix="🧠")
 
         except Exception as e:
-            log_error(f"Error checking context overflow: {e}")
+            import traceback
+            log_error(f"Error checking context overflow: {e}", prefix="🧠")
+            log_error(f"Traceback:\n{traceback.format_exc()}", prefix="🧠")
 
     def _run_extraction(self) -> None:
         """
         Run extraction in background thread and clear the in-progress flag when done.
         """
+        import time
+        start_time = time.time()
+        log_info("=== EXTRACTION THREAD START ===", prefix="🧠")
         try:
             self.extract_memories()
+            duration = (time.time() - start_time) * 1000
+            log_info(f"=== EXTRACTION THREAD COMPLETE ({duration:.0f}ms) ===", prefix="🧠")
+        except Exception as e:
+            import traceback
+            duration = (time.time() - start_time) * 1000
+            log_error(f"=== EXTRACTION THREAD ERROR ({duration:.0f}ms) ===", prefix="🧠")
+            log_error(f"Extraction error: {e}", prefix="🧠")
+            log_error(f"Traceback:\n{traceback.format_exc()}", prefix="🧠")
         finally:
             self._extraction_in_progress.clear()
+            log_info("Extraction in-progress flag cleared", prefix="🧠")
 
     def wait_for_completion(self, timeout: float = 5.0) -> bool:
         """

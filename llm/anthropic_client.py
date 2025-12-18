@@ -496,8 +496,14 @@ class AnthropicClient:
                         pass
 
         except Exception as e:
+            import traceback
             error_msg = str(e)
+            full_traceback = traceback.format_exc()
+
+            # DIAGNOSTIC: Log full exception details
             log_error(f"Streaming error: {error_msg}", prefix="[Stream]")
+            log_error(f"Exception type: {type(e).__name__}", prefix="[Stream]")
+            log_error(f"Full traceback:\n{full_traceback}", prefix="[Stream]")
 
             # Handle specific error types
             if "authentication" in error_msg.lower() or "api key" in error_msg.lower():
@@ -510,6 +516,7 @@ class AnthropicClient:
             # Yield error state
             error_state = StreamingState()
             error_state.stop_reason = "error"
+            error_state._error_message = error_msg  # Store for debugging
             yield ("", error_state)
 
     def generate(
