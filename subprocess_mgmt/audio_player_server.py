@@ -206,7 +206,7 @@ def play_audio():
 
     # Get voice settings with defaults
     voice_id = data.get('voice_id', 'MKHH3pSZhHPPzypDhMoU')
-    model = data.get('model', 'eleven_multilingual_v2')
+    model = data.get('model', 'eleven_turbo_v2_5')
 
     text_preview = text[:50] + "..." if len(text) > 50 else text
     log_server(f"Starting TTS for {len(text)} chars: '{text_preview}'")
