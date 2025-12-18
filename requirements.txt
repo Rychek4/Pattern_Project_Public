@@ -32,6 +32,9 @@ pygame>=2.5.0
 # Telegram Bot API
 python-telegram-bot>=21.0
 
+# Spell Check
+pyspellchecker>=0.7.0
+
 # Visual Capture (optional)
 # Uncomment if using visual features
 # pillow>=10.0.0
