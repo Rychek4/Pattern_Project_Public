@@ -140,12 +140,26 @@ class ToolResponseHelper:
         pulse_interval_changed = False
         start_time = time.time()
 
+        # Accumulate text across all passes to preserve original streamed text
+        # This fixes a bug where text from early passes was lost if later
+        # continuations returned empty text
+        accumulated_text = ""
+
         for pass_num in range(1, max_passes + 1):
             # Create fresh context for each pass to avoid cross-contamination
             context = {}
 
             # Process response for tool calls
             processed = self._processor.process(current_response, context=context)
+
+            # Accumulate text from this pass
+            pass_text = processed.display_text.strip() if processed.display_text else ""
+            if pass_text:
+                if accumulated_text:
+                    # Append continuation text with separator
+                    accumulated_text = accumulated_text + "\n\n" + pass_text
+                else:
+                    accumulated_text = pass_text
 
             # Emit to dev window if enabled
             if dev_mode_callbacks and config.DEV_MODE_ENABLED:
@@ -175,7 +189,7 @@ class ToolResponseHelper:
             # If no continuation needed (no tool calls or stop_reason != "tool_use")
             if not processed.needs_continuation:
                 return ToolProcessingResult(
-                    final_text=processed.display_text,
+                    final_text=accumulated_text,
                     final_provider=current_response.provider.value if hasattr(current_response.provider, 'value') else str(current_response.provider),
                     passes_executed=pass_num,
                     telegram_sent=telegram_sent,
@@ -204,10 +218,10 @@ class ToolResponseHelper:
             current_duration = (time.time() - cont_start) * 1000
 
             if not continuation.success:
-                # On failure, return last successful text
+                # On failure, return accumulated text from successful passes
                 log_warning(f"Continuation failed on pass {pass_num + 1}: {continuation.error}")
                 return ToolProcessingResult(
-                    final_text=processed.display_text,
+                    final_text=accumulated_text,
                     final_provider=current_response.provider.value if hasattr(current_response.provider, 'value') else str(current_response.provider),
                     passes_executed=pass_num,
                     telegram_sent=telegram_sent,
@@ -217,10 +231,19 @@ class ToolResponseHelper:
 
             current_response = continuation
 
-        # Hit max passes - return final response
+        # Hit max passes - return accumulated text plus any text from final response
         log_info(f"Reached max passes ({max_passes}), returning final response", prefix="🔧")
+
+        # Include any text from the final unprocessed response
+        final_response_text = current_response.text.strip() if current_response.text else ""
+        if final_response_text:
+            if accumulated_text:
+                accumulated_text = accumulated_text + "\n\n" + final_response_text
+            else:
+                accumulated_text = final_response_text
+
         return ToolProcessingResult(
-            final_text=current_response.text,
+            final_text=accumulated_text,
             final_provider=current_response.provider.value if hasattr(current_response.provider, 'value') else str(current_response.provider),
             passes_executed=max_passes,
             telegram_sent=telegram_sent,

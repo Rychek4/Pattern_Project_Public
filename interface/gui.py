@@ -1159,6 +1159,16 @@ class ChatWindow(QMainWindow):
         if not self._streaming_msg_id:
             return
 
+        # Fallback: if full_text is empty but we have accumulated streaming text, use that
+        # This provides defense-in-depth for edge cases where tool processing might lose text
+        if not full_text.strip() and self._streaming_text.strip():
+            from core.logger import log_warning
+            log_warning(
+                "Empty full_text received but streaming_text exists - using streaming text as fallback",
+                prefix="⚠️"
+            )
+            full_text = self._streaming_text
+
         # Store message for search
         timestamp = self._get_timestamp()
         msg_data = MessageData(
