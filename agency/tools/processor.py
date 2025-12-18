@@ -33,7 +33,6 @@ class ProcessedToolResponse:
         tool_result_message: Message dict to send tool results back to Claude
         continuation_images: Images to include in continuation (from visual tools)
         pulse_interval_change: New pulse interval in seconds if AI requested change
-        conversation_style_change: New conversation style if AI requested change
         telegram_sent: True if send_telegram was executed successfully
     """
     original_text: str
@@ -43,7 +42,6 @@ class ProcessedToolResponse:
     tool_result_message: Optional[Dict[str, Any]] = None
     continuation_images: Optional[List["ImageContent"]] = field(default=None)
     pulse_interval_change: Optional[int] = None
-    conversation_style_change: Optional[str] = None
     telegram_sent: bool = False
 
     def has_tool_results(self) -> bool:
@@ -57,10 +55,6 @@ class ProcessedToolResponse:
     def has_pulse_interval_change(self) -> bool:
         """Check if pulse interval change was requested."""
         return self.pulse_interval_change is not None
-
-    def has_conversation_style_change(self) -> bool:
-        """Check if conversation style change was requested."""
-        return self.conversation_style_change is not None
 
 
 class ToolProcessor:
@@ -149,9 +143,6 @@ class ToolProcessor:
         # Extract pulse interval change if requested
         pulse_interval_change = context.get("pulse_interval_change")
 
-        # Extract conversation style change if requested
-        conversation_style_change = context.get("conversation_style_change")
-
         return ProcessedToolResponse(
             original_text=response.text,
             display_text=response.text,
@@ -160,7 +151,6 @@ class ToolProcessor:
             tool_result_message=tool_result_message,
             continuation_images=continuation_images,
             pulse_interval_change=pulse_interval_change,
-            conversation_style_change=conversation_style_change,
             telegram_sent=telegram_sent
         )
 

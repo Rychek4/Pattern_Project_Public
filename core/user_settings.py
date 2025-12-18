@@ -32,8 +32,6 @@ class UserSettings:
     tts: TTSSettings = None
     font_size: int = 12
     conversation_model: str = "claude-sonnet-4-5-20250929"  # Default to Sonnet for first-time users
-    conversation_style: str = "none"  # none, casual, deep, funny, teacher
-    spell_check_enabled: bool = True  # Enable spell check by default
 
     def __post_init__(self):
         if self.tts is None:
@@ -90,8 +88,6 @@ class UserSettingsManager:
                 # Parse other settings
                 self._settings.font_size = data.get('font_size', 12)
                 self._settings.conversation_model = data.get('conversation_model', 'claude-sonnet-4-5-20250929')
-                self._settings.conversation_style = data.get('conversation_style', 'none')
-                self._settings.spell_check_enabled = data.get('spell_check_enabled', True)
 
                 log_info("User settings loaded", prefix="⚙️")
         except json.JSONDecodeError as e:
@@ -109,9 +105,7 @@ class UserSettingsManager:
                         'voice_id': self._settings.tts.voice_id
                     },
                     'font_size': self._settings.font_size,
-                    'conversation_model': self._settings.conversation_model,
-                    'conversation_style': self._settings.conversation_style,
-                    'spell_check_enabled': self._settings.spell_check_enabled
+                    'conversation_model': self._settings.conversation_model
                 }
 
                 with open(self._settings_path, 'w') as f:
@@ -164,32 +158,6 @@ class UserSettingsManager:
         self._settings.conversation_model = value
         self._save()
 
-    @property
-    def conversation_style(self) -> str:
-        """Get the conversation style (none, casual, deep, funny, teacher)."""
-        return self._settings.conversation_style
-
-    @conversation_style.setter
-    def conversation_style(self, value: str) -> None:
-        """Set the conversation style."""
-        valid_styles = {"none", "casual", "deep", "funny", "teacher"}
-        if value not in valid_styles:
-            log_warning(f"Invalid conversation style '{value}', using 'none'")
-            value = "none"
-        self._settings.conversation_style = value
-        self._save()
-
-    @property
-    def spell_check_enabled(self) -> bool:
-        """Check if spell check is enabled."""
-        return self._settings.spell_check_enabled
-
-    @spell_check_enabled.setter
-    def spell_check_enabled(self, value: bool) -> None:
-        """Set spell check enabled state."""
-        self._settings.spell_check_enabled = value
-        self._save()
-
     def get_all(self) -> UserSettings:
         """Get a copy of all settings."""
         return UserSettings(
@@ -198,9 +166,7 @@ class UserSettingsManager:
                 voice_id=self._settings.tts.voice_id
             ),
             font_size=self._settings.font_size,
-            conversation_model=self._settings.conversation_model,
-            conversation_style=self._settings.conversation_style,
-            spell_check_enabled=self._settings.spell_check_enabled
+            conversation_model=self._settings.conversation_model
         )
 
 
