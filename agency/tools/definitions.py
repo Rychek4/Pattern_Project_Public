@@ -61,6 +61,10 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
     if getattr(config, 'CURIOSITY_ENABLED', True):
         tools.append(ADVANCE_CURIOSITY_TOOL)
 
+    # Conversation style tool (if enabled)
+    if getattr(config, 'CONVERSATION_STYLE_ENABLED', True):
+        tools.append(SET_CONVERSATION_STYLE_TOOL)
+
     return tools
 
 
@@ -554,5 +558,43 @@ The system will automatically select your next curiosity after resolution.""",
             }
         },
         "required": ["outcome"]
+    }
+}
+
+
+# =============================================================================
+# CONVERSATION STYLE TOOL
+# =============================================================================
+
+SET_CONVERSATION_STYLE_TOOL: Dict[str, Any] = {
+    "name": "set_conversation_style",
+    "description": """Change your conversation style mode.
+
+Use when the user requests a different vibe or when context clearly calls for it:
+- "let's keep it chill" / "just hanging out" → casual
+- "teach me about X" / "explain how..." → teacher
+- "let's really dig into this" / deep topic → deep
+- "make me laugh" / playful banter → funny
+- "back to normal" / default behavior → none
+
+Modes:
+- none: Default behavior (no style guidance)
+- casual: Brief, warm, low-energy presence. Match their energy.
+- deep: Explore complexity and nuance. Ask opening questions.
+- funny: Wit and lightness. Natural banter, don't explain jokes.
+- teacher: Clear explanations. Build from what they know.
+
+The style persists until changed. You can proactively suggest a style shift
+if the conversation energy changes significantly.""",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "style": {
+                "type": "string",
+                "enum": ["none", "casual", "deep", "funny", "teacher"],
+                "description": "The conversation style to activate"
+            }
+        },
+        "required": ["style"]
     }
 }

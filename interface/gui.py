@@ -78,6 +78,7 @@ class MessageSignals(QObject):
     update_timer = pyqtSignal(str, str)  # session_time, total_time
     response_complete = pyqtSignal()
     pulse_interval_change = pyqtSignal(int)  # new interval in seconds
+    conversation_style_change = pyqtSignal(str)  # new style (none, casual, deep, funny, teacher)
     show_notification = pyqtSignal(str, str)  # message, level (info/success/warning/error)
     tool_executing = pyqtSignal(str)  # tool name being executed
     # Streaming signals
@@ -247,6 +248,7 @@ class ChatWindow(QMainWindow):
         self._setup_draft_manager()
         self._apply_style()
         self._init_model_dropdown()
+        self._init_style_dropdown()
 
     def _setup_signals(self):
         """Connect signals to slots."""
@@ -255,6 +257,7 @@ class ChatWindow(QMainWindow):
         self.signals.update_timer.connect(self._update_timer_display)
         self.signals.response_complete.connect(self._on_response_complete)
         self.signals.pulse_interval_change.connect(self.set_pulse_interval_by_seconds)
+        self.signals.conversation_style_change.connect(self.set_conversation_style_by_name)
         self.signals.show_notification.connect(self._show_notification)
         # Streaming signal connections
         self.signals.stream_start.connect(self._on_stream_start)
@@ -367,6 +370,14 @@ class ChatWindow(QMainWindow):
         self.model_dropdown.setToolTip("Conversation model (affects new messages)")
         self.model_dropdown.currentIndexChanged.connect(self._on_model_changed)
         layout.addWidget(self.model_dropdown)
+
+        # Conversation style dropdown
+        self.style_dropdown = QComboBox()
+        self.style_dropdown.setFont(QFont("Consolas", 11))
+        self.style_dropdown.addItems(["Default", "Casual", "Deep", "Funny", "Teacher"])
+        self.style_dropdown.setToolTip("Conversation style (casual, deep, funny, teacher)")
+        self.style_dropdown.currentIndexChanged.connect(self._on_style_changed)
+        layout.addWidget(self.style_dropdown)
 
         # Font size controls
         self.font_decrease_btn = QPushButton("A-")
@@ -837,6 +848,84 @@ class ChatWindow(QMainWindow):
             self._user_settings.conversation_model = model_id
             self._notification_manager.info(f"Switched to {name}")
             log_info(f"Conversation model changed to {name}", prefix="🤖")
+
+    def _init_style_dropdown(self):
+        """Initialize conversation style dropdown based on saved user preference."""
+        saved_style = self._user_settings.conversation_style
+
+        # Map style ID to dropdown index
+        style_to_index = {
+            "none": 0,
+            "casual": 1,
+            "deep": 2,
+            "funny": 3,
+            "teacher": 4
+        }
+
+        index = style_to_index.get(saved_style, 0)  # Default to "none" (index 0)
+
+        # Block signals to avoid triggering _on_style_changed during initialization
+        self.style_dropdown.blockSignals(True)
+        self.style_dropdown.setCurrentIndex(index)
+        self.style_dropdown.blockSignals(False)
+
+    def _on_style_changed(self, index: int):
+        """Handle conversation style dropdown change."""
+        # Map dropdown index to style ID
+        style_map = {
+            0: ("Default", "none"),
+            1: ("Casual", "casual"),
+            2: ("Deep", "deep"),
+            3: ("Funny", "funny"),
+            4: ("Teacher", "teacher")
+        }
+
+        name, style_id = style_map.get(index, ("Default", "none"))
+
+        # Save to user settings
+        if self._user_settings:
+            self._user_settings.conversation_style = style_id
+            self._notification_manager.info(f"Style: {name}")
+            log_info(f"Conversation style changed to {name}", prefix="💬")
+
+    def _emit_conversation_style_change(self, style: str):
+        """Emit conversation style change signal."""
+        log_info(f"Emitting conversation_style_change signal: {style}", prefix="💬")
+        self.signals.conversation_style_change.emit(style)
+
+    def set_conversation_style_by_name(self, style: str):
+        """Set the conversation style and update dropdown to match.
+
+        Called when AI changes style via tool - updates UI to reflect the change.
+        """
+        # Map style name to dropdown index
+        style_to_index = {
+            "none": 0,
+            "casual": 1,
+            "deep": 2,
+            "funny": 3,
+            "teacher": 4
+        }
+
+        index = style_to_index.get(style)
+        log_info(f"Style change from AI: {style} -> index {index}", prefix="💬")
+
+        if index is not None:
+            # Block signals to avoid triggering _on_style_changed
+            self.style_dropdown.blockSignals(True)
+            self.style_dropdown.setCurrentIndex(index)
+            self.style_dropdown.blockSignals(False)
+
+            # Show notification
+            style_names = {
+                "none": "Default",
+                "casual": "Casual",
+                "deep": "Deep",
+                "funny": "Funny",
+                "teacher": "Teacher"
+            }
+            name = style_names.get(style, style)
+            self._notification_manager.info(f"AI set style: {name}")
 
     def _decrease_font_size(self):
         """Decrease font size by 1pt (minimum 10pt)."""
@@ -1575,6 +1664,7 @@ class ChatWindow(QMainWindow):
                     system_prompt=assembled.full_system_prompt,
                     max_passes=max_passes,
                     pulse_callback=lambda interval: self._emit_pulse_interval_change(interval),
+                    style_callback=lambda style: self._emit_conversation_style_change(style),
                     tools=tools,
                     dev_mode_callbacks=dev_callbacks
                 )
@@ -1996,6 +2086,7 @@ class ChatWindow(QMainWindow):
                     system_prompt=assembled.full_system_prompt,
                     max_passes=5,
                     pulse_callback=lambda interval: self._emit_pulse_interval_change(interval),
+                    style_callback=lambda style: self._emit_conversation_style_change(style),
                     tools=tools,
                     dev_mode_callbacks=dev_callbacks
                 )
@@ -2152,6 +2243,7 @@ class ChatWindow(QMainWindow):
                     system_prompt=assembled.full_system_prompt,
                     max_passes=5,
                     pulse_callback=lambda interval: self._emit_pulse_interval_change(interval),
+                    style_callback=lambda style: self._emit_conversation_style_change(style),
                     tools=tools,
                     dev_mode_callbacks=dev_callbacks
                 )
@@ -2296,6 +2388,7 @@ class ChatWindow(QMainWindow):
                     system_prompt=assembled.full_system_prompt,
                     max_passes=5,
                     pulse_callback=lambda interval: self._emit_pulse_interval_change(interval),
+                    style_callback=lambda style: self._emit_conversation_style_change(style),
                     tools=tools,
                     dev_mode_callbacks=dev_callbacks
                 )

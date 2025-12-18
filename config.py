@@ -314,6 +314,7 @@ CLI_ASSISTANT_STYLE = "AI: "
 CONVERSATION_EXCHANGE_LIMIT = 15  # Last N exchanges (user + reply pairs)
 MEMORY_PROMOTION_THRESHOLD = 0.85  # Score threshold for core memory promotion
 TOOL_STANCE_ENABLED = True  # Inject proactive tool usage guidance into prompts
+CONVERSATION_STYLE_ENABLED = True  # Enable conversation style modes (casual, deep, funny, teacher)
 
 # =============================================================================
 # VISUAL CAPTURE CONFIGURATION
