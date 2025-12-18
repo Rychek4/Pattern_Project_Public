@@ -247,6 +247,7 @@ class ChatWindow(QMainWindow):
         self._setup_draft_manager()
         self._apply_style()
         self._init_model_dropdown()
+        self._init_style_dropdown()
 
     def _setup_signals(self):
         """Connect signals to slots."""
@@ -367,6 +368,14 @@ class ChatWindow(QMainWindow):
         self.model_dropdown.setToolTip("Conversation model (affects new messages)")
         self.model_dropdown.currentIndexChanged.connect(self._on_model_changed)
         layout.addWidget(self.model_dropdown)
+
+        # Conversation style dropdown
+        self.style_dropdown = QComboBox()
+        self.style_dropdown.setFont(QFont("Consolas", 11))
+        self.style_dropdown.addItems(["Default", "Casual", "Deep", "Funny", "Teacher"])
+        self.style_dropdown.setToolTip("Conversation style (casual, deep, funny, teacher)")
+        self.style_dropdown.currentIndexChanged.connect(self._on_style_changed)
+        layout.addWidget(self.style_dropdown)
 
         # Font size controls
         self.font_decrease_btn = QPushButton("A-")
@@ -837,6 +846,45 @@ class ChatWindow(QMainWindow):
             self._user_settings.conversation_model = model_id
             self._notification_manager.info(f"Switched to {name}")
             log_info(f"Conversation model changed to {name}", prefix="🤖")
+
+    def _init_style_dropdown(self):
+        """Initialize conversation style dropdown based on saved user preference."""
+        saved_style = self._user_settings.conversation_style
+
+        # Map style ID to dropdown index
+        style_to_index = {
+            "none": 0,
+            "casual": 1,
+            "deep": 2,
+            "funny": 3,
+            "teacher": 4
+        }
+
+        index = style_to_index.get(saved_style, 0)  # Default to "none" (index 0)
+
+        # Block signals to avoid triggering _on_style_changed during initialization
+        self.style_dropdown.blockSignals(True)
+        self.style_dropdown.setCurrentIndex(index)
+        self.style_dropdown.blockSignals(False)
+
+    def _on_style_changed(self, index: int):
+        """Handle conversation style dropdown change."""
+        # Map dropdown index to style ID
+        style_map = {
+            0: ("Default", "none"),
+            1: ("Casual", "casual"),
+            2: ("Deep", "deep"),
+            3: ("Funny", "funny"),
+            4: ("Teacher", "teacher")
+        }
+
+        name, style_id = style_map.get(index, ("Default", "none"))
+
+        # Save to user settings
+        if self._user_settings:
+            self._user_settings.conversation_style = style_id
+            self._notification_manager.info(f"Style: {name}")
+            log_info(f"Conversation style changed to {name}", prefix="💬")
 
     def _decrease_font_size(self):
         """Decrease font size by 1pt (minimum 10pt)."""

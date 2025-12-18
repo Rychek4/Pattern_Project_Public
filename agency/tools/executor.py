@@ -60,6 +60,7 @@ class ToolExecutor:
             "set_pulse_interval": self._exec_set_pulse_interval,
             "advance_curiosity": self._exec_advance_curiosity,
             "resolve_curiosity": self._exec_resolve_curiosity,
+            "set_conversation_style": self._exec_set_conversation_style,
         }
 
     def execute(
@@ -823,6 +824,54 @@ class ToolExecutor:
                 content=f"Error resolving curiosity: {str(e)}",
                 is_error=True
             )
+
+    # =========================================================================
+    # CONVERSATION STYLE TOOL
+    # =========================================================================
+
+    def _exec_set_conversation_style(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """
+        Set the conversation style mode.
+
+        Updates the user settings to change how the AI approaches conversation.
+        The style is persisted and affects the system prompt on subsequent messages.
+        """
+        from core.user_settings import get_user_settings
+
+        style = input.get("style", "none")
+        valid_styles = {"none", "casual", "deep", "funny", "teacher"}
+
+        if style not in valid_styles:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="set_conversation_style",
+                content=f"Invalid style '{style}'. Valid options: {', '.join(sorted(valid_styles))}",
+                is_error=True
+            )
+
+        # Update the setting (persists to disk)
+        settings = get_user_settings()
+        settings.conversation_style = style
+
+        # Human-readable descriptions
+        style_descriptions = {
+            "none": "default (no style guidance)",
+            "casual": "casual (brief, warm, low-energy)",
+            "deep": "deep (exploring complexity and nuance)",
+            "funny": "playful (wit and lightness)",
+            "teacher": "teacher (clear explanations)",
+        }
+        description = style_descriptions.get(style, style)
+
+        log_info(f"Conversation style changed to: {description}", prefix="💬")
+
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="set_conversation_style",
+            content=f"Conversation style set to {description}"
+        )
 
 
 # Global instance
