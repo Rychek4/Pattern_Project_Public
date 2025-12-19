@@ -60,6 +60,9 @@ class ToolExecutor:
             "set_pulse_interval": self._exec_set_pulse_interval,
             "advance_curiosity": self._exec_advance_curiosity,
             "resolve_curiosity": self._exec_resolve_curiosity,
+            "get_clipboard": self._exec_get_clipboard,
+            "set_clipboard": self._exec_set_clipboard,
+            "request_clarification": self._exec_request_clarification,
         }
 
     def execute(
@@ -823,6 +826,167 @@ class ToolExecutor:
                 content=f"Error resolving curiosity: {str(e)}",
                 is_error=True
             )
+
+    # =========================================================================
+    # CLIPBOARD TOOLS
+    # =========================================================================
+
+    def _exec_get_clipboard(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Read system clipboard contents."""
+        try:
+            import pyperclip
+        except ImportError:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="get_clipboard",
+                content="Clipboard not available (pyperclip not installed). Run: pip install pyperclip",
+                is_error=True
+            )
+
+        try:
+            content = pyperclip.paste()
+
+            if not content or not content.strip():
+                return ToolResult(
+                    tool_use_id=id,
+                    tool_name="get_clipboard",
+                    content="Clipboard is empty"
+                )
+
+            # Truncate large content
+            max_size = getattr(config, 'CLIPBOARD_MAX_READ_SIZE', 10000)
+            original_len = len(content)
+            if original_len > max_size:
+                content = content[:max_size]
+                return ToolResult(
+                    tool_use_id=id,
+                    tool_name="get_clipboard",
+                    content=f"{content}\n\n[Truncated: showing {max_size:,} of {original_len:,} characters]"
+                )
+
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="get_clipboard",
+                content=content
+            )
+
+        except Exception as e:
+            log_error(f"Clipboard read error: {e}")
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="get_clipboard",
+                content=f"Clipboard error: {str(e)}",
+                is_error=True
+            )
+
+    def _exec_set_clipboard(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Write content to system clipboard."""
+        try:
+            import pyperclip
+        except ImportError:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="set_clipboard",
+                content="Clipboard not available (pyperclip not installed). Run: pip install pyperclip",
+                is_error=True
+            )
+
+        content = input.get("content", "")
+        if not content:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="set_clipboard",
+                content="No content provided to copy",
+                is_error=True
+            )
+
+        try:
+            pyperclip.copy(content)
+
+            # Build confirmation with preview
+            char_count = len(content)
+            line_count = content.count('\n') + 1
+            preview = content[:80].replace('\n', ' ')
+            if len(content) > 80:
+                preview += "..."
+
+            log_info(f"Copied {char_count} chars to clipboard", prefix="📋")
+
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="set_clipboard",
+                content=f"Copied to clipboard ({char_count:,} chars, {line_count} line{'s' if line_count != 1 else ''}): {preview}"
+            )
+
+        except Exception as e:
+            log_error(f"Clipboard write error: {e}")
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="set_clipboard",
+                content=f"Clipboard error: {str(e)}",
+                is_error=True
+            )
+
+    # =========================================================================
+    # CLARIFICATION TOOL
+    # =========================================================================
+
+    def _exec_request_clarification(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """
+        Request clarification from the user.
+
+        This tool signals that the AI needs user input before proceeding.
+        The question is formatted and returned, and a flag is set in the
+        context so the response processor can apply special UI styling.
+        """
+        question = input.get("question", "")
+        options = input.get("options", [])
+        context_note = input.get("context", "")
+
+        if not question:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="request_clarification",
+                content="No question provided",
+                is_error=True
+            )
+
+        # Build formatted response for Claude to include
+        parts = []
+
+        if context_note:
+            parts.append(f"Context: {context_note}")
+            parts.append("")
+
+        parts.append(f"Question: {question}")
+
+        if options:
+            parts.append("")
+            parts.append("Options:")
+            for i, opt in enumerate(options, 1):
+                parts.append(f"  {i}. {opt}")
+
+        # Signal to response processor that this is a clarification request
+        # This enables special UI styling in CLI and GUI
+        ctx["clarification_requested"] = {
+            "question": question,
+            "options": options,
+            "context": context_note
+        }
+
+        log_info(f"Clarification requested: {question[:50]}...", prefix="❓")
+
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="request_clarification",
+            content="\n".join(parts)
+        )
 
 
 # Global instance

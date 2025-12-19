@@ -455,3 +455,24 @@ TELEGRAM_MAX_PER_HOUR = 30   # Maximum Telegram messages per hour
 WEB_SEARCH_ENABLED = True                       # Master toggle for web search
 WEB_SEARCH_MAX_USES_PER_REQUEST = 3             # Max searches Claude can do per API call
 WEB_SEARCH_TOTAL_ALLOWED_PER_DAY = 30           # Daily budget (resets at midnight)
+
+# =============================================================================
+# CLIPBOARD TOOL CONFIGURATION
+# =============================================================================
+# Clipboard tools allow the AI to read from and write to the system clipboard.
+# Useful for quick data transfer without file operations.
+#
+# Requires: pip install pyperclip
+# On Linux: also requires xclip or xsel (sudo apt-get install xclip)
+CLIPBOARD_ENABLED = True                        # Master toggle for clipboard tools
+CLIPBOARD_MAX_READ_SIZE = 10000                 # Truncate clipboard reads beyond this (chars)
+
+# =============================================================================
+# CLARIFICATION TOOL CONFIGURATION
+# =============================================================================
+# The clarification tool gives the AI a formal way to pause and ask the user
+# for input when the request is ambiguous or requires a choice.
+#
+# When used, the question is displayed prominently in the UI, and in GUI mode,
+# options can be rendered as clickable buttons for easy response.
+CLARIFICATION_ENABLED = True                    # Master toggle for clarification tool

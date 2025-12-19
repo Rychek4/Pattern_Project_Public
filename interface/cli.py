@@ -222,6 +222,7 @@ class ChatCLI:
 
                     final_text = result.final_text
                     final_provider = result.final_provider
+                    clarification = result.clarification_data if result.clarification_requested else None
 
                     # Store final response
                     conversation_mgr.add_turn(
@@ -230,8 +231,8 @@ class ChatCLI:
                         input_type="text"
                     )
 
-                    # Display response
-                    self._display_response(final_text, final_provider)
+                    # Display response (with special styling if clarification requested)
+                    self._display_response(final_text, final_provider, clarification)
                 else:
                     self.console.print(
                         f"[bold red]Error:[/bold red] {response.error}"
@@ -253,20 +254,87 @@ class ChatCLI:
         """Stop the CLI loop."""
         self._running = False
 
-    def _display_response(self, text: str, provider: str) -> None:
-        """Display the AI response."""
+    def _display_response(
+        self,
+        text: str,
+        provider: str,
+        clarification: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Display the AI response, with special styling for clarification requests."""
         timestamp = get_timestamp()
 
-        # Create a panel for the response
+        if clarification:
+            # Special styling for clarification requests
+            question = clarification.get("question", "")
+            options = clarification.get("options", [])
+            context_note = clarification.get("context", "")
+
+            # Build clarification panel content
+            content_parts = []
+            if context_note:
+                content_parts.append(f"[dim italic]{context_note}[/dim italic]")
+                content_parts.append("")
+
+            content_parts.append(f"[bold]{question}[/bold]")
+
+            if options:
+                content_parts.append("")
+                for i, opt in enumerate(options, 1):
+                    content_parts.append(f"  [cyan]{i}.[/cyan] {opt}")
+
+            clarification_panel = Panel(
+                "\n".join(content_parts),
+                title="[bold yellow]Clarification Needed[/bold yellow]",
+                title_align="left",
+                border_style="yellow",
+                padding=(1, 2)
+            )
+            self.console.print(clarification_panel)
+
+            # Also show any additional response text (Claude's natural language)
+            if text.strip():
+                self.console.print()
+                self.console.print(Markdown(text))
+        else:
+            # Normal response display
+            panel = Panel(
+                Markdown(text),
+                title=f"[bold blue]AI[/bold blue] [dim]({provider})[/dim]",
+                title_align="left",
+                border_style="blue",
+                padding=(0, 1)
+            )
+            self.console.print(panel)
+
+        self.console.print()
+
+    def _display_clarification_panel(self, clarification: Dict[str, Any]) -> None:
+        """Display a clarification request panel."""
+        question = clarification.get("question", "")
+        options = clarification.get("options", [])
+        context_note = clarification.get("context", "")
+
+        # Build clarification panel content
+        content_parts = []
+        if context_note:
+            content_parts.append(f"[dim italic]{context_note}[/dim italic]")
+            content_parts.append("")
+
+        content_parts.append(f"[bold]{question}[/bold]")
+
+        if options:
+            content_parts.append("")
+            for i, opt in enumerate(options, 1):
+                content_parts.append(f"  [cyan]{i}.[/cyan] {opt}")
+
         panel = Panel(
-            Markdown(text),
-            title=f"[bold blue]AI[/bold blue] [dim]({provider})[/dim]",
+            "\n".join(content_parts),
+            title="[bold yellow]Clarification Needed[/bold yellow]",
             title_align="left",
-            border_style="blue",
-            padding=(0, 1)
+            border_style="yellow",
+            padding=(1, 2)
         )
         self.console.print(panel)
-        self.console.print()
 
     def _display_dev_prompt_assembly(self, assembled) -> None:
         """Display prompt assembly info in dev mode."""
@@ -619,16 +687,24 @@ class ChatCLI:
                     input_type="text"
                 )
 
-                # Display with special styling
-                panel = Panel(
-                    Markdown(final_text),
-                    title=f"[bold magenta]AI (pulse)[/bold magenta] [dim]({final_provider})[/dim]",
-                    title_align="left",
-                    border_style="magenta",
-                    padding=(0, 1)
-                )
-                self.console.print(panel)
-                self.console.print()
+                # Check for clarification request
+                if result.clarification_requested and result.clarification_data:
+                    self._display_clarification_panel(result.clarification_data)
+                    if final_text.strip():
+                        self.console.print()
+                        self.console.print(Markdown(final_text))
+                    self.console.print()
+                else:
+                    # Display with special styling
+                    panel = Panel(
+                        Markdown(final_text),
+                        title=f"[bold magenta]AI (pulse)[/bold magenta] [dim]({final_provider})[/dim]",
+                        title_align="left",
+                        border_style="magenta",
+                        padding=(0, 1)
+                    )
+                    self.console.print(panel)
+                    self.console.print()
             else:
                 self.console.print(f"[bold red]Pulse error:[/bold red] {response.error}")
 
@@ -747,16 +823,24 @@ class ChatCLI:
                     input_type="text"
                 )
 
-                # Display with special styling
-                panel = Panel(
-                    Markdown(final_text),
-                    title=f"[bold yellow]AI (reminder)[/bold yellow] [dim]({final_provider})[/dim]",
-                    title_align="left",
-                    border_style="yellow",
-                    padding=(0, 1)
-                )
-                self.console.print(panel)
-                self.console.print()
+                # Check for clarification request
+                if result.clarification_requested and result.clarification_data:
+                    self._display_clarification_panel(result.clarification_data)
+                    if final_text.strip():
+                        self.console.print()
+                        self.console.print(Markdown(final_text))
+                    self.console.print()
+                else:
+                    # Display with special styling
+                    panel = Panel(
+                        Markdown(final_text),
+                        title=f"[bold yellow]AI (reminder)[/bold yellow] [dim]({final_provider})[/dim]",
+                        title_align="left",
+                        border_style="yellow",
+                        padding=(0, 1)
+                    )
+                    self.console.print(panel)
+                    self.console.print()
             else:
                 self.console.print(f"[bold red]Reminder error:[/bold red] {response.error}")
 
@@ -879,16 +963,24 @@ class ChatCLI:
                     input_type="text"
                 )
 
-                # Display with special styling
-                panel = Panel(
-                    Markdown(final_text),
-                    title=f"[bold cyan]AI (telegram)[/bold cyan] [dim]({final_provider})[/dim]",
-                    title_align="left",
-                    border_style="cyan",
-                    padding=(0, 1)
-                )
-                self.console.print(panel)
-                self.console.print()
+                # Check for clarification request
+                if result.clarification_requested and result.clarification_data:
+                    self._display_clarification_panel(result.clarification_data)
+                    if final_text.strip():
+                        self.console.print()
+                        self.console.print(Markdown(final_text))
+                    self.console.print()
+                else:
+                    # Display with special styling
+                    panel = Panel(
+                        Markdown(final_text),
+                        title=f"[bold cyan]AI (telegram)[/bold cyan] [dim]({final_provider})[/dim]",
+                        title_align="left",
+                        border_style="cyan",
+                        padding=(0, 1)
+                    )
+                    self.console.print(panel)
+                    self.console.print()
 
                 # Also send response back to Telegram (only if not already sent via tool)
                 if config.TELEGRAM_ENABLED and not telegram_sent:

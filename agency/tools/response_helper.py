@@ -53,6 +53,8 @@ class ToolProcessingResult:
         telegram_sent: True if send_telegram was executed successfully (any pass)
         pulse_interval_changed: True if pulse interval was changed (any pass)
         total_duration_ms: Total processing time in milliseconds
+        clarification_requested: True if request_clarification was used
+        clarification_data: Dict with question, options, context if clarification requested
     """
     final_text: str
     final_provider: str
@@ -60,6 +62,8 @@ class ToolProcessingResult:
     telegram_sent: bool = False
     pulse_interval_changed: bool = False
     total_duration_ms: float = 0.0
+    clarification_requested: bool = False
+    clarification_data: Optional[Dict[str, Any]] = None
 
 
 class ToolResponseHelper:
@@ -138,6 +142,8 @@ class ToolResponseHelper:
         # Track across all passes
         telegram_sent = False
         pulse_interval_changed = False
+        clarification_requested = False
+        clarification_data = None
         start_time = time.time()
 
         # Accumulate text across all passes to preserve original streamed text
@@ -186,6 +192,11 @@ class ToolResponseHelper:
             if processed.telegram_sent:
                 telegram_sent = True
 
+            # Track clarification requests (from context set by executor)
+            if context.get("clarification_requested"):
+                clarification_requested = True
+                clarification_data = context["clarification_requested"]
+
             # If no continuation needed (no tool calls or stop_reason != "tool_use")
             if not processed.needs_continuation:
                 return ToolProcessingResult(
@@ -194,7 +205,9 @@ class ToolResponseHelper:
                     passes_executed=pass_num,
                     telegram_sent=telegram_sent,
                     pulse_interval_changed=pulse_interval_changed,
-                    total_duration_ms=(time.time() - start_time) * 1000
+                    total_duration_ms=(time.time() - start_time) * 1000,
+                    clarification_requested=clarification_requested,
+                    clarification_data=clarification_data
                 )
 
             # Build continuation: add assistant message with raw content blocks
@@ -226,7 +239,9 @@ class ToolResponseHelper:
                     passes_executed=pass_num,
                     telegram_sent=telegram_sent,
                     pulse_interval_changed=pulse_interval_changed,
-                    total_duration_ms=(time.time() - start_time) * 1000
+                    total_duration_ms=(time.time() - start_time) * 1000,
+                    clarification_requested=clarification_requested,
+                    clarification_data=clarification_data
                 )
 
             current_response = continuation
@@ -248,7 +263,9 @@ class ToolResponseHelper:
             passes_executed=max_passes,
             telegram_sent=telegram_sent,
             pulse_interval_changed=pulse_interval_changed,
-            total_duration_ms=(time.time() - start_time) * 1000
+            total_duration_ms=(time.time() - start_time) * 1000,
+            clarification_requested=clarification_requested,
+            clarification_data=clarification_data
         )
 
     def _emit_dev_events(

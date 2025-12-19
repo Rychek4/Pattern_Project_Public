@@ -61,6 +61,15 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
     if getattr(config, 'CURIOSITY_ENABLED', True):
         tools.append(ADVANCE_CURIOSITY_TOOL)
 
+    # Clipboard tools (if enabled)
+    if getattr(config, 'CLIPBOARD_ENABLED', True):
+        tools.append(GET_CLIPBOARD_TOOL)
+        tools.append(SET_CLIPBOARD_TOOL)
+
+    # Clarification tool (if enabled)
+    if getattr(config, 'CLARIFICATION_ENABLED', True):
+        tools.append(REQUEST_CLARIFICATION_TOOL)
+
     return tools
 
 
@@ -554,5 +563,95 @@ The system will automatically select your next curiosity after resolution.""",
             }
         },
         "required": ["outcome"]
+    }
+}
+
+
+# =============================================================================
+# CLIPBOARD TOOLS
+# =============================================================================
+
+GET_CLIPBOARD_TOOL: Dict[str, Any] = {
+    "name": "get_clipboard",
+    "description": """Read the current system clipboard contents.
+
+Use when:
+- User mentions copying something ("I copied the error", "check my clipboard")
+- You need to see what the user has selected or copied
+- Quick data transfer without requiring file operations
+
+Returns the clipboard text content. Images are not supported.
+Large content (>10KB) will be truncated with a note.""",
+    "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+    }
+}
+
+SET_CLIPBOARD_TOOL: Dict[str, Any] = {
+    "name": "set_clipboard",
+    "description": """Copy text to the system clipboard for the user to paste elsewhere.
+
+Use when:
+- Providing code snippets the user will paste into their editor
+- Generating content the user needs in another application
+- User explicitly asks you to "copy" something for them
+
+The user can then paste (Ctrl+V / Cmd+V) into any application.""",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "content": {
+                "type": "string",
+                "description": "The text to copy to clipboard"
+            }
+        },
+        "required": ["content"]
+    }
+}
+
+
+# =============================================================================
+# CLARIFICATION TOOL
+# =============================================================================
+
+REQUEST_CLARIFICATION_TOOL: Dict[str, Any] = {
+    "name": "request_clarification",
+    "description": """Pause and ask the user a clarifying question before proceeding.
+
+Use this when:
+- You have multiple valid approaches and user preference matters
+- The request is ambiguous and guessing could waste effort
+- You need specific information before proceeding (file paths, preferences, constraints)
+- The user's intent is unclear and you want to confirm before acting
+
+This is better than guessing. The user will see your question prominently displayed
+and their response will continue the conversation.
+
+Do NOT use for:
+- Rhetorical questions or conversation flow
+- Questions you could reasonably infer the answer to
+- Stalling or being overly cautious about simple requests
+
+Format your question clearly and, when helpful, provide options.""",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "question": {
+                "type": "string",
+                "description": "The clarifying question to ask the user"
+            },
+            "options": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional list of choices (e.g., ['Option A', 'Option B'])"
+            },
+            "context": {
+                "type": "string",
+                "description": "Optional brief context explaining why you're asking"
+            }
+        },
+        "required": ["question"]
     }
 }

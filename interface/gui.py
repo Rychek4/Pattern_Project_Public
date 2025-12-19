@@ -84,6 +84,8 @@ class MessageSignals(QObject):
     stream_start = pyqtSignal(str)  # timestamp - start of streaming response
     stream_chunk = pyqtSignal(str)  # text chunk to append
     stream_complete = pyqtSignal(str)  # full_text - streaming finished
+    # Clarification signal
+    show_clarification = pyqtSignal(dict, str)  # clarification_data, timestamp
 
 
 class ChatInputWidget(QTextEdit):
@@ -261,6 +263,8 @@ class ChatWindow(QMainWindow):
         self.signals.stream_chunk.connect(self._on_stream_chunk)
         self.signals.stream_complete.connect(self._on_stream_complete)
         self.signals.tool_executing.connect(self._on_tool_executing)
+        # Clarification signal
+        self.signals.show_clarification.connect(self._show_clarification_message)
 
         # Theme change signal
         self._theme_manager.theme_changed.connect(self._on_theme_changed)
@@ -288,7 +292,8 @@ class ChatWindow(QMainWindow):
 
         # Chat display
         self.chat_display = QTextBrowser()
-        self.chat_display.setOpenExternalLinks(True)  # Enable clicking links
+        self.chat_display.setOpenExternalLinks(False)  # Handle links ourselves for clarification
+        self.chat_display.anchorClicked.connect(self._on_link_clicked)
         self.chat_display.setFont(QFont("Consolas", self._user_settings.font_size))
         self.chat_display.setContextMenuPolicy(Qt.CustomContextMenu)
         self.chat_display.customContextMenuRequested.connect(self._show_chat_context_menu)
@@ -1081,6 +1086,109 @@ class ChatWindow(QMainWindow):
         if role == "assistant":
             self._trigger_tts(content)
 
+    def _show_clarification_message(self, clarification_data: dict, timestamp: str):
+        """Display a clarification request with clickable option buttons."""
+        import html as html_module
+
+        question = clarification_data.get("question", "")
+        options = clarification_data.get("options", [])
+        context = clarification_data.get("context", "")
+
+        # Store as a special message
+        msg_id = str(uuid.uuid4())
+        msg_data = MessageData(
+            id=msg_id,
+            role="clarification",
+            content=question,
+            timestamp=timestamp
+        )
+        self._messages.append(msg_data)
+
+        # Build HTML for clarification panel
+        # Yellow/amber styling to stand out
+        clarification_color = "#f0c040"
+        bg_color = "#3d3520"
+
+        content_parts = []
+
+        if context:
+            content_parts.append(
+                f"<div style='color: #888888; font-style: italic; margin-bottom: 8px;'>"
+                f"{html_module.escape(context)}</div>"
+            )
+
+        content_parts.append(
+            f"<div style='font-weight: bold; margin-bottom: 10px;'>"
+            f"{html_module.escape(question)}</div>"
+        )
+
+        # Add clickable options as styled buttons
+        if options:
+            content_parts.append("<div style='margin-top: 10px;'>")
+            for i, opt in enumerate(options, 1):
+                escaped_opt = html_module.escape(opt)
+                # Use a special link format that we can intercept
+                content_parts.append(
+                    f"<div style='margin: 5px 0;'>"
+                    f"<a href='clarification://{i}' style='color: #4da6ff; text-decoration: none;'>"
+                    f"  {i}. {escaped_opt}</a>"
+                    f"</div>"
+                )
+            content_parts.append("</div>")
+
+        # Store options for click handling
+        self._pending_clarification_options = options
+
+        msg_html = f"""
+        <div style='margin-bottom: 10px; padding: 12px; background-color: {bg_color};
+                    border: 2px solid {clarification_color}; border-radius: 8px;'
+             data-msg-id='{msg_id}'>
+            <div style='margin-bottom: 8px;'>
+                <span style='color:{self._theme.timestamp};'>[{timestamp}]</span>
+                <span style='color: {clarification_color}; font-weight: bold;'>
+                    ⚠️ Clarification Needed
+                </span>
+            </div>
+            <div style='color: {self._theme.text}; margin-left: 10px;'>
+                {"".join(content_parts)}
+            </div>
+            <div style='color: #888888; font-size: 0.9em; margin-top: 10px; font-style: italic;'>
+                Click an option above or type your response below.
+            </div>
+        </div>
+        """
+
+        self.chat_display.append(msg_html)
+        self.chat_display.moveCursor(QTextCursor.End)
+
+    def _on_link_clicked(self, url):
+        """Handle clicks on links in chat display."""
+        import webbrowser
+        url_str = url.toString()
+
+        # Check for clarification links
+        if url_str.startswith("clarification://"):
+            self._on_clarification_link_clicked(url)
+        else:
+            # Open external links in browser
+            webbrowser.open(url_str)
+
+    def _on_clarification_link_clicked(self, url):
+        """Handle clicks on clarification option links."""
+        url_str = url.toString()
+        if url_str.startswith("clarification://"):
+            try:
+                option_num = int(url_str.replace("clarification://", ""))
+                if hasattr(self, '_pending_clarification_options'):
+                    options = self._pending_clarification_options
+                    if 1 <= option_num <= len(options):
+                        selected_option = options[option_num - 1]
+                        # Set the input field and send
+                        self.input_field.setPlainText(selected_option)
+                        self._send_message()
+            except (ValueError, IndexError):
+                pass
+
     def _trigger_tts(self, text: str):
         """Trigger text-to-speech for the given text if TTS is enabled."""
         try:
@@ -1638,6 +1746,11 @@ class ChatWindow(QMainWindow):
                             if is_speakable and sentence_text.strip():
                                 queue_tts_sentence(sentence_text, voice_id)
 
+                # Check for clarification request
+                if result.clarification_requested and result.clarification_data:
+                    timestamp = self._get_timestamp()
+                    self.signals.show_clarification.emit(result.clarification_data, timestamp)
+
             # Store response
             log_info(f"Storing assistant response ({len(final_text)} chars)", prefix="📨")
             self._conversation_mgr.add_turn(
@@ -2063,7 +2176,13 @@ class ChatWindow(QMainWindow):
 
                 # Emit to GUI
                 timestamp = self._get_timestamp()
-                self.signals.new_message.emit("assistant", f"📱 {final_text}", timestamp)
+                # Check for clarification request
+                if result.clarification_requested and result.clarification_data:
+                    self.signals.show_clarification.emit(result.clarification_data, timestamp)
+                    if final_text.strip():
+                        self.signals.new_message.emit("assistant", f"📱 {final_text}", timestamp)
+                else:
+                    self.signals.new_message.emit("assistant", f"📱 {final_text}", timestamp)
 
                 # Send response back to Telegram (only if not already sent via tool)
                 if config.TELEGRAM_ENABLED and not telegram_sent:
@@ -2219,7 +2338,13 @@ class ChatWindow(QMainWindow):
 
                 # Emit to GUI
                 timestamp = self._get_timestamp()
-                self.signals.new_message.emit("assistant", final_text, timestamp)
+                # Check for clarification request
+                if result.clarification_requested and result.clarification_data:
+                    self.signals.show_clarification.emit(result.clarification_data, timestamp)
+                    if final_text.strip():
+                        self.signals.new_message.emit("assistant", final_text, timestamp)
+                else:
+                    self.signals.new_message.emit("assistant", final_text, timestamp)
             else:
                 error_msg = f"Pulse API error: {response.error}"
                 log_error(f"PULSE: API call failed - {error_msg}")
@@ -2363,7 +2488,13 @@ class ChatWindow(QMainWindow):
 
                 # Emit to GUI
                 timestamp = self._get_timestamp()
-                self.signals.new_message.emit("assistant", final_text, timestamp)
+                # Check for clarification request
+                if result.clarification_requested and result.clarification_data:
+                    self.signals.show_clarification.emit(result.clarification_data, timestamp)
+                    if final_text.strip():
+                        self.signals.new_message.emit("assistant", final_text, timestamp)
+                else:
+                    self.signals.new_message.emit("assistant", final_text, timestamp)
             else:
                 error_msg = f"Reminder pulse API error: {response.error}"
                 log_error(f"REMINDER: API call failed - {error_msg}")
