@@ -37,3 +37,6 @@ python-telegram-bot>=21.0
 # pillow>=10.0.0
 # opencv-python>=4.8.0
 # google-generativeai>=0.3.0
+
+# Clipboard support
+pyperclip>=1.8.0
