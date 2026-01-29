@@ -46,6 +46,8 @@ class LLMResponse:
     stop_reason: Optional[str] = None
     tool_calls: List[ToolCall] = None
     raw_content: List[Any] = None  # Original content blocks for continuation
+    # Extended thinking fields
+    thinking_text: str = ""  # Claude's internal reasoning (not shown to user by default)
 
     def __post_init__(self):
         if self.citations is None:
@@ -169,7 +171,9 @@ class LLMRouter:
         max_tokens: Optional[int] = None,
         temperature: float = 0.7,
         force_provider: Optional[LLMProvider] = None,
-        tools: Optional[List[Dict[str, Any]]] = None
+        tools: Optional[List[Dict[str, Any]]] = None,
+        thinking_enabled: bool = False,
+        thinking_budget_tokens: Optional[int] = None
     ) -> LLMResponse:
         """
         Send a chat request, routing to appropriate provider.
@@ -185,6 +189,8 @@ class LLMRouter:
             temperature: Sampling temperature
             force_provider: Force a specific provider (bypass routing)
             tools: Optional list of tool definitions for native tool use (Anthropic only)
+            thinking_enabled: Whether to enable extended thinking (Anthropic only)
+            thinking_budget_tokens: Max tokens for thinking (None = use config default)
 
         Returns:
             LLMResponse with generated text and any tool calls
@@ -221,7 +227,9 @@ class LLMRouter:
             enable_web_search=enable_web_search,
             web_search_max_uses=web_search_max_uses,
             tools=tools,
-            task_type=task_type
+            task_type=task_type,
+            thinking_enabled=thinking_enabled,
+            thinking_budget_tokens=thinking_budget_tokens
         )
 
         # Record web search usage if any were used
@@ -262,7 +270,9 @@ class LLMRouter:
         task_type: TaskType = TaskType.CONVERSATION,
         max_tokens: Optional[int] = None,
         temperature: float = 0.7,
-        tools: Optional[List[Dict[str, Any]]] = None
+        tools: Optional[List[Dict[str, Any]]] = None,
+        thinking_enabled: bool = False,
+        thinking_budget_tokens: Optional[int] = None
     ) -> Generator[tuple[str, StreamingState], None, None]:
         """
         Stream a chat request, yielding text chunks as they arrive.
@@ -276,6 +286,8 @@ class LLMRouter:
             max_tokens: Maximum tokens to generate
             temperature: Sampling temperature
             tools: Optional list of tool definitions
+            thinking_enabled: Whether to enable extended thinking
+            thinking_budget_tokens: Max tokens for thinking (None = use config default)
 
         Yields:
             Tuple of (text_chunk, streaming_state)
@@ -317,6 +329,7 @@ class LLMRouter:
         log_info(f"Messages count: {len(messages)}", prefix="🔍")
         log_info(f"Tools enabled: {tools is not None and len(tools) > 0}", prefix="🔍")
         log_info(f"Web search: {enable_web_search}", prefix="🔍")
+        log_info(f"Thinking: {thinking_enabled}", prefix="🔍")
 
         # Log message structure (not full content for privacy)
         for i, msg in enumerate(messages):
@@ -345,7 +358,9 @@ class LLMRouter:
                 enable_web_search=enable_web_search,
                 web_search_max_uses=web_search_max_uses,
                 tools=tools,
-                model=model
+                model=model,
+                thinking_enabled=thinking_enabled,
+                thinking_budget_tokens=thinking_budget_tokens
             ):
                 final_state = state
                 chunk_count += 1
@@ -430,7 +445,9 @@ class LLMRouter:
         enable_web_search: bool = False,
         web_search_max_uses: Optional[int] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
-        task_type: TaskType = TaskType.CONVERSATION
+        task_type: TaskType = TaskType.CONVERSATION,
+        thinking_enabled: bool = False,
+        thinking_budget_tokens: Optional[int] = None
     ) -> LLMResponse:
         """Send request to a specific provider."""
         try:
@@ -457,7 +474,9 @@ class LLMRouter:
                     enable_web_search=enable_web_search,
                     web_search_max_uses=web_search_max_uses,
                     tools=tools,
-                    model=model
+                    model=model,
+                    thinking_enabled=thinking_enabled,
+                    thinking_budget_tokens=thinking_budget_tokens
                 )
 
                 llm_response = LLMResponse(
@@ -471,7 +490,8 @@ class LLMRouter:
                     citations=response.citations,
                     stop_reason=response.stop_reason,
                     tool_calls=response.tool_calls,
-                    raw_content=response.raw_content
+                    raw_content=response.raw_content,
+                    thinking_text=response.thinking_text
                 )
 
                 # Log the API request/response
@@ -484,7 +504,9 @@ class LLMRouter:
                         "temperature": temperature,
                         "max_tokens": max_tokens,
                         "web_search_enabled": enable_web_search,
-                        "web_search_max_uses": web_search_max_uses
+                        "web_search_max_uses": web_search_max_uses,
+                        "thinking_enabled": thinking_enabled,
+                        "thinking_budget_tokens": thinking_budget_tokens
                     },
                     response_text=response.text,
                     tokens_in=response.input_tokens,

@@ -249,6 +249,7 @@ class ChatWindow(QMainWindow):
         self._setup_draft_manager()
         self._apply_style()
         self._init_model_dropdown()
+        self._init_thinking_toggle()
 
     def _setup_signals(self):
         """Connect signals to slots."""
@@ -372,6 +373,13 @@ class ChatWindow(QMainWindow):
         self.model_dropdown.setToolTip("Conversation model (affects new messages)")
         self.model_dropdown.currentIndexChanged.connect(self._on_model_changed)
         layout.addWidget(self.model_dropdown)
+
+        # Extended thinking toggle
+        self.thinking_checkbox = QCheckBox("Thinking")
+        self.thinking_checkbox.setFont(QFont("Consolas", 10))
+        self.thinking_checkbox.setToolTip("Enable extended thinking for deeper reasoning (uses more tokens)")
+        self.thinking_checkbox.stateChanged.connect(self._on_thinking_changed)
+        layout.addWidget(self.thinking_checkbox)
 
         # Font size controls
         self.font_decrease_btn = QPushButton("A-")
@@ -842,6 +850,24 @@ class ChatWindow(QMainWindow):
             self._user_settings.conversation_model = model_id
             self._notification_manager.info(f"Switched to {name}")
             log_info(f"Conversation model changed to {name}", prefix="🤖")
+
+    def _init_thinking_toggle(self):
+        """Initialize thinking toggle based on saved user preference."""
+        enabled = self._user_settings.thinking_enabled
+
+        # Block signals to avoid triggering _on_thinking_changed during initialization
+        self.thinking_checkbox.blockSignals(True)
+        self.thinking_checkbox.setChecked(enabled)
+        self.thinking_checkbox.blockSignals(False)
+
+    def _on_thinking_changed(self, state: int):
+        """Handle thinking checkbox state change."""
+        enabled = state == Qt.Checked
+        if self._user_settings:
+            self._user_settings.thinking_enabled = enabled
+            status = "enabled" if enabled else "disabled"
+            self._notification_manager.info(f"Thinking {status}")
+            log_info(f"Extended thinking {status}", prefix="🧠")
 
     def _decrease_font_size(self):
         """Decrease font size by 1pt (minimum 10pt)."""
@@ -1633,6 +1659,9 @@ class ChatWindow(QMainWindow):
             tts_enabled = is_tts_enabled()
             voice_id = get_tts_voice_id() if tts_enabled else None
 
+            # Read thinking setting for conversation
+            thinking_on = self._user_settings.thinking_enabled
+
             # Stream the response
             final_state = None
             for chunk, state in self._llm_router.chat_stream(
@@ -1640,7 +1669,8 @@ class ChatWindow(QMainWindow):
                 system_prompt=assembled.full_system_prompt,
                 task_type=TaskType.CONVERSATION,
                 temperature=0.7,
-                tools=tools
+                tools=tools,
+                thinking_enabled=thinking_on
             ):
                 # Check for cancellation
                 if self._cancel_requested:
@@ -1677,6 +1707,10 @@ class ChatWindow(QMainWindow):
 
             log_info(f"Streaming completed successfully: {len(final_state.text)} chars, stop_reason={final_state.stop_reason}", prefix="📨")
 
+            # Log thinking in dev mode
+            if final_state.thinking_text and config.DEV_MODE_ENABLED:
+                log_info(f"Thinking ({len(final_state.thinking_text)} chars): {final_state.thinking_text[:500]}...", prefix="🧠")
+
             # Flush any remaining TTS content
             if tts_enabled:
                 remaining = sentence_buffer.flush()
@@ -1705,7 +1739,8 @@ class ChatWindow(QMainWindow):
                     tool_calls=final_state.tool_calls,
                     raw_content=final_state.raw_content,
                     web_searches_used=final_state.web_searches_used,
-                    citations=final_state.citations
+                    citations=final_state.citations,
+                    thinking_text=final_state.thinking_text
                 )
 
                 max_passes = getattr(config, 'COMMAND_MAX_PASSES', 3)
@@ -1729,7 +1764,8 @@ class ChatWindow(QMainWindow):
                     max_passes=max_passes,
                     pulse_callback=lambda interval: self._emit_pulse_interval_change(interval),
                     tools=tools,
-                    dev_mode_callbacks=dev_callbacks
+                    dev_mode_callbacks=dev_callbacks,
+                    thinking_enabled=thinking_on
                 )
 
                 final_text = result.final_text
@@ -1871,7 +1907,8 @@ class ChatWindow(QMainWindow):
                 system_prompt=system_prompt,
                 task_type=TaskType.CONVERSATION,
                 temperature=0.7,
-                tools=tools
+                tools=tools,
+                thinking_enabled=self._user_settings.thinking_enabled
             )
             current_duration = (time.time() - cont_start) * 1000
 
@@ -1983,7 +2020,8 @@ class ChatWindow(QMainWindow):
                 messages=current_history,
                 system_prompt=system_prompt,
                 task_type=TaskType.CONVERSATION,
-                temperature=0.7
+                temperature=0.7,
+                thinking_enabled=self._user_settings.thinking_enabled
             )
             current_duration = (time.time() - cont_start) * 1000
 
@@ -2138,7 +2176,8 @@ class ChatWindow(QMainWindow):
                 system_prompt=assembled.full_system_prompt,
                 task_type=TaskType.CONVERSATION,
                 temperature=0.7,
-                tools=tools  # Enable native tools for Telegram responses
+                tools=tools,  # Enable native tools for Telegram responses
+                thinking_enabled=self._user_settings.thinking_enabled
             )
 
             if response.success:
@@ -2161,7 +2200,8 @@ class ChatWindow(QMainWindow):
                     max_passes=5,
                     pulse_callback=lambda interval: self._emit_pulse_interval_change(interval),
                     tools=tools,
-                    dev_mode_callbacks=dev_callbacks
+                    dev_mode_callbacks=dev_callbacks,
+                    thinking_enabled=self._user_settings.thinking_enabled
                 )
 
                 final_text = result.final_text
@@ -2298,7 +2338,8 @@ class ChatWindow(QMainWindow):
                 system_prompt=assembled.full_system_prompt,
                 task_type=TaskType.CONVERSATION,
                 temperature=0.7,
-                tools=tools  # Enable native tools for pulse responses
+                tools=tools,  # Enable native tools for pulse responses
+                thinking_enabled=self._user_settings.thinking_enabled
             )
 
             log_info(f"PULSE: Router returned, success={response.success}", prefix="⏱️")
@@ -2323,7 +2364,8 @@ class ChatWindow(QMainWindow):
                     max_passes=5,
                     pulse_callback=lambda interval: self._emit_pulse_interval_change(interval),
                     tools=tools,
-                    dev_mode_callbacks=dev_callbacks
+                    dev_mode_callbacks=dev_callbacks,
+                    thinking_enabled=self._user_settings.thinking_enabled
                 )
 
                 final_text = result.final_text
@@ -2451,7 +2493,8 @@ class ChatWindow(QMainWindow):
                 system_prompt=assembled.full_system_prompt,
                 task_type=TaskType.CONVERSATION,
                 temperature=0.7,
-                tools=tools  # Enable native tools for reminder responses
+                tools=tools,  # Enable native tools for reminder responses
+                thinking_enabled=self._user_settings.thinking_enabled
             )
 
             if response.success:
@@ -2473,7 +2516,8 @@ class ChatWindow(QMainWindow):
                     max_passes=5,
                     pulse_callback=lambda interval: self._emit_pulse_interval_change(interval),
                     tools=tools,
-                    dev_mode_callbacks=dev_callbacks
+                    dev_mode_callbacks=dev_callbacks,
+                    thinking_enabled=self._user_settings.thinking_enabled
                 )
 
                 final_text = result.final_text

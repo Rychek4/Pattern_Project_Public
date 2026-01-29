@@ -44,6 +44,14 @@ ANTHROPIC_MODEL_CONVERSATION = os.getenv("ANTHROPIC_MODEL_CONVERSATION", "claude
 ANTHROPIC_MODEL_EXTRACTION = os.getenv("ANTHROPIC_MODEL_EXTRACTION", "claude-sonnet-4-5-20250929")  # Memory extraction (Sonnet)
 ANTHROPIC_MAX_TOKENS = int(os.getenv("ANTHROPIC_MAX_TOKENS", "4096"))
 
+# Extended Thinking
+# When enabled, Claude uses a private scratchpad to reason before responding.
+# Improves quality for complex reasoning tasks but uses more output tokens.
+# temperature is forced to 1.0 by the API when thinking is enabled.
+ANTHROPIC_THINKING_ENABLED = True                  # Default state for new users (on by default)
+ANTHROPIC_THINKING_BUDGET_TOKENS = 10000           # Max tokens Claude can use for thinking
+ANTHROPIC_THINKING_MAX_TOKENS = 16000              # Total max_tokens when thinking is on (must be > budget)
+
 # KoboldCpp (Local)
 KOBOLD_API_URL = os.getenv("KOBOLD_API_URL", "http://127.0.0.1:5001")
 KOBOLD_MAX_CONTEXT = int(os.getenv("KOBOLD_MAX_CONTEXT", "4096"))

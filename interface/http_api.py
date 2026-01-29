@@ -60,11 +60,13 @@ def create_app() -> Flask:
 
             # Get response
             router = get_llm_router()
+            from core.user_settings import get_user_settings
             response = router.chat(
                 messages=history,
                 system_prompt=system_prompt,
                 task_type=TaskType.CONVERSATION,
-                temperature=temperature
+                temperature=temperature,
+                thinking_enabled=get_user_settings().thinking_enabled
             )
 
             if response.success:
