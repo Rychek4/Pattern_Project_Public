@@ -40,6 +40,8 @@ class AnthropicResponse:
     # Native tool use fields
     tool_calls: List[ToolCall] = field(default_factory=list)
     raw_content: List[Any] = field(default_factory=list)  # Original content blocks for continuation
+    # Extended thinking fields
+    thinking_text: str = ""  # Claude's internal reasoning (not shown to user by default)
 
     def has_tool_calls(self) -> bool:
         """Check if response contains tool calls (excluding web_search)."""
@@ -61,6 +63,9 @@ class StreamingState:
     _current_tool_id: Optional[str] = None
     _current_tool_name: Optional[str] = None
     _current_tool_input_json: str = ""
+    # Extended thinking
+    thinking_text: str = ""  # Accumulated thinking content
+    _current_thinking_text: str = ""  # Thinking text for current block
 
     def to_response(self) -> AnthropicResponse:
         """Convert streaming state to final AnthropicResponse."""
@@ -73,7 +78,8 @@ class StreamingState:
             web_searches_used=self.web_searches_used,
             citations=self.citations,
             tool_calls=self.tool_calls,
-            raw_content=self.raw_content
+            raw_content=self.raw_content,
+            thinking_text=self.thinking_text
         )
 
     def has_tool_calls(self) -> bool:
@@ -145,7 +151,9 @@ class AnthropicClient:
         enable_web_search: bool = False,
         web_search_max_uses: Optional[int] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
-        model: Optional[str] = None
+        model: Optional[str] = None,
+        thinking_enabled: bool = False,
+        thinking_budget_tokens: Optional[int] = None
     ) -> AnthropicResponse:
         """
         Send a chat completion request.
@@ -174,6 +182,8 @@ class AnthropicClient:
             web_search_max_uses: Max searches per request (None = no limit)
             tools: Optional list of tool definitions for native tool use
             model: Optional model override (uses instance model if None)
+            thinking_enabled: Whether to enable extended thinking
+            thinking_budget_tokens: Max tokens for thinking (None = use config default)
 
         Returns:
             AnthropicResponse with generated text and any tool calls
@@ -192,6 +202,22 @@ class AnthropicClient:
                 "temperature": temperature,
                 "messages": messages
             }
+
+            # Extended thinking: override max_tokens and temperature when enabled
+            if thinking_enabled:
+                import config as cfg
+                budget = thinking_budget_tokens or cfg.ANTHROPIC_THINKING_BUDGET_TOKENS
+                request_params["thinking"] = {
+                    "type": "enabled",
+                    "budget_tokens": budget
+                }
+                # API requires temperature=1 when thinking is enabled
+                request_params["temperature"] = 1.0
+                # max_tokens must exceed budget_tokens
+                request_params["max_tokens"] = max(
+                    request_params["max_tokens"],
+                    cfg.ANTHROPIC_THINKING_MAX_TOKENS
+                )
 
             if system_prompt:
                 request_params["system"] = system_prompt
@@ -226,6 +252,7 @@ class AnthropicClient:
             # Note: All iterations use defensive (x or []) pattern to handle None values
             # The hasattr() check alone is insufficient - an attribute can exist but be None
             text = ""
+            thinking_text = ""
             web_searches_used = 0
             citations: List[WebSearchCitation] = []
             tool_calls: List[ToolCall] = []
@@ -233,12 +260,23 @@ class AnthropicClient:
             # Safely iterate over response content blocks
             content_blocks = getattr(response, "content", None) or []
             for block in content_blocks:
-                if hasattr(block, "text"):
+                block_type = getattr(block, "type", None)
+
+                if block_type == "thinking":
+                    # Extended thinking block - capture internal reasoning
+                    block_thinking = getattr(block, "thinking", None)
+                    if block_thinking:
+                        thinking_text += block_thinking
+                        log_info(f"Thinking block: {len(block_thinking)} chars", prefix="🧠")
+                elif block_type == "redacted_thinking":
+                    # Redacted thinking - safety-filtered, preserve for continuations only
+                    log_info("Redacted thinking block received", prefix="🧠")
+                elif block_type == "text" or hasattr(block, "text"):
                     # Regular text block - safely get text (could be None or empty)
                     block_text = getattr(block, "text", None)
                     if block_text:
                         text += block_text
-                elif hasattr(block, "type") and block.type == "tool_use":
+                elif block_type == "tool_use":
                     tool_name = getattr(block, "name", None)
                     if tool_name == "web_search":
                         # Claude invoked web search (built-in tool)
@@ -280,12 +318,26 @@ class AnthropicClient:
                     ))
 
             # Build raw_content for continuation (serialize content blocks)
-            # This preserves the original structure for tool_result messages
+            # This preserves the original structure for tool_result messages.
+            # Thinking and redacted_thinking blocks MUST be preserved for
+            # multi-turn continuations (API requirement).
             raw_content_list = []
             for block in content_blocks:
-                if hasattr(block, "text"):
+                block_type = getattr(block, "type", None)
+
+                if block_type == "thinking":
+                    raw_content_list.append({
+                        "type": "thinking",
+                        "thinking": getattr(block, "thinking", "")
+                    })
+                elif block_type == "redacted_thinking":
+                    raw_content_list.append({
+                        "type": "redacted_thinking",
+                        "data": getattr(block, "data", "")
+                    })
+                elif block_type == "text" or hasattr(block, "text"):
                     raw_content_list.append({"type": "text", "text": getattr(block, "text", "")})
-                elif hasattr(block, "type") and block.type == "tool_use":
+                elif block_type == "tool_use":
                     raw_content_list.append({
                         "type": "tool_use",
                         "id": getattr(block, "id", ""),
@@ -302,7 +354,8 @@ class AnthropicClient:
                 web_searches_used=web_searches_used,
                 citations=citations,
                 tool_calls=tool_calls,
-                raw_content=raw_content_list
+                raw_content=raw_content_list,
+                thinking_text=thinking_text
             )
 
         except Exception as e:
@@ -334,7 +387,9 @@ class AnthropicClient:
         enable_web_search: bool = False,
         web_search_max_uses: Optional[int] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
-        model: Optional[str] = None
+        model: Optional[str] = None,
+        thinking_enabled: bool = False,
+        thinking_budget_tokens: Optional[int] = None
     ) -> Generator[tuple[str, StreamingState], None, None]:
         """
         Stream a chat completion request, yielding text chunks as they arrive.
@@ -360,6 +415,20 @@ class AnthropicClient:
                 "temperature": temperature,
                 "messages": messages
             }
+
+            # Extended thinking: override max_tokens and temperature when enabled
+            if thinking_enabled:
+                import config as cfg
+                budget = thinking_budget_tokens or cfg.ANTHROPIC_THINKING_BUDGET_TOKENS
+                request_params["thinking"] = {
+                    "type": "enabled",
+                    "budget_tokens": budget
+                }
+                request_params["temperature"] = 1.0
+                request_params["max_tokens"] = max(
+                    request_params["max_tokens"],
+                    cfg.ANTHROPIC_THINKING_MAX_TOKENS
+                )
 
             if system_prompt:
                 request_params["system"] = system_prompt
@@ -430,7 +499,12 @@ class AnthropicClient:
                             block_type = getattr(content_block, "type", None)
                             current_block_type = block_type
 
-                            if block_type == "tool_use":
+                            if block_type == "thinking":
+                                # Starting a thinking block - reset current thinking text
+                                state._current_thinking_text = ""
+                                log_info("Thinking block started", prefix="🧠")
+
+                            elif block_type == "tool_use":
                                 # Starting a tool call
                                 state._current_tool_id = getattr(content_block, "id", "")
                                 state._current_tool_name = getattr(content_block, "name", "")
@@ -445,7 +519,14 @@ class AnthropicClient:
                         if delta:
                             delta_type = getattr(delta, "type", None)
 
-                            if delta_type == "text_delta":
+                            if delta_type == "thinking_delta":
+                                # Thinking content chunk
+                                thinking_chunk = getattr(delta, "thinking", "")
+                                if thinking_chunk:
+                                    state._current_thinking_text += thinking_chunk
+                                    state.thinking_text += thinking_chunk
+
+                            elif delta_type == "text_delta":
                                 # Text chunk arrived
                                 text_chunk = getattr(delta, "text", "")
                                 if text_chunk:
@@ -461,7 +542,25 @@ class AnthropicClient:
 
                     elif event_type == "content_block_stop":
                         # Content block finished
-                        if current_block_type == "tool_use" and state._current_tool_name:
+                        if current_block_type == "thinking":
+                            # Finalize thinking block - add to raw_content for continuations
+                            log_info(f"Thinking block complete: {len(state._current_thinking_text)} chars", prefix="🧠")
+                            state.raw_content.append({
+                                "type": "thinking",
+                                "thinking": state._current_thinking_text
+                            })
+                            state._current_thinking_text = ""
+
+                        elif current_block_type == "redacted_thinking":
+                            # Redacted thinking - preserve for continuations
+                            log_info("Redacted thinking block complete", prefix="🧠")
+                            content_block = getattr(event, "content_block", None)
+                            state.raw_content.append({
+                                "type": "redacted_thinking",
+                                "data": getattr(content_block, "data", "") if content_block else ""
+                            })
+
+                        elif current_block_type == "tool_use" and state._current_tool_name:
                             # Finalize the tool call
                             tool_input = {}
                             if state._current_tool_input_json:

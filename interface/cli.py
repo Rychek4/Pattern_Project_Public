@@ -187,12 +187,15 @@ class ChatCLI:
                 start_time = time.time()
                 with self.console.status("[bold blue]Thinking...[/bold blue]", spinner="dots"):
                     # Get response from LLM with full context and native tools
+                    from core.user_settings import get_user_settings
+                    _thinking_on = get_user_settings().thinking_enabled
                     response = router.chat(
                         messages=history,
                         system_prompt=assembled.full_system_prompt,
                         task_type=TaskType.CONVERSATION,
                         temperature=0.7,
-                        tools=tools
+                        tools=tools,
+                        thinking_enabled=_thinking_on
                     )
                 pass1_duration = (time.time() - start_time) * 1000
 
@@ -217,7 +220,8 @@ class ChatCLI:
                         max_passes=max_passes,
                         pulse_callback=on_pulse_change,
                         tools=tools,
-                        dev_mode_callbacks=dev_callbacks
+                        dev_mode_callbacks=dev_callbacks,
+                        thinking_enabled=_thinking_on
                     )
 
                     final_text = result.final_text
@@ -464,12 +468,14 @@ class ChatCLI:
             # Get next response
             cont_start = time.time()
             with self.console.status("[bold blue]Continuing...[/bold blue]", spinner="dots"):
+                from core.user_settings import get_user_settings
                 continuation = router.chat(
                     messages=current_history,
                     system_prompt=system_prompt,
                     task_type=TaskType.CONVERSATION,
                     temperature=0.7,
-                    tools=tools
+                    tools=tools,
+                    thinking_enabled=get_user_settings().thinking_enabled
                 )
             current_duration = (time.time() - cont_start) * 1000
 
@@ -552,11 +558,13 @@ class ChatCLI:
             # Get next response
             cont_start = time.time()
             with self.console.status("[bold blue]Continuing...[/bold blue]", spinner="dots"):
+                from core.user_settings import get_user_settings
                 continuation = router.chat(
                     messages=current_history,
                     system_prompt=system_prompt,
                     task_type=TaskType.CONVERSATION,
-                    temperature=0.7
+                    temperature=0.7,
+                    thinking_enabled=get_user_settings().thinking_enabled
                 )
             current_duration = (time.time() - cont_start) * 1000
 
@@ -647,12 +655,14 @@ class ChatCLI:
 
             # Show thinking indicator
             with self.console.status("[bold magenta]Pulse thinking...[/bold magenta]", spinner="dots"):
+                from core.user_settings import get_user_settings
                 response = router.chat(
                     messages=history,
                     system_prompt=assembled.full_system_prompt,
                     task_type=TaskType.CONVERSATION,
                     temperature=0.7,
-                    tools=tools  # Enable native tools for pulse responses
+                    tools=tools,  # Enable native tools for pulse responses
+                    thinking_enabled=get_user_settings().thinking_enabled
                 )
 
             if response.success:
@@ -674,7 +684,8 @@ class ChatCLI:
                     max_passes=5,
                     pulse_callback=on_pulse_change,
                     tools=tools,
-                    dev_mode_callbacks=dev_callbacks
+                    dev_mode_callbacks=dev_callbacks,
+                    thinking_enabled=get_user_settings().thinking_enabled
                 )
 
                 final_text = result.final_text
@@ -783,12 +794,14 @@ class ChatCLI:
 
             # Show thinking indicator
             with self.console.status("[bold yellow]Reminder thinking...[/bold yellow]", spinner="dots"):
+                from core.user_settings import get_user_settings
                 response = router.chat(
                     messages=history,
                     system_prompt=assembled.full_system_prompt,
                     task_type=TaskType.CONVERSATION,
                     temperature=0.7,
-                    tools=tools  # Enable native tools for reminder responses
+                    tools=tools,  # Enable native tools for reminder responses
+                    thinking_enabled=get_user_settings().thinking_enabled
                 )
 
             if response.success:
@@ -810,7 +823,8 @@ class ChatCLI:
                     max_passes=5,
                     pulse_callback=on_pulse_change,
                     tools=tools,
-                    dev_mode_callbacks=dev_callbacks
+                    dev_mode_callbacks=dev_callbacks,
+                    thinking_enabled=get_user_settings().thinking_enabled
                 )
 
                 final_text = result.final_text
@@ -922,12 +936,14 @@ class ChatCLI:
 
             # Show thinking indicator
             with self.console.status("[bold cyan]Responding to Telegram...[/bold cyan]", spinner="dots"):
+                from core.user_settings import get_user_settings
                 response = router.chat(
                     messages=history,
                     system_prompt=assembled.full_system_prompt,
                     task_type=TaskType.CONVERSATION,
                     temperature=0.7,
-                    tools=tools  # Enable native tools for telegram responses
+                    tools=tools,  # Enable native tools for telegram responses
+                    thinking_enabled=get_user_settings().thinking_enabled
                 )
 
             if response.success:
@@ -949,7 +965,8 @@ class ChatCLI:
                     max_passes=5,
                     pulse_callback=on_pulse_change,
                     tools=tools,
-                    dev_mode_callbacks=dev_callbacks
+                    dev_mode_callbacks=dev_callbacks,
+                    thinking_enabled=get_user_settings().thinking_enabled
                 )
 
                 final_text = result.final_text

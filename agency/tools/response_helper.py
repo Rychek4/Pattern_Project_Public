@@ -88,7 +88,9 @@ class ToolResponseHelper:
         llm_router,
         system_prompt: str,
         tools: Optional[List[Dict[str, Any]]] = None,
-        task_type=None
+        task_type=None,
+        thinking_enabled: bool = False,
+        thinking_budget_tokens: Optional[int] = None
     ):
         """
         Initialize the helper.
@@ -98,11 +100,15 @@ class ToolResponseHelper:
             system_prompt: System prompt for all API calls
             tools: Tool definitions (defaults to get_tool_definitions())
             task_type: Task type for router calls (defaults to CONVERSATION)
+            thinking_enabled: Whether to enable extended thinking for continuations
+            thinking_budget_tokens: Max tokens for thinking (None = use config default)
         """
         self._router = llm_router
         self._system_prompt = system_prompt
         self._tools = tools if tools is not None else get_tool_definitions()
         self._task_type = task_type
+        self._thinking_enabled = thinking_enabled
+        self._thinking_budget_tokens = thinking_budget_tokens
         self._processor = get_tool_processor()
 
     def process_response(
@@ -226,7 +232,9 @@ class ToolResponseHelper:
                 system_prompt=self._system_prompt,
                 task_type=task_type,
                 temperature=0.7,
-                tools=self._tools
+                tools=self._tools,
+                thinking_enabled=self._thinking_enabled,
+                thinking_budget_tokens=self._thinking_budget_tokens
             )
             current_duration = (time.time() - cont_start) * 1000
 
@@ -313,7 +321,9 @@ def process_with_tools(
     max_passes: int = 5,
     pulse_callback: Optional[Callable[[int], None]] = None,
     tools: Optional[List[Dict[str, Any]]] = None,
-    dev_mode_callbacks: Optional[Dict[str, Callable]] = None
+    dev_mode_callbacks: Optional[Dict[str, Callable]] = None,
+    thinking_enabled: bool = False,
+    thinking_budget_tokens: Optional[int] = None
 ) -> ToolProcessingResult:
     """
     Convenience function for processing a response with native tools.
@@ -331,6 +341,8 @@ def process_with_tools(
         dev_mode_callbacks: Optional dict of callbacks for dev window:
             - emit_response_pass: For Response Pipeline tab
             - emit_command_executed: For Tools tab
+        thinking_enabled: Whether to enable extended thinking for continuations
+        thinking_budget_tokens: Max tokens for thinking (None = use config default)
 
     Returns:
         ToolProcessingResult with final text and metadata
@@ -338,7 +350,9 @@ def process_with_tools(
     helper = ToolResponseHelper(
         llm_router=llm_router,
         system_prompt=system_prompt,
-        tools=tools
+        tools=tools,
+        thinking_enabled=thinking_enabled,
+        thinking_budget_tokens=thinking_budget_tokens
     )
     return helper.process_response(
         response=response,
