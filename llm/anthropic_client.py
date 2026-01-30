@@ -66,6 +66,7 @@ class StreamingState:
     # Extended thinking
     thinking_text: str = ""  # Accumulated thinking content
     _current_thinking_text: str = ""  # Thinking text for current block
+    _current_thinking_signature: str = ""  # Signature for current thinking block
 
     def to_response(self) -> AnthropicResponse:
         """Convert streaming state to final AnthropicResponse."""
@@ -328,7 +329,8 @@ class AnthropicClient:
                 if block_type == "thinking":
                     raw_content_list.append({
                         "type": "thinking",
-                        "thinking": getattr(block, "thinking", "")
+                        "thinking": getattr(block, "thinking", ""),
+                        "signature": getattr(block, "signature", "")
                     })
                 elif block_type == "redacted_thinking":
                     raw_content_list.append({
@@ -500,8 +502,9 @@ class AnthropicClient:
                             current_block_type = block_type
 
                             if block_type == "thinking":
-                                # Starting a thinking block - reset current thinking text
+                                # Starting a thinking block - reset current thinking state
                                 state._current_thinking_text = ""
+                                state._current_thinking_signature = ""
                                 log_info("Thinking block started", prefix="🧠")
 
                             elif block_type == "tool_use":
@@ -526,6 +529,12 @@ class AnthropicClient:
                                     state._current_thinking_text += thinking_chunk
                                     state.thinking_text += thinking_chunk
 
+                            elif delta_type == "signature_delta":
+                                # Thinking block signature (required for continuations)
+                                signature = getattr(delta, "signature", "")
+                                if signature:
+                                    state._current_thinking_signature = signature
+
                             elif delta_type == "text_delta":
                                 # Text chunk arrived
                                 text_chunk = getattr(delta, "text", "")
@@ -547,9 +556,11 @@ class AnthropicClient:
                             log_info(f"Thinking block complete: {len(state._current_thinking_text)} chars", prefix="🧠")
                             state.raw_content.append({
                                 "type": "thinking",
-                                "thinking": state._current_thinking_text
+                                "thinking": state._current_thinking_text,
+                                "signature": state._current_thinking_signature
                             })
                             state._current_thinking_text = ""
+                            state._current_thinking_signature = ""
 
                         elif current_block_type == "redacted_thinking":
                             # Redacted thinking - preserve for continuations
