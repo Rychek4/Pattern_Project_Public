@@ -2323,9 +2323,10 @@ class ChatWindow(QMainWindow):
 
             # Add the pulse prompt as the message to respond to
             # (role="user" is an API constraint, but content clarifies it's automated)
-            # Capture visuals for the pulse message (same as user messages in auto mode)
-            pulse_message = self._capture_visuals_for_message(pulse_prompt)
-            history.append(pulse_message)
+            # No screenshots during pulse — the AI's autonomous moment should focus
+            # on introspection, curiosity, and intentions, not whatever is on screen.
+            # The AI can still request screenshots on-demand via [[SCREENSHOT]] if needed.
+            history.append({"role": "user", "content": pulse_prompt})
 
             # Get tool definitions for native tool use
             tools = get_tool_definitions()

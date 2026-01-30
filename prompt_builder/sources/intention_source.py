@@ -46,6 +46,9 @@ class IntentionSource(ContextSource):
             engine = get_trigger_engine()
             now = datetime.now()
 
+            # Check if this is a pulse trigger
+            is_pulse = session_context.get("is_pulse", False)
+
             # Check if this is a session start (for next_session triggers)
             is_session_start = session_context.get("is_session_start", False)
             if is_session_start:
@@ -57,21 +60,26 @@ class IntentionSource(ContextSource):
             triggered_count = summary["triggered_count"]
             pending_count = summary["pending_count"]
 
-            # If no intentions at all, return minimal context
+            # If no intentions at all, return context (pulse gets a proactive nudge)
             if triggered_count == 0 and pending_count == 0:
+                content = self._build_pulse_empty_context() if is_pulse else self._build_empty_context()
                 return ContextBlock(
                     source_name=self.source_name,
-                    content=self._build_empty_context(),
+                    content=content,
                     priority=self.priority,
                     include_always=True,
                     metadata={
                         "triggered_count": 0,
                         "pending_count": 0,
+                        "is_pulse": is_pulse,
                     }
                 )
 
-            # Build full intention context
-            content = self._build_context(summary, now)
+            # Build intention context (pulse-aware or standard)
+            if is_pulse:
+                content = self._build_pulse_context(summary, now)
+            else:
+                content = self._build_context(summary, now)
 
             # Store in session context for other sources
             session_context["intention_triggered_count"] = triggered_count
@@ -85,6 +93,7 @@ class IntentionSource(ContextSource):
                 metadata={
                     "triggered_count": triggered_count,
                     "pending_count": pending_count,
+                    "is_pulse": is_pulse,
                     "triggered_ids": [i.id for i in summary["triggered"]],
                     "pending_ids": [i.id for i in summary["pending"]],
                 }
@@ -130,6 +139,62 @@ class IntentionSource(ContextSource):
             "Note: Time-based reminders automatically trigger a pulse prompt when due,",
             "even if the user hasn't messaged. You will receive an automated reminder pulse.",
             "</your_intentions>",
+        ])
+
+        return "\n".join(lines)
+
+    def _build_pulse_empty_context(self) -> str:
+        """Build pulse context when there are no intentions."""
+        return "\n".join([
+            "<your_intentions_pulse>",
+            "You have no active intentions.",
+            "",
+            "The pulse is a moment to think forward. Is there anything from recent",
+            "conversations worth following up on? A question left unanswered?",
+            "Something you want to revisit later?",
+            "",
+            "Create intentions with: [[REMIND: when | what]]",
+            "</your_intentions_pulse>",
+        ])
+
+    def _build_pulse_context(self, summary: dict, now: datetime) -> str:
+        """Build pulse-specific context with elevated urgency for triggered items."""
+        triggered_count = summary["triggered_count"]
+        pending_count = summary["pending_count"]
+
+        lines = ["<your_intentions_pulse>"]
+
+        if triggered_count > 0:
+            lines.extend([
+                "ATTENTION — You have intentions that need action:",
+                "",
+            ])
+        else:
+            lines.extend([
+                "Your forward-looking commitments:",
+                "",
+            ])
+
+        # Add the formatted intention list (reuse existing formatting)
+        if summary["formatted_context"]:
+            lines.append(summary["formatted_context"])
+            lines.append("")
+
+        # Add resolution guidance
+        if triggered_count > 0:
+            lines.extend([
+                "These are commitments you made to yourself. Address them now or",
+                "consciously dismiss them with [[DISMISS: I-id]].",
+                "",
+            ])
+
+        # Add total count and commands
+        total = triggered_count + pending_count
+        lines.append(f"You have {total} active intention{'s' if total != 1 else ''}.")
+        lines.append("")
+        lines.extend([
+            "Commands: [[COMPLETE: I-id | outcome]], [[DISMISS: I-id]], [[REMIND: when | what]]",
+            "</your_intentions_pulse>",
         ])
 
         return "\n".join(lines)
