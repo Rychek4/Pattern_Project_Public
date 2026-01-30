@@ -187,7 +187,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 # Optional
 ANTHROPIC_MODEL=claude-sonnet-4-5-20250929
 USER_NAME=YourName
-AI_NAME=Claude
+AI_NAME=Isaac
 
 # Telegram (optional)
 telegram_bot=your_bot_token

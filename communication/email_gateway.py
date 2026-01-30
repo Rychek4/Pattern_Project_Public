@@ -50,7 +50,7 @@ class EmailGateway:
         self,
         email_address: str,
         email_password: str,
-        display_name: str = "Pattern Claude",
+        display_name: str = "Pattern Isaac",
         smtp_host: str = "smtp.gmail.com",
         smtp_port: int = 587,
     ):

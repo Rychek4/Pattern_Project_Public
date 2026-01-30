@@ -32,7 +32,7 @@ PROJECT_NAME = "Pattern Project"
 # This ensures consistent entity naming for better semantic memory retrieval.
 # TODO: Eventually prompt for this at first boot instead of hardcoding.
 USER_NAME = os.getenv("USER_NAME", "Brian")
-AI_NAME = os.getenv("AI_NAME", "Claude")
+AI_NAME = os.getenv("AI_NAME", "Isaac")
 
 # =============================================================================
 # LLM CONFIGURATION
@@ -417,7 +417,7 @@ DEV_MODE_ENABLED = False  # Set programmatically via --dev flag, not env var
 EMAIL_GATEWAY_ENABLED = False  # Disabled - Telegram is the primary communication channel
 EMAIL_ADDRESS = os.getenv("APP_EMAIL_ADDRESS", "")
 EMAIL_PASSWORD = os.getenv("APP_EMAIL_PASS", "")
-EMAIL_DISPLAY_NAME = "Pattern Claude"
+EMAIL_DISPLAY_NAME = "Pattern Isaac"
 EMAIL_SMTP_HOST = "smtp.gmail.com"
 EMAIL_SMTP_PORT = 587
 

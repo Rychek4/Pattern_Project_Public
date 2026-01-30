@@ -425,9 +425,9 @@ Format with names and fuzzy timestamps
 ```xml
 <recent_conversation>
   Brian: Hey, can you help me debug this Flask app? (23 minutes ago)
-  Claude: Of course! What kind of error are you seeing? (22 minutes ago)
+  Isaac: Of course! What kind of error are you seeing? (22 minutes ago)
   Brian: I'm getting a circular import error (21 minutes ago)
-  Claude: That's a common issue. Let me explain... (20 minutes ago)
+  Isaac: That's a common issue. Let me explain... (20 minutes ago)
   ...
 </recent_conversation>
 ```
