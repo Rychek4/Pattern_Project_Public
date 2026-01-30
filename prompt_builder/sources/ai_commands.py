@@ -1,6 +1,6 @@
 """
 Pattern Project - AI Capabilities Context Source
-Provides information about web search and other AI capabilities.
+Provides information about web search, web fetch, and other AI capabilities.
 
 NOTE: Tool instructions are provided via native tool schemas in the API call.
 This source no longer injects legacy [[COMMAND]] syntax instructions.
@@ -19,6 +19,8 @@ class AICommandsSource(ContextSource):
 
     This source includes:
     - Web search capability status
+    - Web fetch capability status
+    - Combined web research guidance (when both are available)
 
     NOTE: Tool instructions are provided via native tool schemas in the API call.
     The legacy [[COMMAND]] syntax is no longer supported (December 2025).
@@ -57,6 +59,37 @@ class AICommandsSource(ContextSource):
             log_error(f"Failed to get web search status: {e}")
             return None  # Silently omit web search status from prompt
 
+    def _get_web_fetch_status(self) -> Optional[str]:
+        """Get web fetch availability status for the prompt."""
+        if not config.WEB_FETCH_ENABLED:
+            return None
+
+        try:
+            from agency.web_fetch_limiter import get_web_fetch_limiter
+            limiter = get_web_fetch_limiter()
+            used, total = limiter.get_usage()
+            remaining = limiter.get_remaining()
+
+            if remaining <= 0:
+                return None  # Will be handled by router with unavailable message
+
+            # Only show detailed budget when running low (< 10 remaining)
+            if remaining < 10:
+                return (
+                    f"<web_fetch_capability>Web fetch available for retrieving full page/PDF content "
+                    f"from URLs. Budget: {remaining} remaining ({used}/{total} used).</web_fetch_capability>"
+                )
+
+            # When budget is ample, minimal reminder
+            return (
+                "<web_fetch_capability>Web fetch available. You can retrieve full content from "
+                "URLs provided by the user or found through web search.</web_fetch_capability>"
+            )
+
+        except Exception as e:
+            log_error(f"Failed to get web fetch status: {e}")
+            return None  # Silently omit web fetch status from prompt
+
     def get_context(
         self,
         user_input: str,
@@ -66,7 +99,7 @@ class AICommandsSource(ContextSource):
         Get AI capability context for prompt injection.
 
         Tool instructions are provided via native tool schemas in the API call,
-        so this source only provides web search status.
+        so this source only provides web search/fetch status.
 
         Args:
             user_input: The user's current message
@@ -79,12 +112,24 @@ class AICommandsSource(ContextSource):
 
         # NOTE: Tool instructions are provided via native tool schemas.
         # The legacy [[COMMAND]] syntax is no longer supported.
-        # Only web search status is included here.
 
         # Add web search status if enabled and available
         web_search_status = self._get_web_search_status()
         if web_search_status:
             content_parts.append(web_search_status)
+
+        # Add web fetch status if enabled and available
+        web_fetch_status = self._get_web_fetch_status()
+        if web_fetch_status:
+            content_parts.append(web_fetch_status)
+
+        # When both are available, add combined research guidance
+        if web_search_status and web_fetch_status:
+            content_parts.append(
+                "<web_research_capability>Both web search and web fetch are available. "
+                "For thorough research: search to discover sources, then fetch to read "
+                "full content. Citations from both tools are automatically tracked.</web_research_capability>"
+            )
 
         if not content_parts:
             return None
@@ -97,6 +142,8 @@ class AICommandsSource(ContextSource):
         }
         if web_search_status:
             metadata["web_search_enabled"] = True
+        if web_fetch_status:
+            metadata["web_fetch_enabled"] = True
 
         return ContextBlock(
             source_name=self.source_name,

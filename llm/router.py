@@ -42,6 +42,8 @@ class LLMResponse:
     # Web search fields
     web_searches_used: int = 0
     citations: List[Any] = None  # List of WebSearchCitation
+    # Web fetch fields
+    web_fetches_used: int = 0
     # Native tool use fields
     stop_reason: Optional[str] = None
     tool_calls: List[ToolCall] = None
@@ -206,16 +208,33 @@ class LLMRouter:
         web_search_max_uses = None
         web_search_unavailable_msg = None
 
+        # Check web fetch availability for conversation tasks on Anthropic
+        enable_web_fetch = False
+        web_fetch_max_uses = None
+        web_fetch_config = None
+        web_fetch_unavailable_msg = None
+
         if provider == LLMProvider.ANTHROPIC and task_type == TaskType.CONVERSATION:
             enable_web_search, web_search_max_uses, web_search_unavailable_msg = (
                 self._check_web_search_availability()
             )
+            enable_web_fetch, web_fetch_max_uses, web_fetch_config, web_fetch_unavailable_msg = (
+                self._check_web_fetch_availability()
+            )
 
         # If web search is unavailable due to daily limit, notify Claude in system prompt
-        if web_search_unavailable_msg and system_prompt:
-            system_prompt = f"{system_prompt}\n\n{web_search_unavailable_msg}"
-        elif web_search_unavailable_msg:
-            system_prompt = web_search_unavailable_msg
+        unavailable_notices = []
+        if web_search_unavailable_msg:
+            unavailable_notices.append(web_search_unavailable_msg)
+        if web_fetch_unavailable_msg:
+            unavailable_notices.append(web_fetch_unavailable_msg)
+
+        if unavailable_notices:
+            notice_text = "\n\n".join(unavailable_notices)
+            if system_prompt:
+                system_prompt = f"{system_prompt}\n\n{notice_text}"
+            else:
+                system_prompt = notice_text
 
         # Try primary provider
         response = self._send_to_provider(
@@ -226,6 +245,9 @@ class LLMRouter:
             temperature=temperature,
             enable_web_search=enable_web_search,
             web_search_max_uses=web_search_max_uses,
+            enable_web_fetch=enable_web_fetch,
+            web_fetch_max_uses=web_fetch_max_uses,
+            web_fetch_config=web_fetch_config,
             tools=tools,
             task_type=task_type,
             thinking_enabled=thinking_enabled,
@@ -235,6 +257,10 @@ class LLMRouter:
         # Record web search usage if any were used
         if response.success and response.web_searches_used > 0:
             self._record_web_search_usage(response.web_searches_used)
+
+        # Record web fetch usage if any were used
+        if response.success and response.web_fetches_used > 0:
+            self._record_web_fetch_usage(response.web_fetches_used)
 
         # Handle fallback - but NOT for conversation tasks
         # Falling back to a weaker model for user-facing chat degrades experience
@@ -300,17 +326,34 @@ class LLMRouter:
         web_search_max_uses = None
         web_search_unavailable_msg = None
 
+        # Check web fetch availability
+        enable_web_fetch = False
+        web_fetch_max_uses = None
+        web_fetch_config = None
+        web_fetch_unavailable_msg = None
+
         if task_type == TaskType.CONVERSATION:
             enable_web_search, web_search_max_uses, web_search_unavailable_msg = (
                 self._check_web_search_availability()
             )
+            enable_web_fetch, web_fetch_max_uses, web_fetch_config, web_fetch_unavailable_msg = (
+                self._check_web_fetch_availability()
+            )
 
-        # Modify system prompt if web search unavailable
+        # Modify system prompt if web tools unavailable
         final_system_prompt = system_prompt
-        if web_search_unavailable_msg and system_prompt:
-            final_system_prompt = f"{system_prompt}\n\n{web_search_unavailable_msg}"
-        elif web_search_unavailable_msg:
-            final_system_prompt = web_search_unavailable_msg
+        unavailable_notices = []
+        if web_search_unavailable_msg:
+            unavailable_notices.append(web_search_unavailable_msg)
+        if web_fetch_unavailable_msg:
+            unavailable_notices.append(web_fetch_unavailable_msg)
+
+        if unavailable_notices:
+            notice_text = "\n\n".join(unavailable_notices)
+            if system_prompt:
+                final_system_prompt = f"{system_prompt}\n\n{notice_text}"
+            else:
+                final_system_prompt = notice_text
 
         # Select model based on task type
         import config
@@ -329,6 +372,7 @@ class LLMRouter:
         log_info(f"Messages count: {len(messages)}", prefix="🔍")
         log_info(f"Tools enabled: {tools is not None and len(tools) > 0}", prefix="🔍")
         log_info(f"Web search: {enable_web_search}", prefix="🔍")
+        log_info(f"Web fetch: {enable_web_fetch}", prefix="🔍")
         log_info(f"Thinking: {thinking_enabled}", prefix="🔍")
 
         # Log message structure (not full content for privacy)
@@ -357,6 +401,9 @@ class LLMRouter:
                 temperature=temperature,
                 enable_web_search=enable_web_search,
                 web_search_max_uses=web_search_max_uses,
+                enable_web_fetch=enable_web_fetch,
+                web_fetch_max_uses=web_fetch_max_uses,
+                web_fetch_config=web_fetch_config,
                 tools=tools,
                 model=model,
                 thinking_enabled=thinking_enabled,
@@ -382,6 +429,10 @@ class LLMRouter:
             # Record web search usage after streaming complete
             if final_state and final_state.web_searches_used > 0:
                 self._record_web_search_usage(final_state.web_searches_used)
+
+            # Record web fetch usage after streaming complete
+            if final_state and final_state.web_fetches_used > 0:
+                self._record_web_fetch_usage(final_state.web_fetches_used)
 
         except Exception as e:
             import traceback
@@ -435,6 +486,64 @@ class LLMRouter:
         limiter = get_web_search_limiter()
         limiter.record_usage(count)
 
+    def _check_web_fetch_availability(self) -> tuple[bool, Optional[int], Optional[Dict[str, Any]], Optional[str]]:
+        """
+        Check if web fetch should be enabled for this request.
+
+        Returns:
+            Tuple of (enable_web_fetch, max_uses, fetch_config, unavailable_message)
+        """
+        import config
+
+        if not config.WEB_FETCH_ENABLED:
+            return (False, None, None, None)
+
+        try:
+            from agency.web_fetch_limiter import get_web_fetch_limiter
+            limiter = get_web_fetch_limiter()
+
+            if not limiter.is_available():
+                # Daily limit hit - notify Claude
+                used, total = limiter.get_usage()
+                log_warning(f"Web fetch daily limit reached ({used}/{total})")
+                return (
+                    False,
+                    None,
+                    None,
+                    "<web_fetch_notice>Web fetch is unavailable today (daily limit reached). "
+                    "Rely on your knowledge or web search snippets instead.</web_fetch_notice>"
+                )
+
+            # Web fetch is available - build config
+            max_uses = limiter.get_max_for_request()
+
+            # Build fetch config from settings + domain manager
+            from agency.web_fetch_domains import get_web_fetch_domain_manager
+            domain_mgr = get_web_fetch_domain_manager()
+            domain_config = domain_mgr.get_domain_config()
+
+            fetch_config = {}
+            fetch_config.update(domain_config)  # allowed_domains, blocked_domains
+
+            if config.WEB_FETCH_MAX_CONTENT_TOKENS:
+                fetch_config["max_content_tokens"] = config.WEB_FETCH_MAX_CONTENT_TOKENS
+
+            if config.WEB_FETCH_CITATIONS_ENABLED:
+                fetch_config["citations"] = {"enabled": True}
+
+            log_info(f"Web fetch enabled (max {max_uses} uses this request)", prefix="🌐")
+            return (True, max_uses, fetch_config, None)
+
+        except Exception as e:
+            log_error(f"Web fetch limiter error, disabling web fetch: {e}")
+            return (False, None, None, None)  # Gracefully disable web fetch
+
+    def _record_web_fetch_usage(self, count: int) -> None:
+        """Record web fetch usage to the limiter."""
+        from agency.web_fetch_limiter import get_web_fetch_limiter
+        limiter = get_web_fetch_limiter()
+        limiter.record_usage(count)
+
     def _send_to_provider(
         self,
         provider: LLMProvider,
@@ -444,6 +553,9 @@ class LLMRouter:
         temperature: float,
         enable_web_search: bool = False,
         web_search_max_uses: Optional[int] = None,
+        enable_web_fetch: bool = False,
+        web_fetch_max_uses: Optional[int] = None,
+        web_fetch_config: Optional[Dict[str, Any]] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         task_type: TaskType = TaskType.CONVERSATION,
         thinking_enabled: bool = False,
@@ -473,6 +585,9 @@ class LLMRouter:
                     temperature=temperature,
                     enable_web_search=enable_web_search,
                     web_search_max_uses=web_search_max_uses,
+                    enable_web_fetch=enable_web_fetch,
+                    web_fetch_max_uses=web_fetch_max_uses,
+                    web_fetch_config=web_fetch_config,
                     tools=tools,
                     model=model,
                     thinking_enabled=thinking_enabled,
@@ -487,6 +602,7 @@ class LLMRouter:
                     tokens_out=response.output_tokens,
                     error=response.error,
                     web_searches_used=response.web_searches_used,
+                    web_fetches_used=response.web_fetches_used,
                     citations=response.citations,
                     stop_reason=response.stop_reason,
                     tool_calls=response.tool_calls,
@@ -505,6 +621,8 @@ class LLMRouter:
                         "max_tokens": max_tokens,
                         "web_search_enabled": enable_web_search,
                         "web_search_max_uses": web_search_max_uses,
+                        "web_fetch_enabled": enable_web_fetch,
+                        "web_fetch_max_uses": web_fetch_max_uses,
                         "thinking_enabled": thinking_enabled,
                         "thinking_budget_tokens": thinking_budget_tokens
                     },

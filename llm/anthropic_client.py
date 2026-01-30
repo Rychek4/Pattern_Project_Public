@@ -37,6 +37,8 @@ class AnthropicResponse:
     # Web search fields
     web_searches_used: int = 0
     citations: List[WebSearchCitation] = field(default_factory=list)
+    # Web fetch fields
+    web_fetches_used: int = 0
     # Native tool use fields
     tool_calls: List[ToolCall] = field(default_factory=list)
     raw_content: List[Any] = field(default_factory=list)  # Original content blocks for continuation
@@ -58,6 +60,7 @@ class StreamingState:
     raw_content: List[Any] = field(default_factory=list)
     stop_reason: Optional[str] = None
     web_searches_used: int = 0
+    web_fetches_used: int = 0
     citations: List[WebSearchCitation] = field(default_factory=list)
     # Track partial tool call being built
     _current_tool_id: Optional[str] = None
@@ -77,6 +80,7 @@ class StreamingState:
             success=True,
             stop_reason=self.stop_reason,
             web_searches_used=self.web_searches_used,
+            web_fetches_used=self.web_fetches_used,
             citations=self.citations,
             tool_calls=self.tool_calls,
             raw_content=self.raw_content,
@@ -151,6 +155,9 @@ class AnthropicClient:
         stop_sequences: Optional[List[str]] = None,
         enable_web_search: bool = False,
         web_search_max_uses: Optional[int] = None,
+        enable_web_fetch: bool = False,
+        web_fetch_max_uses: Optional[int] = None,
+        web_fetch_config: Optional[Dict[str, Any]] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         model: Optional[str] = None,
         thinking_enabled: bool = False,
@@ -181,6 +188,10 @@ class AnthropicClient:
             stop_sequences: Optional list of stop sequences
             enable_web_search: Whether to enable Claude's web search tool
             web_search_max_uses: Max searches per request (None = no limit)
+            enable_web_fetch: Whether to enable Claude's web fetch tool
+            web_fetch_max_uses: Max fetches per request (None = no limit)
+            web_fetch_config: Optional dict with allowed_domains, blocked_domains,
+                max_content_tokens, and citations config
             tools: Optional list of tool definitions for native tool use
             model: Optional model override (uses instance model if None)
             thinking_enabled: Whether to enable extended thinking
@@ -243,11 +254,40 @@ class AnthropicClient:
                     web_search_tool["max_uses"] = web_search_max_uses
                 all_tools.append(web_search_tool)
 
+            # Add web fetch tool if enabled
+            if enable_web_fetch:
+                web_fetch_tool = {
+                    "type": "web_fetch_20250910",
+                    "name": "web_fetch",
+                }
+                if web_fetch_max_uses is not None:
+                    web_fetch_tool["max_uses"] = web_fetch_max_uses
+                if web_fetch_config:
+                    if web_fetch_config.get("allowed_domains"):
+                        web_fetch_tool["allowed_domains"] = web_fetch_config["allowed_domains"]
+                    if web_fetch_config.get("blocked_domains"):
+                        web_fetch_tool["blocked_domains"] = web_fetch_config["blocked_domains"]
+                    if web_fetch_config.get("max_content_tokens"):
+                        web_fetch_tool["max_content_tokens"] = web_fetch_config["max_content_tokens"]
+                    if web_fetch_config.get("citations"):
+                        web_fetch_tool["citations"] = web_fetch_config["citations"]
+                all_tools.append(web_fetch_tool)
+
             if all_tools:
                 request_params["tools"] = all_tools
 
+            # Add beta header for web fetch if enabled
+            extra_headers = {}
+            if enable_web_fetch:
+                import config as fetch_cfg
+                if fetch_cfg.WEB_FETCH_BETA_HEADER:
+                    extra_headers["anthropic-beta"] = "web-fetch-2025-09-10"
+
             # Make the request
-            response = client.messages.create(**request_params)
+            create_kwargs = {**request_params}
+            if extra_headers:
+                create_kwargs["extra_headers"] = extra_headers
+            response = client.messages.create(**create_kwargs)
 
             # Parse response content
             # Note: All iterations use defensive (x or []) pattern to handle None values
@@ -255,6 +295,7 @@ class AnthropicClient:
             text = ""
             thinking_text = ""
             web_searches_used = 0
+            web_fetches_used = 0
             citations: List[WebSearchCitation] = []
             tool_calls: List[ToolCall] = []
 
@@ -283,6 +324,10 @@ class AnthropicClient:
                         # Claude invoked web search (built-in tool)
                         web_searches_used += 1
                         log_info(f"Web search invoked ({web_searches_used})", prefix="🔍")
+                    elif tool_name == "web_fetch":
+                        # Claude invoked web fetch (built-in tool)
+                        web_fetches_used += 1
+                        log_info(f"Web fetch invoked ({web_fetches_used})", prefix="🌐")
                     else:
                         # Native tool call - capture it
                         tool_calls.append(ToolCall(
@@ -295,8 +340,9 @@ class AnthropicClient:
             # Extract citations from the response if present
             # Citations appear in server_tool_use blocks or as part of the response metadata
             for block in content_blocks:
-                if hasattr(block, "type") and block.type == "web_search_tool_result":
-                    # Extract citations from search results
+                block_type_str = getattr(block, "type", None)
+                if block_type_str in ("web_search_tool_result", "web_fetch_tool_result"):
+                    # Extract citations from search/fetch results
                     # Safely get block.content - could be None even if attribute exists
                     block_content = getattr(block, "content", None) or []
                     for result_block in block_content:
@@ -346,6 +392,21 @@ class AnthropicClient:
                         "name": getattr(block, "name", ""),
                         "input": getattr(block, "input", {})
                     })
+                elif block_type in ("web_search_tool_result", "web_fetch_tool_result"):
+                    # Preserve server tool results for continuation context
+                    raw_content_list.append({
+                        "type": block_type,
+                        "tool_use_id": getattr(block, "tool_use_id", ""),
+                        "content": getattr(block, "content", [])
+                    })
+                elif block_type == "server_tool_use":
+                    # Preserve server tool use blocks (web search/fetch invocations)
+                    raw_content_list.append({
+                        "type": "server_tool_use",
+                        "id": getattr(block, "id", ""),
+                        "name": getattr(block, "name", ""),
+                        "input": getattr(block, "input", {})
+                    })
 
             return AnthropicResponse(
                 text=text,
@@ -354,6 +415,7 @@ class AnthropicClient:
                 success=True,
                 stop_reason=response.stop_reason,
                 web_searches_used=web_searches_used,
+                web_fetches_used=web_fetches_used,
                 citations=citations,
                 tool_calls=tool_calls,
                 raw_content=raw_content_list,
@@ -388,6 +450,9 @@ class AnthropicClient:
         stop_sequences: Optional[List[str]] = None,
         enable_web_search: bool = False,
         web_search_max_uses: Optional[int] = None,
+        enable_web_fetch: bool = False,
+        web_fetch_max_uses: Optional[int] = None,
+        web_fetch_config: Optional[Dict[str, Any]] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         model: Optional[str] = None,
         thinking_enabled: bool = False,
@@ -452,8 +517,34 @@ class AnthropicClient:
                     web_search_tool["max_uses"] = web_search_max_uses
                 all_tools.append(web_search_tool)
 
+            # Add web fetch tool if enabled
+            if enable_web_fetch:
+                web_fetch_tool = {
+                    "type": "web_fetch_20250910",
+                    "name": "web_fetch",
+                }
+                if web_fetch_max_uses is not None:
+                    web_fetch_tool["max_uses"] = web_fetch_max_uses
+                if web_fetch_config:
+                    if web_fetch_config.get("allowed_domains"):
+                        web_fetch_tool["allowed_domains"] = web_fetch_config["allowed_domains"]
+                    if web_fetch_config.get("blocked_domains"):
+                        web_fetch_tool["blocked_domains"] = web_fetch_config["blocked_domains"]
+                    if web_fetch_config.get("max_content_tokens"):
+                        web_fetch_tool["max_content_tokens"] = web_fetch_config["max_content_tokens"]
+                    if web_fetch_config.get("citations"):
+                        web_fetch_tool["citations"] = web_fetch_config["citations"]
+                all_tools.append(web_fetch_tool)
+
             if all_tools:
                 request_params["tools"] = all_tools
+
+            # Add beta header for web fetch if enabled
+            extra_headers = {}
+            if enable_web_fetch:
+                import config as fetch_cfg
+                if fetch_cfg.WEB_FETCH_BETA_HEADER:
+                    extra_headers["anthropic-beta"] = "web-fetch-2025-09-10"
 
             # Initialize streaming state
             state = StreamingState()
@@ -462,7 +553,10 @@ class AnthropicClient:
             text_chunks_yielded = 0
 
             # Use the streaming API
-            with client.messages.stream(**request_params) as stream:
+            stream_kwargs = {**request_params}
+            if extra_headers:
+                stream_kwargs["extra_headers"] = extra_headers
+            with client.messages.stream(**stream_kwargs) as stream:
                 current_block_type = None
                 current_block_index = -1
 
@@ -516,6 +610,9 @@ class AnthropicClient:
                                 if state._current_tool_name == "web_search":
                                     state.web_searches_used += 1
                                     log_info(f"Web search invoked ({state.web_searches_used})", prefix="🔍")
+                                elif state._current_tool_name == "web_fetch":
+                                    state.web_fetches_used += 1
+                                    log_info(f"Web fetch invoked ({state.web_fetches_used})", prefix="🌐")
 
                     elif event_type == "content_block_delta":
                         delta = getattr(event, "delta", None)
@@ -580,7 +677,7 @@ class AnthropicClient:
                                 except json.JSONDecodeError:
                                     log_error(f"Failed to parse tool input JSON", prefix="[Stream]")
 
-                            if state._current_tool_name != "web_search":
+                            if state._current_tool_name not in ("web_search", "web_fetch"):
                                 state.tool_calls.append(ToolCall(
                                     id=state._current_tool_id or "",
                                     name=state._current_tool_name,

@@ -465,6 +465,30 @@ WEB_SEARCH_MAX_USES_PER_REQUEST = 3             # Max searches Claude can do per
 WEB_SEARCH_TOTAL_ALLOWED_PER_DAY = 30           # Daily budget (resets at midnight)
 
 # =============================================================================
+# WEB FETCH CONFIGURATION
+# =============================================================================
+# Claude's native web fetch tool - fetches full page/PDF content server-side.
+# Requires beta header: web-fetch-2025-09-10 (toggled via WEB_FETCH_BETA_HEADER)
+#
+# Pricing: Standard token costs (fetched content counted as input tokens)
+# Supported models: Claude Opus 4.1, Opus 4, Sonnet 4, Haiku 3.5+
+#
+# When enabled alongside web search, Claude can search for sources then fetch
+# full content for deep analysis. Claude can ONLY fetch URLs explicitly provided
+# by the user or discovered through web search/web fetch results.
+#
+# Security: Domain lists are managed at runtime by the AI via tools.
+# Config values below serve as defaults; runtime overrides persist in the database.
+WEB_FETCH_ENABLED = True                        # Master toggle for web fetch
+WEB_FETCH_MAX_USES_PER_REQUEST = 5              # Max fetches Claude can do per API call
+WEB_FETCH_TOTAL_ALLOWED_PER_DAY = 50            # Daily budget (resets at midnight)
+WEB_FETCH_MAX_CONTENT_TOKENS = 50000            # Max tokens per fetched page (controls cost)
+WEB_FETCH_CITATIONS_ENABLED = True              # Enable inline citations for fetched content
+WEB_FETCH_ALLOWED_DOMAINS = []                  # Default domain whitelist (empty = allow all)
+WEB_FETCH_BLOCKED_DOMAINS = []                  # Default domain blacklist
+WEB_FETCH_BETA_HEADER = True                    # Send beta header (disable when tool goes GA)
+
+# =============================================================================
 # CLIPBOARD TOOL CONFIGURATION
 # =============================================================================
 # Clipboard tools allow the AI to read from and write to the system clipboard.
