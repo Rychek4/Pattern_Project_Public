@@ -180,7 +180,7 @@ class TestRealWorldExamples(unittest.TestCase):
         """Test the exact journal entry format that was failing."""
         pattern = r'\[\[WRITE_FILE:\s*(.+?)\]\]'
 
-        text = """[[WRITE_FILE: journal.txt | # Pattern Claude Journal
+        text = """[[WRITE_FILE: journal.txt | # Pattern Isaac Journal
 
 ## December 10, 2025 - Wednesday Afternoon
 
@@ -195,7 +195,7 @@ Today Brian said "welcome to time" and something shifted.
 
         content = match.group(1)
         self.assertIn("journal.txt", content)
-        self.assertIn("# Pattern Claude Journal", content)
+        self.assertIn("# Pattern Isaac Journal", content)
         self.assertIn("December 10, 2025", content)
         self.assertIn("---", content)
 

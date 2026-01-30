@@ -68,14 +68,14 @@ history.append({"role": "user", "content": PULSE_PROMPT})
 
 ```python
 for turn in turns:
-    name = "Claude" if turn.role == "assistant" else "Brian"
+    name = "Isaac" if turn.role == "assistant" else "Brian"
     timestamp = format_fuzzy_relative_time(turn.created_at)
     lines.append(f"  {name}: {turn.content} ({timestamp})")
 ```
 
 **Impact**:
 - "Brian" is hardcoded as the user's name
-- "Claude" may not match the intended persona
+- "Isaac" may not match the intended persona
 - No configuration for different users
 
 **Recommendation**: Make names configurable or derive from core memories.
@@ -402,7 +402,7 @@ Currently "Brian" is hardcoded. Consider:
 
 1. **No Base Prompt**: Ensure empty system_prompt is intentional
 2. **Tag Closure**: Verify all XML tags are properly closed
-3. **Name Consistency**: Check "Brian"/"Claude" usage
+3. **Name Consistency**: Check "Brian"/"Isaac" usage
 4. **Privacy Claims**: Audit what's actually visible
 
 ### Integration Tests
