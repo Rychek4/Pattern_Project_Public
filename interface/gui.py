@@ -1787,6 +1787,10 @@ class ChatWindow(QMainWindow):
                     timestamp = self._get_timestamp()
                     self.signals.show_clarification.emit(result.clarification_data, timestamp)
 
+            # Strip any temporal markers the LLM echoed from prompt context
+            from core.temporal import strip_temporal_echoes
+            final_text = strip_temporal_echoes(final_text)
+
             # Store response
             log_info(f"Storing assistant response ({len(final_text)} chars)", prefix="📨")
             self._conversation_mgr.add_turn(

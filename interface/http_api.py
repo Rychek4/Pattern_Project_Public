@@ -70,15 +70,19 @@ def create_app() -> Flask:
             )
 
             if response.success:
+                # Strip any temporal markers the LLM echoed from prompt context
+                from core.temporal import strip_temporal_echoes
+                clean_text = strip_temporal_echoes(response.text)
+
                 # Store response
                 conversation_mgr.add_turn(
                     role="assistant",
-                    content=response.text,
+                    content=clean_text,
                     input_type="text"
                 )
 
                 return jsonify({
-                    "response": response.text,
+                    "response": clean_text,
                     "provider": response.provider.value,
                     "tokens_in": response.tokens_in,
                     "tokens_out": response.tokens_out

@@ -3,6 +3,7 @@ Pattern Project - Temporal Context Tracking
 Tracks time across all entities and provides semantic conversion for prompts
 """
 
+import re
 import threading
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
@@ -489,3 +490,24 @@ def init_temporal_tracker() -> TemporalTracker:
     global _tracker
     _tracker = TemporalTracker()
     return _tracker
+
+
+# --- Output filtering ---
+
+_TEMPORAL_ECHO_RE = re.compile(r'\(Just now\) ?')
+
+
+def strip_temporal_echoes(text: str) -> str:
+    """Remove '(Just now)' markers the LLM may echo from temporal prompt context.
+
+    Applied before display and storage so the marker never reaches the user
+    or pollutes conversation history / memory.
+    """
+    if "(Just now)" not in text:
+        return text
+    cleaned = _TEMPORAL_ECHO_RE.sub('', text)
+    # Collapse any double-spaces left behind
+    cleaned = re.sub(r'  +', ' ', cleaned)
+    # Strip leading blank lines that may result from removal at line start
+    cleaned = cleaned.lstrip('\n')
+    return cleaned
