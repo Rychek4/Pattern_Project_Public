@@ -80,7 +80,8 @@ EMBEDDING_DIMENSIONS = 384
 # =============================================================================
 # MEMORY CONFIGURATION
 # =============================================================================
-MEMORY_FRESHNESS_HALF_LIFE_DAYS = 14  # Decay rate for freshness scoring (more recency bias)
+# Freshness decay rates are configured per-category in the Decay Category
+# Configuration section below (DECAY_HALF_LIFE_STANDARD, DECAY_HALF_LIFE_EPHEMERAL).
 
 # -----------------------------------------------------------------------------
 # Context Window & Extraction (Windowed System)
@@ -145,21 +146,19 @@ MEMORY_SMALL_BATCH_THRESHOLD = 10  # Below this turn count, preserve all topics 
 
 # Importance floor for memory storage
 # Memories rated below this threshold are not stored (filters trivial content)
-# Scale: 0.0-1.0 (maps from 0-10 LLM rating)
-# - 0.0-0.1: Trivial or forgettable
-# - 0.2-0.4: Minor details, casual observations
+# Scale: 0.0-1.0 (normalized from 1-10 LLM rating, e.g., 3/10 = 0.3)
+# - 0.1-0.2: Trivial or forgettable (LLM instructed to skip these)
+# - 0.3-0.4: Minor but notable details
 # - 0.5-0.7: Useful information, moderate preferences
 # - 0.8-1.0: Major decisions, significant events
-MEMORY_IMPORTANCE_FLOOR = 0.3  # Don't store memories below this importance
+MEMORY_IMPORTANCE_FLOOR = 0.3  # Don't store memories below this (rating < 3/10)
 
 # Scoring weights for memory retrieval (must sum to 1.0)
-# Prioritizes semantic relevance and importance over recency
-# NOTE: Access weight is 0.0 - recency is now handled by the Warmth Cache system
-# at the application layer (see semantic_memory.py WarmthCache)
-MEMORY_SEMANTIC_WEIGHT = 0.65  # Semantic similarity to query (boosted - semantic is king)
+# Prioritizes semantic relevance and importance over recency.
+# Session-scoped recency is handled by the Warmth Cache (see semantic_memory.py).
+MEMORY_SEMANTIC_WEIGHT = 0.65  # Semantic similarity to query (primary signal)
 MEMORY_IMPORTANCE_WEIGHT = 0.25  # Memory importance score (value-aware retrieval)
 MEMORY_FRESHNESS_WEIGHT = 0.10  # Recency of memory source (tie-breaker)
-MEMORY_ACCESS_WEIGHT = 0.00  # DEPRECATED: Handled by Warmth Cache at application layer
 
 # -----------------------------------------------------------------------------
 # Memory Warmth Cache System
@@ -179,11 +178,15 @@ MEMORY_ACCESS_WEIGHT = 0.00  # DEPRECATED: Handled by Warmth Cache at applicatio
 #    - Example: Retrieve "won 11 awards" → pre-warm "developed by Sandfall"
 #
 # Both decay each turn, creating a natural conversational memory window.
+#
+# Warmth is applied MULTIPLICATIVELY: adjusted = base * (1 + warmth).
+# This ensures low-relevance warm memories cannot outrank high-relevance cold ones.
+# A warmth of 0.25 gives a 25% boost proportional to base relevance score.
 WARMTH_RETRIEVAL_INITIAL = 0.15     # Boost for directly retrieved memories
 WARMTH_RETRIEVAL_DECAY = 0.6        # Per-turn decay multiplier (4-turn lifespan)
 WARMTH_TOPIC_INITIAL = 0.10         # Boost for associated memories
 WARMTH_TOPIC_DECAY = 0.5            # Per-turn decay multiplier (3-turn lifespan)
-WARMTH_CAP = 0.20                   # Maximum combined warmth boost
+WARMTH_CAP = 0.40                   # Maximum combined warmth factor (40% max boost)
 WARMTH_TOPIC_SIMILARITY_THRESHOLD = 0.5   # Min similarity for topic association
 WARMTH_TOPIC_MAX_EXPANSION = 20     # Cap on topic-warm memories per turn
 

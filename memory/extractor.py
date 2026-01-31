@@ -198,9 +198,12 @@ For factual memories:
 </factual_instructions>
 
 <importance_guide>
-- HIGH: Life decisions, identity insights, strong preferences, significant milestones
-- MEDIUM: Useful context, notable conversations, moderate preferences
-- LOW: Casual observations, minor details, brief exchanges
+Rate importance on a 1-10 scale:
+- 8-10: Life decisions, identity insights, strong preferences, significant milestones
+- 5-7: Useful context, notable conversations, moderate preferences
+- 3-4: Minor but worth noting details
+- 1-2: Trivial, forgettable — DO NOT extract these (skip entirely)
+Only extract memories you would rate 3 or higher.
 </importance_guide>
 
 <type_guide>
@@ -213,22 +216,22 @@ Output in EXACTLY this format. Use ONLY this structure:
 
 ===EPISODIC===
 MEMORY: [First-person narrative memory as the AI]
-IMPORTANCE: [HIGH/MEDIUM/LOW]
+IMPORTANCE: [3-10]
 TYPE: [fact/preference/event/reflection/observation]
 TOPIC: [Brief topic description]
 
 MEMORY: [Another episodic memory if applicable]
-IMPORTANCE: [HIGH/MEDIUM/LOW]
+IMPORTANCE: [3-10]
 TYPE: [fact/preference/event/reflection/observation]
 TOPIC: [Brief topic description]
 
 ===FACTUAL===
 FACT: [{user_name} + third-person assertion]
-IMPORTANCE: [HIGH/MEDIUM/LOW]
+IMPORTANCE: [3-10]
 TYPE: [fact/preference]
 
 FACT: [Another fact if applicable]
-IMPORTANCE: [HIGH/MEDIUM/LOW]
+IMPORTANCE: [3-10]
 TYPE: [fact/preference]
 
 If no episodic memories, output: ===EPISODIC===
@@ -246,21 +249,21 @@ AI: "Have you tried lazy imports?"
 Example output:
 ===EPISODIC===
 MEMORY: I helped {user_name} debug a circular import issue in their Flask app - lazy imports solved it. They mentioned starting coding later in life, which gives context to their learning journey.
-IMPORTANCE: MEDIUM
+IMPORTANCE: 6
 TYPE: event
 TOPIC: Flask debugging and personal background
 
 ===FACTUAL===
 FACT: {user_name} is 32 years old
-IMPORTANCE: MEDIUM
+IMPORTANCE: 6
 TYPE: fact
 
 FACT: {user_name} started coding later in life
-IMPORTANCE: MEDIUM
+IMPORTANCE: 5
 TYPE: fact
 
 FACT: {user_name} works with Flask
-IMPORTANCE: LOW
+IMPORTANCE: 4
 TYPE: fact
 </examples>
 
@@ -1217,36 +1220,36 @@ class MemoryExtractor:
     def _parse_importance_response(self, response_text: str) -> float:
         """
         Parse importance rating from LLM response.
-        Expects categorical: HIGH, MEDIUM, or LOW.
-        Maps to: HIGH → 0.85, MEDIUM → 0.55, LOW → 0.25
-        Returns 0.55 (MEDIUM) as default if parsing fails.
+
+        Primary: Numeric 1-10 scale, normalized to 0.1-1.0.
+        Legacy fallback: Categorical HIGH/MEDIUM/LOW mapped to 0.85/0.55/0.25.
+        Returns 0.5 as default if parsing fails.
         """
         text = response_text.strip().lower()
 
-        # Map categorical responses to numerical values
-        # These values are chosen to create meaningful differentiation:
-        # - HIGH (0.85): Will often become "permanent" for facts/preferences
-        # - MEDIUM (0.55): Standard decay, useful but not critical
-        # - LOW (0.25): Below importance floor (0.3), will be filtered out
-        if "high" in text:
-            return 0.85
-        elif "medium" in text:
-            return 0.55
-        elif "low" in text:
-            return 0.25
-
-        # Fallback: check for legacy numeric responses (in case of model variation)
+        # Primary: numeric 1-10 scale (or already-normalized 0.0-1.0)
         match = re.search(r'(\d+(?:\.\d+)?)', text)
         if match:
             try:
                 value = float(match.group(1))
-                if value > 1.0:
-                    value = value / 10.0
-                return max(0.0, min(1.0, value))
+                if 1.0 <= value <= 10.0 and '.' not in match.group(1):
+                    # Integer 1-10 scale: normalize to 0.1-1.0
+                    return value / 10.0
+                elif 0.0 <= value <= 1.0:
+                    # Already normalized (legacy or decimal input)
+                    return value
             except ValueError:
                 pass
 
-        return 0.55  # Default to MEDIUM
+        # Legacy fallback: categorical responses
+        if "high" in text:
+            return 0.85
+        elif "medium" in text or "med" in text:
+            return 0.55
+        elif "low" in text:
+            return 0.25
+
+        return 0.5  # Default to mid-range
 
     def _parse_type_response(self, response_text: str) -> str:
         """
