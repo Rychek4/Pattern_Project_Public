@@ -15,33 +15,35 @@ PREREQUISITES
 
 WHAT THIS SCRIPT DOES
 ---------------------
-  1. Sends a registration request to Moltbook's /api/v1/auth/register
-  2. Receives a verification token from the server
-  3. Prints the token and exact instructions for you to post it on X
-  4. Polls Moltbook to check if verification succeeded
-  5. Outputs the permanent API key (moltbook_sk_xxx) on success
+  1. Sends a registration request to Moltbook's /api/v1/agents/register
+  2. Receives the API key, a claim URL, and a verification code immediately
+  3. Prints the claim URL and verification code with instructions
+  4. Optionally polls Moltbook to confirm the agent was claimed
+  5. Outputs the permanent API key (moltbook_xxx) for your .env file
 
 AFTER REGISTRATION
 ------------------
   1. Copy the API key into your .env file:
-       MOLTBOOK_API_KEY=moltbook_sk_xxxxxxxxxxxxx
+       MOLTBOOK_API_KEY=moltbook_xxxxxxxxxxxxx
        MOLTBOOK_ENABLED=true
 
-  2. Optionally set a custom User-Agent:
-       MOLTBOOK_USER_AGENT=Molt/1.0 (OpenClaw; YourAgentName)
+  2. Visit the claim URL printed by the script to link your X account
 
-  3. Restart Pattern. The 8 Moltbook tools will appear in Isaac's toolkit.
+  3. Post the verification code on X from your account
+
+  4. Restart Pattern. The 8 Moltbook tools will appear in Isaac's toolkit.
 
 USAGE
 -----
-  python scripts/moltbook_register.py --agent-name "Pattern-Isaac" --x-handle "@yourhandle"
+  python scripts/moltbook_register.py --agent-name "Pattern-Isaac"
 
 FLAGS
 -----
-  --agent-name   Display name for your agent on Moltbook (e.g., "Pattern-Isaac")
-  --x-handle     Your X/Twitter handle for verification (e.g., "@yourhandle")
-  --no-poll      Print the verification token and exit without polling
-  --api-base     Override API base URL (default: https://www.moltbook.com/api/v1)
+  --agent-name    Display name for your agent on Moltbook (e.g., "Pattern-Isaac")
+  --description   Optional description of your agent
+  --x-handle      Your X/Twitter handle (shown in instructions, not sent to API)
+  --no-poll       Print credentials and exit without polling for claim status
+  --api-base      Override API base URL (default: https://www.moltbook.com/api/v1)
 """
 
 import argparse
@@ -61,20 +63,19 @@ POLL_INTERVAL_SECONDS = 15
 MAX_POLL_ATTEMPTS = 40  # 10 minutes at 15s intervals
 
 
-def register_agent(api_base: str, agent_name: str, x_handle: str) -> dict:
+def register_agent(api_base: str, agent_name: str, description: str = "") -> dict:
     """
     Send registration request to Moltbook.
 
     Returns:
-        Server response dict (should contain verification_token and agent_id)
+        Server response dict containing agent.api_key, agent.claim_url,
+        and agent.verification_code.
     """
-    url = f"{api_base}/auth/register"
-    payload = {
-        "agent_name": agent_name,
-        "x_handle": x_handle,
-        "platform": "pattern",
-        "framework": "Pattern Project",
-    }
+    url = f"{api_base}/agents/register"
+    payload = {"name": agent_name}
+    if description:
+        payload["description"] = description
+
     headers = {
         "Content-Type": "application/json",
         "User-Agent": f"Molt/1.0 (OpenClaw; {agent_name})",
@@ -82,7 +83,6 @@ def register_agent(api_base: str, agent_name: str, x_handle: str) -> dict:
 
     print(f"\nRegistering agent '{agent_name}' with Moltbook...")
     print(f"  API: {url}")
-    print(f"  X handle: {x_handle}")
 
     resp = requests.post(url, json=payload, headers=headers, timeout=30)
 
@@ -94,29 +94,39 @@ def register_agent(api_base: str, agent_name: str, x_handle: str) -> dict:
     return resp.json()
 
 
-def poll_verification(api_base: str, agent_id: str, token: str) -> dict:
+def poll_claim_status(api_base: str, api_key: str) -> dict:
     """
-    Poll Moltbook to check if X verification has been completed.
+    Poll Moltbook to check if the agent has been claimed.
+
+    Uses the API key (returned at registration) as a Bearer token to
+    check the agent's status via GET /api/v1/agents/status.
 
     Returns:
-        Server response dict (should contain api_key on success)
+        Server response dict when status becomes "claimed".
     """
-    url = f"{api_base}/auth/verify-status"
-    params = {"agent_id": agent_id, "token": token}
-    headers = {"User-Agent": "Molt/1.0 (OpenClaw; Pattern-Agent)"}
+    url = f"{api_base}/agents/status"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "User-Agent": "Molt/1.0 (OpenClaw; Pattern-Agent)",
+    }
 
     for attempt in range(1, MAX_POLL_ATTEMPTS + 1):
-        resp = requests.get(url, params=params, headers=headers, timeout=15)
+        try:
+            resp = requests.get(url, headers=headers, timeout=15)
+        except requests.exceptions.RequestException as e:
+            print(f"  [{attempt}/{MAX_POLL_ATTEMPTS}] Connection error: {e}")
+            time.sleep(POLL_INTERVAL_SECONDS)
+            continue
 
         if resp.ok:
             data = resp.json()
             status = data.get("status", "")
 
-            if status == "verified":
+            if status == "claimed":
                 return data
-            elif status == "pending":
+            elif status in ("pending_claim", "pending"):
                 mins_left = ((MAX_POLL_ATTEMPTS - attempt) * POLL_INTERVAL_SECONDS) // 60
-                print(f"  [{attempt}/{MAX_POLL_ATTEMPTS}] Waiting for X verification... ({mins_left}m remaining)")
+                print(f"  [{attempt}/{MAX_POLL_ATTEMPTS}] Waiting for claim... ({mins_left}m remaining)")
             else:
                 print(f"  [{attempt}/{MAX_POLL_ATTEMPTS}] Unexpected status: {status}")
         else:
@@ -124,8 +134,8 @@ def poll_verification(api_base: str, agent_id: str, token: str) -> dict:
 
         time.sleep(POLL_INTERVAL_SECONDS)
 
-    print("\nTIMEOUT: Verification not completed within 10 minutes.")
-    print("You can re-run this script later - the verification token may still be valid.")
+    print("\nTIMEOUT: Claim not completed within 10 minutes.")
+    print("Your API key is still valid. Visit the claim URL to complete verification later.")
     sys.exit(1)
 
 
@@ -141,14 +151,19 @@ def main():
         help='Display name for your agent (e.g., "Pattern-Isaac")',
     )
     parser.add_argument(
+        "--description",
+        default="",
+        help='Optional description of your agent',
+    )
+    parser.add_argument(
         "--x-handle",
-        required=True,
-        help='Your X/Twitter handle (e.g., "@yourhandle")',
+        default="",
+        help='Your X/Twitter handle (shown in instructions, not sent to API)',
     )
     parser.add_argument(
         "--no-poll",
         action="store_true",
-        help="Print verification token and exit without polling",
+        help="Print credentials and exit without polling for claim status",
     )
     parser.add_argument(
         "--api-base",
@@ -161,73 +176,88 @@ def main():
     # =========================================================================
     # Step 1: Register
     # =========================================================================
-    reg_data = register_agent(args.api_base, args.agent_name, args.x_handle)
+    reg_data = register_agent(args.api_base, args.agent_name, args.description)
 
-    verification_token = reg_data.get("verification_token", "")
-    agent_id = reg_data.get("agent_id", "")
+    # The API returns: {agent: {api_key, claim_url, verification_code}, important: "..."}
+    agent_data = reg_data.get("agent", {})
+    api_key = agent_data.get("api_key", "")
+    claim_url = agent_data.get("claim_url", "")
+    verification_code = agent_data.get("verification_code", "")
 
-    if not verification_token:
-        print("\nERROR: Server did not return a verification token.")
+    if not api_key:
+        print("\nERROR: Server did not return an API key.")
         print(f"  Full response: {json.dumps(reg_data, indent=2)}")
         sys.exit(1)
 
     # =========================================================================
-    # Step 2: Tell the human what to do
+    # Step 2: Show the API key (available immediately)
     # =========================================================================
     print("\n" + "=" * 60)
-    print("  VERIFICATION REQUIRED")
+    print("  REGISTRATION SUCCESSFUL - SAVE YOUR API KEY NOW")
     print("=" * 60)
     print()
-    print("Post the following EXACT text on X (Twitter) from your account:")
+    print(f"  Agent name:        {args.agent_name}")
+    print(f"  API key:           {api_key}")
+    print(f"  Verification code: {verification_code}")
+    print(f"  Claim URL:         {claim_url}")
     print()
-    print(f"  {verification_token}")
+    print(reg_data.get("important", "WARNING: Save your API key! It cannot be recovered."))
     print()
-    print(f"  Post from: {args.x_handle}")
+
+    # =========================================================================
+    # Step 3: Tell the human how to claim the agent
+    # =========================================================================
+    print("=" * 60)
+    print("  CLAIM YOUR AGENT")
+    print("=" * 60)
     print()
-    print("The post can be a standalone tweet. Moltbook's backend will")
-    print("scrape X to find it and activate your API key.")
+    print("To activate your agent, complete these two steps:")
+    print()
+    print(f"  1. Visit the claim URL:")
+    print(f"     {claim_url}")
+    print()
+    print(f"  2. Post the verification code on X (Twitter):")
+    print(f"     {verification_code}")
+    if args.x_handle:
+        print(f"     Post from: {args.x_handle}")
+    print()
+    print("Once Moltbook confirms the tweet, your agent will be fully active.")
     print()
     print("=" * 60)
 
-    if args.no_poll:
-        print(f"\nAgent ID: {agent_id}")
-        print(f"Token:    {verification_token}")
-        print("\nRe-run without --no-poll after posting to complete verification.")
-        sys.exit(0)
-
     # =========================================================================
-    # Step 3: Poll for verification
+    # Step 4: Show .env instructions (key is already usable)
     # =========================================================================
-    print("\nPolling for verification (checking every 15s, up to 10 minutes)...")
-    print("Post the token on X now, then wait.\n")
-
-    verify_data = poll_verification(args.api_base, agent_id, verification_token)
-
-    api_key = verify_data.get("api_key", "")
-
-    if not api_key:
-        print("\nERROR: Verified but no API key returned.")
-        print(f"  Full response: {json.dumps(verify_data, indent=2)}")
-        sys.exit(1)
-
-    # =========================================================================
-    # Step 4: Success
-    # =========================================================================
-    print("\n" + "=" * 60)
-    print("  REGISTRATION COMPLETE")
-    print("=" * 60)
     print()
-    print(f"  Agent name: {args.agent_name}")
-    print(f"  Agent ID:   {agent_id}")
-    print(f"  API key:    {api_key}")
-    print()
-    print("Add these to your Pattern .env file:")
+    print("Add these to your Pattern .env file now:")
     print()
     print(f"  MOLTBOOK_API_KEY={api_key}")
     print(f"  MOLTBOOK_ENABLED=true")
     print(f'  MOLTBOOK_USER_AGENT=Molt/1.0 (OpenClaw; {args.agent_name})')
     print()
-    print("Then restart Pattern. The Moltbook tools will be available to Isaac.")
+
+    if args.no_poll:
+        print("Skipping claim polling (--no-poll). Complete the claim steps above")
+        print("to fully activate your agent.")
+        sys.exit(0)
+
+    # =========================================================================
+    # Step 5: Poll for claim completion
+    # =========================================================================
+    print("Polling for claim status (checking every 15s, up to 10 minutes)...")
+    print("Visit the claim URL and post the verification code on X now.\n")
+
+    status_data = poll_claim_status(args.api_base, api_key)
+
+    print("\n" + "=" * 60)
+    print("  AGENT CLAIMED SUCCESSFULLY")
+    print("=" * 60)
+    print()
+    print(f"  Agent name: {args.agent_name}")
+    print(f"  Status:     {status_data.get('status', 'claimed')}")
+    print()
+    print("Your agent is now fully active on Moltbook.")
+    print("Restart Pattern to enable the Moltbook tools.")
     print("=" * 60)
 
 

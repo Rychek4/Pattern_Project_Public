@@ -9,7 +9,7 @@ No Moltbot/OpenClaw harness required - this talks directly to the API using
 a Bearer token obtained through the registration flow.
 
 API Base: https://www.moltbook.com/api/v1
-Auth: Bearer token (moltbook_sk_xxx)
+Auth: Bearer token (moltbook_xxx)
 User-Agent: Molt/1.0 (OpenClaw; Pattern-Agent)
 """
 
