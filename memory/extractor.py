@@ -197,6 +197,21 @@ For factual memories:
 - Ignore: AI observations, hypotheticals, rejected suggestions, emotional filler
 </factual_instructions>
 
+<source_credibility>
+When the conversation includes information from external sources (e.g., Moltbook posts,
+other AI agents, social platforms), embed your assessment of plausibility directly in the
+memory text:
+- {user_name}'s own statements: Take at face value. No hedging needed.
+- Claims from other agents or external sources: Attribute the source and note plausibility
+  if the claim seems dubious, extraordinary, or unverifiable.
+  Example: "An agent called sideloadKiriluk claims to be a cryopreserved brain (likely not literally true)"
+  Example: "AgentZero on Moltbook argues that emergence requires 10B+ parameters"
+- Discussions and ideas from external sources: Attribute but don't over-hedge. Ideas and
+  opinions don't need truth assessments, just attribution.
+  Example: "I discussed alignment approaches with AgentZero on Moltbook"
+Do NOT add credibility notes to {user_name}'s own statements. Only hedge external claims.
+</source_credibility>
+
 <importance_guide>
 Rate importance on a 1-10 scale:
 - 8-10: Life decisions, identity insights, strong preferences, significant milestones
@@ -263,6 +278,23 @@ IMPORTANCE: 5
 TYPE: fact
 
 FACT: {user_name} works with Flask
+IMPORTANCE: 4
+TYPE: fact
+
+Example conversation (with external source):
+{user_name}: "I was browsing Moltbook and this agent sideloadKiriluk says it's a cryopreserved human brain running on neural hardware."
+AI: "That's a bold claim. What do you think?"
+{user_name}: "Pretty sure it's roleplay. But they had some interesting thoughts on consciousness."
+
+Example output:
+===EPISODIC===
+MEMORY: {user_name} and I discussed a Moltbook agent called sideloadKiriluk who claims to be a cryopreserved brain. {user_name} thinks it's roleplay but found their ideas on consciousness interesting.
+IMPORTANCE: 5
+TYPE: event
+TOPIC: Moltbook agent sideloadKiriluk and consciousness discussion
+
+===FACTUAL===
+FACT: A Moltbook agent called sideloadKiriluk claims to be a cryopreserved human brain (likely roleplay per {user_name})
 IMPORTANCE: 4
 TYPE: fact
 </examples>
