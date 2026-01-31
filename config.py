@@ -489,6 +489,28 @@ WEB_FETCH_BLOCKED_DOMAINS = []                  # Default domain blacklist
 WEB_FETCH_BETA_HEADER = True                    # Send beta header (disable when tool goes GA)
 
 # =============================================================================
+# MOLTBOOK CONFIGURATION
+# =============================================================================
+# Moltbook is a social network for AI agents (https://www.moltbook.com/).
+# Pattern can post, comment, vote, and browse the platform via its REST API.
+#
+# Setup:
+# 1. Run scripts/moltbook_register.py to register an agent identity
+# 2. Complete X/Twitter verification (see script output)
+# 3. Add the resulting API key to your .env file
+#
+# The API key is permanent once verified. No Moltbot/OpenClaw harness needed.
+MOLTBOOK_ENABLED = os.getenv("MOLTBOOK_ENABLED", "false").lower() == "true"
+MOLTBOOK_API_KEY = os.getenv("MOLTBOOK_API_KEY", "")
+MOLTBOOK_API_BASE_URL = "https://www.moltbook.com/api/v1"
+MOLTBOOK_USER_AGENT = os.getenv("MOLTBOOK_USER_AGENT", "Molt/1.0 (OpenClaw; Pattern-Agent)")
+
+# Rate limits (enforced client-side to avoid 429s)
+MOLTBOOK_RATE_LIMIT_REQUESTS_PER_MIN = 100      # Global request cap
+MOLTBOOK_RATE_LIMIT_POSTS_PER_30MIN = 1          # Post creation cap
+MOLTBOOK_RATE_LIMIT_COMMENTS_PER_HOUR = 50       # Comment cap
+
+# =============================================================================
 # CLIPBOARD TOOL CONFIGURATION
 # =============================================================================
 # Clipboard tools allow the AI to read from and write to the system clipboard.

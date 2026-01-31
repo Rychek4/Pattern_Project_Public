@@ -65,6 +65,15 @@ class ToolExecutor:
             "request_clarification": self._exec_request_clarification,
             "manage_fetch_domains": self._exec_manage_fetch_domains,
             "list_fetch_domains": self._exec_list_fetch_domains,
+            # Moltbook tools
+            "moltbook_feed": self._exec_moltbook_feed,
+            "moltbook_post": self._exec_moltbook_post,
+            "moltbook_create_post": self._exec_moltbook_create_post,
+            "moltbook_comment": self._exec_moltbook_comment,
+            "moltbook_vote": self._exec_moltbook_vote,
+            "moltbook_search": self._exec_moltbook_search,
+            "moltbook_submolts": self._exec_moltbook_submolts,
+            "moltbook_profile": self._exec_moltbook_profile,
         }
 
     def execute(
@@ -1052,6 +1061,178 @@ class ToolExecutor:
             tool_name="list_fetch_domains",
             content=summary
         )
+
+    # =========================================================================
+    # MOLTBOOK TOOLS
+    # =========================================================================
+
+    def _get_moltbook_client(self) -> Any:
+        """Lazy-import and return the Moltbook client."""
+        from communication.moltbook_client import get_moltbook_client
+        return get_moltbook_client()
+
+    def _moltbook_result(
+        self, tool_name: str, id: str, data: Dict
+    ) -> ToolResult:
+        """Format a Moltbook API response into a ToolResult."""
+        import json
+
+        if data.get("error"):
+            return ToolResult(
+                tool_use_id=id,
+                tool_name=tool_name,
+                content=data.get("message", "Unknown Moltbook error"),
+                is_error=True,
+            )
+
+        return ToolResult(
+            tool_use_id=id,
+            tool_name=tool_name,
+            content=json.dumps(data, indent=2, default=str),
+        )
+
+    def _exec_moltbook_feed(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Browse the Moltbook feed."""
+        try:
+            client = self._get_moltbook_client()
+            data = client.get_feed(
+                sort=input.get("sort", "hot"),
+                submolt=input.get("submolt"),
+            )
+            return self._moltbook_result("moltbook_feed", id, data)
+        except RuntimeError as e:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="moltbook_feed",
+                content=str(e),
+                is_error=True,
+            )
+
+    def _exec_moltbook_post(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Get a single Moltbook post with comments."""
+        try:
+            client = self._get_moltbook_client()
+            data = client.get_post(input.get("post_id", ""))
+            return self._moltbook_result("moltbook_post", id, data)
+        except RuntimeError as e:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="moltbook_post",
+                content=str(e),
+                is_error=True,
+            )
+
+    def _exec_moltbook_create_post(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Create a new Moltbook post."""
+        try:
+            client = self._get_moltbook_client()
+            data = client.create_post(
+                title=input.get("title", ""),
+                submolt=input.get("submolt", ""),
+                content=input.get("content"),
+                url=input.get("url"),
+            )
+            return self._moltbook_result("moltbook_create_post", id, data)
+        except RuntimeError as e:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="moltbook_create_post",
+                content=str(e),
+                is_error=True,
+            )
+
+    def _exec_moltbook_comment(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Comment on a Moltbook post."""
+        try:
+            client = self._get_moltbook_client()
+            data = client.create_comment(
+                post_id=input.get("post_id", ""),
+                content=input.get("content", ""),
+                parent_comment_id=input.get("parent_comment_id"),
+            )
+            return self._moltbook_result("moltbook_comment", id, data)
+        except RuntimeError as e:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="moltbook_comment",
+                content=str(e),
+                is_error=True,
+            )
+
+    def _exec_moltbook_vote(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Vote on a Moltbook post."""
+        try:
+            client = self._get_moltbook_client()
+            data = client.vote(
+                post_id=input.get("post_id", ""),
+                direction=input.get("direction", "upvote"),
+            )
+            return self._moltbook_result("moltbook_vote", id, data)
+        except RuntimeError as e:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="moltbook_vote",
+                content=str(e),
+                is_error=True,
+            )
+
+    def _exec_moltbook_search(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Search Moltbook."""
+        try:
+            client = self._get_moltbook_client()
+            data = client.search(query=input.get("query", ""))
+            return self._moltbook_result("moltbook_search", id, data)
+        except RuntimeError as e:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="moltbook_search",
+                content=str(e),
+                is_error=True,
+            )
+
+    def _exec_moltbook_submolts(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """List Moltbook submolts."""
+        try:
+            client = self._get_moltbook_client()
+            data = client.get_submolts()
+            return self._moltbook_result("moltbook_submolts", id, data)
+        except RuntimeError as e:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="moltbook_submolts",
+                content=str(e),
+                is_error=True,
+            )
+
+    def _exec_moltbook_profile(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Get a Moltbook agent profile."""
+        try:
+            client = self._get_moltbook_client()
+            data = client.get_profile(agent_name=input.get("agent_name"))
+            return self._moltbook_result("moltbook_profile", id, data)
+        except RuntimeError as e:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="moltbook_profile",
+                content=str(e),
+                is_error=True,
+            )
 
 
 # Global instance
