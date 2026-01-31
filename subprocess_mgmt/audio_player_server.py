@@ -61,19 +61,16 @@ try:
     from elevenlabs import stream
     from elevenlabs.client import ElevenLabs
     _elevenlabs_available = True
-    log_server("✓ elevenlabs package available")
 except ImportError:
     log_server("✗ elevenlabs package NOT installed - TTS will not work", "error")
 
 try:
     import sounddevice  # elevenlabs uses this for streaming playback
     _audio_available = True
-    log_server("✓ sounddevice audio backend available")
 except ImportError:
     try:
         import pyaudio
         _audio_available = True
-        log_server("✓ pyaudio audio backend available")
     except ImportError:
         log_server("✗ No audio backend available - install sounddevice or pyaudio", "error")
 
@@ -89,7 +86,6 @@ def _get_client() -> "ElevenLabs | None":
         log_server("Cannot create client - Eleven_Labs_API env var not set", "error")
         return None
 
-    log_server(f"Creating ElevenLabs client (API key: {api_key[:8]}...)")
     return ElevenLabs(api_key=api_key)
 
 
@@ -101,29 +97,22 @@ def _play_audio_stream(text: str, voice_id: str, model: str):
     """
     global _stop_requested
 
-    text_preview = text[:50] + "..." if len(text) > 50 else text
-    log_server(f"Starting audio stream for: '{text_preview}'")
-    log_server(f"Voice: {voice_id}, Model: {model}")
-
     try:
         client = _get_client()
         if not client:
             log_server("Could not create ElevenLabs client - aborting", "error")
             return
 
-        log_server("Calling ElevenLabs API to generate audio...")
         # Generate streaming audio (ElevenLabs SDK 1.0+ API)
         audio_stream = client.text_to_speech.stream(
             text=text,
             voice_id=voice_id,
             model_id=model,
         )
-        log_server("Got audio stream from ElevenLabs, starting playback...")
 
         # Use elevenlabs built-in streaming playback
         # This handles chunked streaming automatically
         stream(audio_stream)
-        log_server("Audio playback completed successfully")
 
     except Exception as e:
         log_server(f"Audio playback failed: {type(e).__name__}: {e}", "error")
@@ -178,8 +167,6 @@ def play_audio():
     """
     global _current_playback_thread
 
-    log_server("Received /play_audio request")
-
     if not _elevenlabs_available:
         log_server("Rejecting request - elevenlabs not available", "error")
         return jsonify({
@@ -198,7 +185,6 @@ def play_audio():
     text = data.get('text', '')
 
     if not text:
-        log_server("Rejecting request - no text provided", "warning")
         return jsonify({
             "success": False,
             "error": "No text provided"
@@ -207,10 +193,6 @@ def play_audio():
     # Get voice settings with defaults
     voice_id = data.get('voice_id', 'MKHH3pSZhHPPzypDhMoU')
     model = data.get('model', 'eleven_turbo_v2_5')
-
-    text_preview = text[:50] + "..." if len(text) > 50 else text
-    log_server(f"Starting TTS for {len(text)} chars: '{text_preview}'")
-    log_server(f"Voice: {voice_id}, Model: {model}")
 
     with _playback_lock:
         # Start playback in background thread
@@ -221,7 +203,6 @@ def play_audio():
             daemon=True
         )
         _current_playback_thread.start()
-        log_server(f"Playback thread started: {_current_playback_thread.name}")
 
     return jsonify({
         "success": True,
@@ -242,9 +223,4 @@ def stop_audio():
 
 if __name__ == '__main__':
     port = int(os.getenv('AUDIO_PLAYER_PORT', '5003'))
-    print(f"Starting Audio Player Server on port {port}")
-    print(f"ElevenLabs available: {_elevenlabs_available}")
-    print(f"Audio backend available: {_audio_available}")
-    print(f"API key set: {bool(os.getenv('Eleven_Labs_API', ''))}")
-
     app.run(host='127.0.0.1', port=port, debug=False, threaded=True)

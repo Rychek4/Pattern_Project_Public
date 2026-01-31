@@ -1221,12 +1221,7 @@ class ChatWindow(QMainWindow):
             from core.user_settings import is_tts_enabled, get_tts_voice_id
 
             if not is_tts_enabled():
-                log_info("TTS skipped - not enabled", prefix="🔊")
                 return
-
-            # Truncate text for logging
-            preview = text[:50] + "..." if len(text) > 50 else text
-            log_info(f"TTS triggered for: {preview}", prefix="🔊")
 
             # Play TTS (runs in background thread internally)
             try:
@@ -2666,7 +2661,7 @@ class SettingsDialog(QDialog):
         self._user_settings.tts_enabled = self.tts_enabled_check.isChecked()
         self._user_settings.tts_voice_id = self.voice_id_input.text().strip()
 
-        log_info(f"Settings applied - TTS: {self._user_settings.tts_enabled}, Voice: {self._user_settings.tts_voice_id}", prefix="⚙️")
+        pass  # Settings applied
 
 
 # Global GUI instance

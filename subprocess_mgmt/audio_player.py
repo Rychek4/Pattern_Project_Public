@@ -8,7 +8,7 @@ from typing import Optional
 
 import config
 from subprocess_mgmt.manager import ProcessConfig, get_subprocess_manager
-from core.logger import log_info, log_warning
+from core.logger import log_warning
 
 
 # Path to the audio player server script
@@ -60,10 +60,7 @@ def register_audio_player(
     manager = get_subprocess_manager()
     manager.register(proc_config)
 
-    if enabled:
-        log_info(f"Audio player registered on port {port}", prefix="🔊")
-    else:
-        log_info("Audio player: DISABLED (TTS not enabled)", prefix="🔊")
+    pass  # Registration complete
 
 
 def start_audio_player() -> bool:
@@ -104,16 +101,9 @@ def play_tts(text: str, voice_id: Optional[str] = None) -> bool:
         "model": config.ELEVENLABS_MODEL
     }
 
-    text_preview = text[:50] + "..." if len(text) > 50 else text
-    log_info(f"TTS client: sending to {url}", prefix="🔊")
-    log_info(f"TTS client: text='{text_preview}', voice={effective_voice_id}", prefix="🔊")
-
     try:
         response = requests.post(url, json=payload, timeout=5)
-        log_info(f"TTS client: got response {response.status_code}", prefix="🔊")
         if response.status_code == 200:
-            response_data = response.json()
-            log_info(f"TTS client: success - {response_data}", prefix="🔊")
             return True
         else:
             log_warning(f"TTS client: request failed ({response.status_code}): {response.text}")

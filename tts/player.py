@@ -24,7 +24,7 @@ from ctypes import c_double
 import numpy as np
 
 import config
-from core.logger import log_info, log_warning, log_error
+from core.logger import log_warning, log_error
 
 
 # =============================================================================
@@ -181,7 +181,7 @@ def _worker_process(audio_queue: Queue, heartbeat: Value, shutdown_event):
             channels=PYGAME_CHANNELS,
             buffer=PYGAME_BUFFER
         )
-        log_info("Pygame mixer initialized in worker process", prefix="[TTS-Worker]")
+        pass  # Mixer initialized
     except Exception as e:
         log_error(f"Failed to initialize pygame mixer: {e}", prefix="[TTS-Worker]")
         return
@@ -254,7 +254,7 @@ def _worker_process(audio_queue: Queue, heartbeat: Value, shutdown_event):
         pygame.mixer.quit()
     except:
         pass
-    log_info("Worker process shutdown complete", prefix="[TTS-Worker]")
+    pass  # Worker shutdown complete
 
 
 # =============================================================================
@@ -359,12 +359,10 @@ class TTSPlayer:
                     daemon=True
                 )
                 self._worker_process.start()
-                log_info("TTS worker process started", prefix="[TTS]")
 
                 # Start watchdog
                 self._watchdog = WorkerWatchdog(self)
                 self._watchdog.start()
-                log_info("TTS watchdog started", prefix="[TTS]")
 
                 self._initialized = True
                 return True
@@ -402,7 +400,6 @@ class TTSPlayer:
                 daemon=True
             )
             self._worker_process.start()
-            log_info("TTS worker restarted", prefix="[TTS]")
 
     def _get_client(self):
         """Lazy-load ElevenLabs client."""
@@ -412,7 +409,6 @@ class TTSPlayer:
                 try:
                     from elevenlabs.client import ElevenLabs
                     self._client = ElevenLabs(api_key=api_key)
-                    log_info("ElevenLabs client initialized", prefix="[TTS]")
                 except ImportError:
                     log_error("elevenlabs package not installed", prefix="[TTS]")
             else:
@@ -442,7 +438,6 @@ class TTSPlayer:
         # Sanitize text: remove *action* blocks before speaking
         sanitized_text = _sanitize_for_tts(text)
         if not sanitized_text:
-            log_info("TTS skipped: no text after removing actions", prefix="[TTS]")
             return True  # Not an error, just nothing to say
 
         # Run API call and audio processing in background thread
@@ -458,9 +453,6 @@ class TTSPlayer:
     def _fetch_and_queue_audio(self, text: str, voice_id: str):
         """Background thread: Fetch audio from ElevenLabs and queue for playback."""
         try:
-            preview = text[:50] + "..." if len(text) > 50 else text
-            log_info(f"TTS fetching: {preview}", prefix="[TTS]")
-
             # Get MP3 audio from ElevenLabs (PCM formats require Pro tier)
             from elevenlabs import VoiceSettings
             audio_generator = self._client.text_to_speech.convert(
@@ -485,7 +477,6 @@ class TTSPlayer:
 
             # Queue MP3 directly for playback (pygame handles MP3 natively)
             self._audio_queue.put(mp3_data)
-            log_info("TTS audio queued for playback", prefix="[TTS]")
 
         except Exception as e:
             log_error(f"TTS fetch/process failed: {e}", prefix="[TTS]")
@@ -538,9 +529,6 @@ class TTSPlayer:
 
     def _fetch_and_queue_pcm(self, text: str, voice_id: str, seq_num: int):
         """Background thread: Fetch PCM audio from ElevenLabs and queue for playback."""
-        preview = text[:40] + "..." if len(text) > 40 else text
-        log_info(f"TTS streaming: seq={seq_num}, {preview}", prefix="[TTS]")
-
         from elevenlabs import VoiceSettings
 
         # Use semaphore to limit concurrent API requests (ElevenLabs limit is 5)
@@ -624,9 +612,6 @@ class TTSPlayer:
 
                     if item is not None:
                         self._audio_queue.put(item)
-                        log_info(f"TTS released seq={self._next_expected_seq}", prefix="[TTS]")
-                    else:
-                        log_info(f"TTS skipped failed seq={self._next_expected_seq}", prefix="[TTS]")
 
                     self._next_expected_seq += 1
 
@@ -638,8 +623,6 @@ class TTSPlayer:
 
                 else:
                     # Still waiting for this sequence, and it hasn't timed out
-                    if audio_data is not None:
-                        log_info(f"TTS buffered seq={seq_num}, waiting for seq={self._next_expected_seq}", prefix="[TTS]")
                     break
 
     def stop(self):
@@ -692,7 +675,6 @@ class TTSPlayer:
                     self._worker_process.terminate()
 
             self._initialized = False
-            log_info("TTS system shutdown complete", prefix="[TTS]")
 
     @staticmethod
     def is_available() -> bool:
