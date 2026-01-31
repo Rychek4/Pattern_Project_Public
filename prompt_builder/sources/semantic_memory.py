@@ -287,14 +287,13 @@ class SemanticMemorySource(ContextSource):
 
         Pipeline:
         1. Decay all warmth scores (per-turn decay)
-        2. Over-fetch memories (2.4x limit) from both categories
-        3. Apply warmth boosts to results
-        4. Re-rank by adjusted scores
-        5. Filter by min_score on BASE score (warmth doesn't make irrelevant memories relevant)
-        6. Deduplicate
-        7. Take top N per category
-        8. Update retrieval warmth for returned memories
-        9. Expand topic warmth to associated memories
+        2. Over-fetch memories (2.4x limit) from both categories (no floor — applied later)
+        3. Apply warmth boosts (multiplicative) and re-rank by adjusted scores
+        4. Filter by min_score on ADJUSTED score (warmth can rescue borderline memories)
+        5. Deduplicate (using adjusted scores to preserve warmth ranking)
+        6. Take top N per category
+        7. Update retrieval warmth for returned memories
+        8. Expand topic warmth to associated memories
         """
         import config
         vector_store = get_vector_store()
@@ -306,62 +305,55 @@ class SemanticMemorySource(ContextSource):
         overfetch_episodic = int(self.max_episodic * MEMORY_OVERFETCH_MULTIPLIER)
         overfetch_factual = int(self.max_factual * MEMORY_OVERFETCH_MULTIPLIER)
 
-        # Step 2: Over-fetch from both categories
+        # Step 2: Over-fetch from both categories with NO floor.
+        # The relevance floor is applied AFTER warmth boosting (step 4) so that
+        # warm memories with base scores slightly below the floor can survive.
         episodic_results = vector_store.search(
             query=user_input,
             limit=overfetch_episodic,
             memory_category="episodic",
-            min_score=self.min_score
+            min_score=0.0
         )
 
         factual_results = vector_store.search(
             query=user_input,
             limit=overfetch_factual,
             memory_category="factual",
-            min_score=self.min_score
+            min_score=0.0
         )
 
-        # Step 3 & 4: Apply warmth boosts and prepare for re-ranking
+        # Step 3: Apply multiplicative warmth boosts and re-rank
+        # Returns 4-tuples: (result, warmth, entry, adjusted_score)
         episodic_with_warmth = self._apply_warmth_and_rerank(episodic_results)
         factual_with_warmth = self._apply_warmth_and_rerank(factual_results)
 
-        # Step 5: Filter by min_score on BASE score (already done by vector_store)
-        # The warmth boost doesn't lower the floor for relevance
+        # Step 4: Filter by min_score on ADJUSTED score (post-warmth)
+        episodic_with_warmth = [
+            t for t in episodic_with_warmth if t[3] >= self.min_score
+        ]
+        factual_with_warmth = [
+            t for t in factual_with_warmth if t[3] >= self.min_score
+        ]
 
-        # Step 6 & 7: Deduplicate and take top N per category
+        # Step 5: Deduplicate using adjusted scores to preserve warmth ranking
         if self.dedup_enabled:
-            episodic_with_warmth = self._deduplicate_results(
-                [r for r, _, _ in episodic_with_warmth]
-            )
-            factual_with_warmth = self._deduplicate_results(
-                [r for r, _, _ in factual_with_warmth]
-            )
-            # Convert back to tuples with warmth info
-            episodic_with_warmth = [
-                (r, self._warmth_cache.get_warmth(r.memory.id),
-                 self._warmth_cache.get_entry(r.memory.id))
-                for r in episodic_with_warmth
-            ]
-            factual_with_warmth = [
-                (r, self._warmth_cache.get_warmth(r.memory.id),
-                 self._warmth_cache.get_entry(r.memory.id))
-                for r in factual_with_warmth
-            ]
+            episodic_with_warmth = self._deduplicate_results(episodic_with_warmth)
+            factual_with_warmth = self._deduplicate_results(factual_with_warmth)
 
-        # Take top N after warmth-based re-ranking
+        # Step 6: Take top N after warmth-based re-ranking
         episodic_final = episodic_with_warmth[:self.max_episodic]
         factual_final = factual_with_warmth[:self.max_factual]
 
         # Extract just the results for formatting
-        episodic_results = [r for r, _, _ in episodic_final]
-        factual_results = [r for r, _, _ in factual_final]
+        episodic_results = [r for r, _, _, _ in episodic_final]
+        factual_results = [r for r, _, _, _ in factual_final]
         all_results = episodic_results + factual_results
 
-        # Step 8: Update retrieval warmth for returned memories
+        # Step 7: Update retrieval warmth for returned memories
         returned_ids = [r.memory.id for r in all_results]
         self._warmth_cache.set_retrieval_warmth(returned_ids)
 
-        # Step 9: Expand topic warmth to associated memories
+        # Step 8: Expand topic warmth to associated memories
         returned_memories = [r.memory for r in all_results]
         topic_warmed_count = self._warmth_cache.expand_topic_warmth(
             returned_memories,
@@ -375,6 +367,7 @@ class SemanticMemorySource(ContextSource):
             recall_data = []
             for r in all_results:
                 entry = self._warmth_cache.get_entry(r.memory.id)
+                warmth = self._warmth_cache.get_warmth(r.memory.id)
                 recall_data.append({
                     "content": r.memory.content,
                     "score": r.combined_score,
@@ -385,10 +378,10 @@ class SemanticMemorySource(ContextSource):
                     "memory_category": r.memory.memory_category,
                     "importance": r.memory.importance,
                     # Warmth info
-                    "warmth_boost": self._warmth_cache.get_warmth(r.memory.id),
+                    "warmth_boost": warmth,
                     "retrieval_warmth": entry.retrieval_warmth if entry else 0.0,
                     "topic_warmth": entry.topic_warmth if entry else 0.0,
-                    "adjusted_score": r.combined_score + self._warmth_cache.get_warmth(r.memory.id)
+                    "adjusted_score": r.combined_score * (1 + warmth)
                 })
             # Add warmth stats to the first entry for display
             if recall_data:
@@ -458,26 +451,31 @@ class SemanticMemorySource(ContextSource):
         results: List[MemorySearchResult]
     ) -> List[tuple]:
         """
-        Apply warmth boosts to results and re-rank by adjusted score.
+        Apply multiplicative warmth boosts to results and re-rank by adjusted score.
+
+        Warmth is applied as a multiplicative factor: adjusted = base * (1 + warmth).
+        This ensures that low-relevance warm memories cannot leap past high-relevance
+        cold memories. A warmth of 0.25 gives a 25% boost proportional to base score.
 
         Args:
             results: Original search results from vector store
 
         Returns:
-            List of (result, warmth_boost, warmth_entry) tuples sorted by adjusted score
+            List of (result, warmth_boost, warmth_entry, adjusted_score) tuples
+            sorted by adjusted score (descending)
         """
         results_with_warmth = []
         for result in results:
             warmth = self._warmth_cache.get_warmth(result.memory.id)
             entry = self._warmth_cache.get_entry(result.memory.id)
-            adjusted_score = result.combined_score + warmth
+            # Multiplicative boost: proportional to base relevance
+            adjusted_score = result.combined_score * (1 + warmth)
             results_with_warmth.append((result, warmth, entry, adjusted_score))
 
         # Sort by adjusted score (descending)
         results_with_warmth.sort(key=lambda x: x[3], reverse=True)
 
-        # Return without the adjusted_score (it was just for sorting)
-        return [(r, w, e) for r, w, e, _ in results_with_warmth]
+        return results_with_warmth
 
     def search(
         self,
@@ -506,8 +504,8 @@ class SemanticMemorySource(ContextSource):
 
     def _deduplicate_results(
         self,
-        results: List[MemorySearchResult]
-    ) -> List[MemorySearchResult]:
+        results_with_warmth: List[tuple]
+    ) -> List[tuple]:
         """
         Collapse near-identical memories to prevent redundant context.
 
@@ -516,29 +514,32 @@ class SemanticMemorySource(ContextSource):
         highest-scored version.
 
         Algorithm:
-            1. Sort by combined_score (highest first)
+            1. Sort by adjusted_score (highest first) — preserves warmth ranking
             2. For each result, check embedding similarity against kept results
             3. If similar to existing (>= threshold), skip it (it's a duplicate)
             4. Otherwise, keep it
 
         Args:
-            results: List of MemorySearchResult from search
+            results_with_warmth: List of (result, warmth, entry, adjusted_score) tuples
 
         Returns:
-            Deduplicated list with near-identical memories collapsed
+            Deduplicated list of tuples with near-identical memories collapsed
 
         Performance: O(n²) but n is small (typically 10-15 results)
         """
-        if not results:
-            return results
+        if not results_with_warmth:
+            return results_with_warmth
 
-        # Sort by score so we keep the best version of duplicates
-        sorted_results = sorted(results, key=lambda r: r.combined_score, reverse=True)
+        # Sort by adjusted_score so we keep the best version of duplicates
+        # (already sorted from _apply_warmth_and_rerank, but re-sort for safety)
+        sorted_results = sorted(results_with_warmth, key=lambda t: t[3], reverse=True)
 
-        kept: List[MemorySearchResult] = []
-        for result in sorted_results:
+        kept: List[tuple] = []
+        for item in sorted_results:
+            result = item[0]
             is_duplicate = False
-            for kept_result in kept:
+            for kept_item in kept:
+                kept_result = kept_item[0]
                 # Compare embeddings to detect semantic duplicates
                 similarity = cosine_similarity(
                     result.memory.embedding,
@@ -549,7 +550,7 @@ class SemanticMemorySource(ContextSource):
                     break
 
             if not is_duplicate:
-                kept.append(result)
+                kept.append(item)
 
         return kept
 

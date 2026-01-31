@@ -72,7 +72,6 @@ class MemorySearchResult:
     semantic_score: float
     importance_score: float
     freshness_score: float
-    access_score: float
     combined_score: float
 
 
@@ -87,30 +86,23 @@ class VectorStore:
     def __init__(
         self,
         embedding_dimensions: int = 384,
-        freshness_half_life_days: float = 30.0,
         semantic_weight: float = 0.65,
         importance_weight: float = 0.25,
-        freshness_weight: float = 0.10,
-        access_weight: float = 0.00
+        freshness_weight: float = 0.10
     ):
         """
         Initialize the vector store.
 
         Args:
             embedding_dimensions: Dimension of embedding vectors
-            freshness_half_life_days: Days for freshness decay
             semantic_weight: Weight for semantic similarity (primary signal)
             importance_weight: Weight for memory importance score
             freshness_weight: Weight for freshness score (tie-breaker)
-            access_weight: DEPRECATED - Set to 0.0, handled by Warmth Cache
-                          at application layer (see semantic_memory.py)
         """
         self.embedding_dimensions = embedding_dimensions
-        self.freshness_half_life_days = freshness_half_life_days
         self.semantic_weight = semantic_weight
         self.importance_weight = importance_weight
         self.freshness_weight = freshness_weight
-        self.access_weight = access_weight
         self._lock_manager = get_lock_manager()
 
     @db_retry()
@@ -128,6 +120,12 @@ class VectorStore:
         """
         Add a new memory to the store.
 
+        For factual memories, performs creation-time deduplication: if a
+        semantically similar fact already exists (>= MEMORY_DEDUP_THRESHOLD),
+        the existing memory's timestamp and importance are refreshed instead
+        of creating a duplicate. This prevents unbounded growth of duplicate
+        facts across conversations.
+
         Args:
             content: The memory content text
             source_conversation_ids: IDs of conversation turns this came from
@@ -144,13 +142,13 @@ class VectorStore:
                 - 'factual': Concrete facts extracted from conversations
 
         Returns:
-            The new memory ID, or None if embedding failed
+            The memory ID (new or refreshed existing), or None if embedding failed
         """
         if not is_model_loaded():
             log_error("Cannot add memory: embedding model not loaded")
             return None
 
-        # Generate embedding
+        # Generate embedding (outside lock — CPU-intensive)
         embedding = get_embedding(content)
         if embedding is None:
             log_error("Failed to generate embedding for memory")
@@ -162,6 +160,34 @@ class VectorStore:
 
             if source_timestamp is None:
                 source_timestamp = now
+
+            # Creation-time dedup for factual memories:
+            # If a very similar fact already exists, refresh it instead of creating a duplicate.
+            if memory_category == "factual":
+                existing_id = self._find_duplicate_factual(db, embedding)
+                if existing_id is not None:
+                    # Refresh existing memory: update timestamp and bump importance if higher
+                    db.execute(
+                        """
+                        UPDATE memories
+                        SET source_timestamp = ?,
+                            importance = MAX(importance, ?),
+                            decay_category = CASE WHEN ? > importance THEN ? ELSE decay_category END
+                        WHERE id = ?
+                        """,
+                        (
+                            source_timestamp.isoformat(),
+                            importance,
+                            importance, decay_category,
+                            existing_id
+                        )
+                    )
+                    log_info(
+                        f"Refreshed existing factual memory #{existing_id} "
+                        f"instead of creating duplicate: '{content[:50]}...'",
+                        prefix="♻️"
+                    )
+                    return existing_id
 
             db.execute(
                 """
@@ -193,6 +219,50 @@ class VectorStore:
             )
 
             return result[0]["id"] if result else None
+
+    def _find_duplicate_factual(
+        self,
+        db,
+        new_embedding: np.ndarray,
+        threshold: float = 0.85
+    ) -> Optional[int]:
+        """
+        Check if a semantically similar factual memory already exists.
+
+        Args:
+            db: Database connection (caller holds the lock)
+            new_embedding: Embedding of the new memory to check
+            threshold: Cosine similarity threshold for "duplicate" (default 0.85)
+
+        Returns:
+            ID of the existing duplicate memory, or None if no match found
+        """
+        from config import MEMORY_DEDUP_THRESHOLD
+        threshold = MEMORY_DEDUP_THRESHOLD
+
+        rows = db.execute(
+            "SELECT id, embedding FROM memories WHERE memory_category = 'factual'",
+            fetch=True
+        )
+
+        if not rows:
+            return None
+
+        # Batch compute similarities against all existing factual embeddings
+        existing_ids = [row["id"] for row in rows]
+        existing_embeddings = np.array([
+            bytes_to_embedding(row["embedding"], self.embedding_dimensions)
+            for row in rows
+        ])
+
+        similarities = cosine_similarity_batch(new_embedding, existing_embeddings)
+        max_idx = int(np.argmax(similarities))
+        max_similarity = float(similarities[max_idx])
+
+        if max_similarity >= threshold:
+            return existing_ids[max_idx]
+
+        return None
 
     @db_retry()
     def search(
@@ -271,21 +341,14 @@ class VectorStore:
                 # Importance score (already normalized 0.0-1.0)
                 importance_score = memory.importance
 
-                # Freshness score
+                # Freshness score (exponential decay based on age and decay_category)
                 freshness_score = self._compute_freshness(memory, now)
 
-                # Access recency score
-                access_score = self._compute_access_score(memory, now)
-
-                # Combined score: semantic + importance + freshness
-                # NOTE: access_weight is 0.0 (deprecated) - recency is now handled by
-                # the Warmth Cache system at the application layer. The access_score
-                # is still computed for backward compatibility in MemorySearchResult.
+                # Combined score: weighted sum of semantic + importance + freshness
                 combined_score = (
                     self.semantic_weight * semantic_score +
                     self.importance_weight * importance_score +
-                    self.freshness_weight * freshness_score +
-                    self.access_weight * access_score
+                    self.freshness_weight * freshness_score
                 )
 
                 if combined_score >= min_score:
@@ -294,17 +357,11 @@ class VectorStore:
                         semantic_score=semantic_score,
                         importance_score=importance_score,
                         freshness_score=freshness_score,
-                        access_score=access_score,
                         combined_score=combined_score
                     ))
 
             # Sort by combined score
             results.sort(key=lambda x: x.combined_score, reverse=True)
-
-            # Update access times for returned results
-            if results:
-                top_ids = [r.memory.id for r in results[:limit]]
-                self._update_access(top_ids, now)
 
             return results[:limit]
 
@@ -356,32 +413,6 @@ class VectorStore:
         # At age = 2 * half_life_days, score = 0.25
         # Clamp to 1.0 as a safety measure (should already be <= 1.0 with non-negative age)
         return min(1.0, math.exp(-0.693 * age_days / half_life_days))
-
-    def _compute_access_score(self, memory: Memory, now: datetime) -> float:
-        """Compute access recency score."""
-        if memory.last_accessed_at:
-            hours_since_access = (now - memory.last_accessed_at).total_seconds() / 3600
-            return math.exp(-hours_since_access / 24)  # Decays over ~1 day
-        return 0.0
-
-    @db_retry()
-    def _update_access(self, memory_ids: List[int], access_time: datetime) -> None:
-        """Update access time and count for memories."""
-        if not memory_ids:
-            return
-
-        db = get_database()
-        placeholders = ",".join("?" * len(memory_ids))
-
-        db.execute(
-            f"""
-            UPDATE memories
-            SET last_accessed_at = ?,
-                access_count = access_count + 1
-            WHERE id IN ({placeholders})
-            """,
-            (access_time.isoformat(), *memory_ids)
-        )
 
     @db_retry()
     def get_memory(self, memory_id: int) -> Optional[Memory]:
@@ -490,19 +521,15 @@ def get_vector_store() -> VectorStore:
     if _vector_store is None:
         from config import (
             EMBEDDING_DIMENSIONS,
-            MEMORY_FRESHNESS_HALF_LIFE_DAYS,
             MEMORY_SEMANTIC_WEIGHT,
             MEMORY_IMPORTANCE_WEIGHT,
-            MEMORY_FRESHNESS_WEIGHT,
-            MEMORY_ACCESS_WEIGHT
+            MEMORY_FRESHNESS_WEIGHT
         )
         _vector_store = VectorStore(
             embedding_dimensions=EMBEDDING_DIMENSIONS,
-            freshness_half_life_days=MEMORY_FRESHNESS_HALF_LIFE_DAYS,
             semantic_weight=MEMORY_SEMANTIC_WEIGHT,
             importance_weight=MEMORY_IMPORTANCE_WEIGHT,
-            freshness_weight=MEMORY_FRESHNESS_WEIGHT,
-            access_weight=MEMORY_ACCESS_WEIGHT
+            freshness_weight=MEMORY_FRESHNESS_WEIGHT
         )
     return _vector_store
 
@@ -512,18 +539,14 @@ def init_vector_store() -> VectorStore:
     global _vector_store
     from config import (
         EMBEDDING_DIMENSIONS,
-        MEMORY_FRESHNESS_HALF_LIFE_DAYS,
         MEMORY_SEMANTIC_WEIGHT,
         MEMORY_IMPORTANCE_WEIGHT,
-        MEMORY_FRESHNESS_WEIGHT,
-        MEMORY_ACCESS_WEIGHT
+        MEMORY_FRESHNESS_WEIGHT
     )
     _vector_store = VectorStore(
         embedding_dimensions=EMBEDDING_DIMENSIONS,
-        freshness_half_life_days=MEMORY_FRESHNESS_HALF_LIFE_DAYS,
         semantic_weight=MEMORY_SEMANTIC_WEIGHT,
         importance_weight=MEMORY_IMPORTANCE_WEIGHT,
-        freshness_weight=MEMORY_FRESHNESS_WEIGHT,
-        access_weight=MEMORY_ACCESS_WEIGHT
+        freshness_weight=MEMORY_FRESHNESS_WEIGHT
     )
     return _vector_store

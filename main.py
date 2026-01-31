@@ -221,9 +221,9 @@ def print_configuration() -> None:
     # Memory settings
     log_section("Memory Settings", "🧠")
     log_subsection(f"Context Window: {config.CONTEXT_WINDOW_SIZE} turns (overflow trigger: {config.CONTEXT_OVERFLOW_TRIGGER})")
-    log_subsection(f"Freshness Half-Life: {config.MEMORY_FRESHNESS_HALF_LIFE_DAYS} days")
     log_subsection(f"Scoring Weights: semantic={config.MEMORY_SEMANTIC_WEIGHT}, "
-                   f"freshness={config.MEMORY_FRESHNESS_WEIGHT}, access={config.MEMORY_ACCESS_WEIGHT}")
+                   f"importance={config.MEMORY_IMPORTANCE_WEIGHT}, "
+                   f"freshness={config.MEMORY_FRESHNESS_WEIGHT}")
 
     # Prompt Builder settings
     log_section("Prompt Builder", "📝")
