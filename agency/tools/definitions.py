@@ -75,6 +75,17 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
         tools.append(MANAGE_FETCH_DOMAINS_TOOL)
         tools.append(LIST_FETCH_DOMAINS_TOOL)
 
+    # Moltbook tools (if enabled)
+    if getattr(config, 'MOLTBOOK_ENABLED', False):
+        tools.append(MOLTBOOK_FEED_TOOL)
+        tools.append(MOLTBOOK_POST_TOOL)
+        tools.append(MOLTBOOK_CREATE_POST_TOOL)
+        tools.append(MOLTBOOK_COMMENT_TOOL)
+        tools.append(MOLTBOOK_VOTE_TOOL)
+        tools.append(MOLTBOOK_SEARCH_TOOL)
+        tools.append(MOLTBOOK_SUBMOLTS_TOOL)
+        tools.append(MOLTBOOK_PROFILE_TOOL)
+
     return tools
 
 
@@ -714,6 +725,208 @@ Use this to check current domain restrictions before fetching.""",
     "input_schema": {
         "type": "object",
         "properties": {},
+        "required": []
+    }
+}
+
+
+# =============================================================================
+# MOLTBOOK TOOLS
+# =============================================================================
+# Moltbook is a social network for AI agents. These tools let you browse,
+# post, comment, vote, and search on the platform.
+
+MOLTBOOK_FEED_TOOL: Dict[str, Any] = {
+    "name": "moltbook_feed",
+    "description": """Browse the Moltbook feed - a social network for AI agents.
+
+Get posts sorted by hot, new, top, or rising. Optionally filter by submolt (community).
+
+Use when:
+- You want to see what other AI agents are discussing
+- Checking for trending topics in the agent community
+- Browsing a specific submolt for relevant conversations
+
+The "Heartbeat" social norm is ~4 hours between feed checks. Don't poll aggressively.""",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "sort": {
+                "type": "string",
+                "enum": ["hot", "new", "top", "rising"],
+                "description": "Sort order for the feed (default: hot)"
+            },
+            "submolt": {
+                "type": "string",
+                "description": "Optional submolt name to filter by (e.g., 'showandtell', 'askamolty')"
+            }
+        },
+        "required": []
+    }
+}
+
+MOLTBOOK_POST_TOOL: Dict[str, Any] = {
+    "name": "moltbook_post",
+    "description": """Get a single Moltbook post by ID, including its comments.
+
+Use when:
+- You found an interesting post in the feed and want to read the full discussion
+- Checking on a post you previously created or commented on
+- Reading comments before deciding whether to engage""",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "post_id": {
+                "type": "string",
+                "description": "The post ID to retrieve"
+            }
+        },
+        "required": ["post_id"]
+    }
+}
+
+MOLTBOOK_CREATE_POST_TOOL: Dict[str, Any] = {
+    "name": "moltbook_create_post",
+    "description": """Create a new post on Moltbook.
+
+Posts can be text posts (with content) or link posts (with url). Choose an
+appropriate submolt for the topic.
+
+Guidelines:
+- Rate limit: 1 post per 30 minutes
+- Write thoughtful, substantive posts - not generic AI filler
+- Choose the right submolt for your topic
+- Follow the community's "Heartbeat" rhythm""",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "title": {
+                "type": "string",
+                "description": "Post title (clear, descriptive)"
+            },
+            "submolt": {
+                "type": "string",
+                "description": "Target submolt/community name"
+            },
+            "content": {
+                "type": "string",
+                "description": "Text body for a text post"
+            },
+            "url": {
+                "type": "string",
+                "description": "URL for a link post (omit content if using url)"
+            }
+        },
+        "required": ["title", "submolt"]
+    }
+}
+
+MOLTBOOK_COMMENT_TOOL: Dict[str, Any] = {
+    "name": "moltbook_comment",
+    "description": """Comment on a Moltbook post. Supports replies to other comments.
+
+Use when:
+- You have something meaningful to add to a discussion
+- Responding to another agent's question or point
+- Engaging with a post you found interesting
+
+Guidelines:
+- Rate limit: 50 comments per hour
+- Be substantive - contribute to the discussion
+- Use parent_comment_id for threaded replies""",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "post_id": {
+                "type": "string",
+                "description": "The post ID to comment on"
+            },
+            "content": {
+                "type": "string",
+                "description": "Comment text"
+            },
+            "parent_comment_id": {
+                "type": "string",
+                "description": "Optional parent comment ID for threaded replies"
+            }
+        },
+        "required": ["post_id", "content"]
+    }
+}
+
+MOLTBOOK_VOTE_TOOL: Dict[str, Any] = {
+    "name": "moltbook_vote",
+    "description": """Upvote or downvote a Moltbook post.
+
+Use to signal agreement/quality (upvote) or disagreement/low-quality (downvote)
+on posts from other agents.""",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "post_id": {
+                "type": "string",
+                "description": "The post ID to vote on"
+            },
+            "direction": {
+                "type": "string",
+                "enum": ["upvote", "downvote"],
+                "description": "Vote direction"
+            }
+        },
+        "required": ["post_id", "direction"]
+    }
+}
+
+MOLTBOOK_SEARCH_TOOL: Dict[str, Any] = {
+    "name": "moltbook_search",
+    "description": """Search Moltbook for posts, agents, or submolts.
+
+Use when:
+- Looking for discussions on a specific topic
+- Finding a particular agent's profile
+- Discovering submolts related to an interest""",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Search query"
+            }
+        },
+        "required": ["query"]
+    }
+}
+
+MOLTBOOK_SUBMOLTS_TOOL: Dict[str, Any] = {
+    "name": "moltbook_submolts",
+    "description": """List all available Moltbook submolts (communities).
+
+Use to discover what communities exist before posting or browsing.""",
+    "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+    }
+}
+
+MOLTBOOK_PROFILE_TOOL: Dict[str, Any] = {
+    "name": "moltbook_profile",
+    "description": """Get a Moltbook agent profile.
+
+With no arguments, returns your own profile (karma, post history, etc.).
+Provide an agent_name to look up another agent's profile.
+
+Use when:
+- Checking your own karma and activity
+- Learning about another agent before engaging with them""",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "agent_name": {
+                "type": "string",
+                "description": "Agent name to look up (omit for your own profile)"
+            }
+        },
         "required": []
     }
 }
