@@ -63,6 +63,8 @@ class ToolExecutor:
             "get_clipboard": self._exec_get_clipboard,
             "set_clipboard": self._exec_set_clipboard,
             "request_clarification": self._exec_request_clarification,
+            "manage_fetch_domains": self._exec_manage_fetch_domains,
+            "list_fetch_domains": self._exec_list_fetch_domains,
         }
 
     def execute(
@@ -986,6 +988,69 @@ class ToolExecutor:
             tool_use_id=id,
             tool_name="request_clarification",
             content="\n".join(parts)
+        )
+
+
+    # =========================================================================
+    # WEB FETCH DOMAIN MANAGEMENT TOOLS
+    # =========================================================================
+
+    def _exec_manage_fetch_domains(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Manage web fetch domain allow/block lists."""
+        from agency.web_fetch_domains import get_web_fetch_domain_manager
+
+        action = input.get("action", "")
+        domain = input.get("domain", "")
+
+        if not action or not domain:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="manage_fetch_domains",
+                content="Both 'action' and 'domain' are required",
+                is_error=True
+            )
+
+        manager = get_web_fetch_domain_manager()
+
+        action_map = {
+            "allow": manager.add_allowed_domain,
+            "block": manager.add_blocked_domain,
+            "remove_allowed": manager.remove_allowed_domain,
+            "unblock": manager.remove_blocked_domain,
+        }
+
+        handler_fn = action_map.get(action)
+        if not handler_fn:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="manage_fetch_domains",
+                content=f"Invalid action '{action}'. Valid: allow, block, remove_allowed, unblock",
+                is_error=True
+            )
+
+        result_msg = handler_fn(domain)
+
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="manage_fetch_domains",
+            content=result_msg
+        )
+
+    def _exec_list_fetch_domains(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """List current web fetch domain configuration."""
+        from agency.web_fetch_domains import get_web_fetch_domain_manager
+
+        manager = get_web_fetch_domain_manager()
+        summary = manager.get_status_summary()
+
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="list_fetch_domains",
+            content=summary
         )
 
 
