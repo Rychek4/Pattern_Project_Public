@@ -36,6 +36,7 @@ from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 from agency.tools import get_tool_definitions, get_tool_processor
 from agency.tools.processor import ProcessedToolResponse
 from core.logger import log_info, log_warning
+from core.temporal import strip_temporal_echoes
 
 if TYPE_CHECKING:
     from llm.anthropic_client import AnthropicResponse
@@ -166,6 +167,7 @@ class ToolResponseHelper:
 
             # Accumulate text from this pass
             pass_text = processed.display_text.strip() if processed.display_text else ""
+            pass_text = strip_temporal_echoes(pass_text)
             if pass_text:
                 if accumulated_text:
                     # Append continuation text with separator
@@ -259,6 +261,7 @@ class ToolResponseHelper:
 
         # Include any text from the final unprocessed response
         final_response_text = current_response.text.strip() if current_response.text else ""
+        final_response_text = strip_temporal_echoes(final_response_text)
         if final_response_text:
             if accumulated_text:
                 accumulated_text = accumulated_text + "\n\n" + final_response_text
