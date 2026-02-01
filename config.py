@@ -232,7 +232,7 @@ AGENCY_IDLE_TRIGGER_SECONDS = 900  # 15 minutes before AI initiates
 # =============================================================================
 # SYSTEM PULSE CONFIGURATION
 # =============================================================================
-SYSTEM_PULSE_ENABLED = True
+SYSTEM_PULSE_ENABLED = os.getenv("SYSTEM_PULSE_ENABLED", "true").lower() == "true"
 SYSTEM_PULSE_INTERVAL = 600  # 10 minutes between pulses (default)
 
 # =============================================================================
@@ -241,7 +241,7 @@ SYSTEM_PULSE_INTERVAL = 600  # 10 minutes between pulses (default)
 # The curiosity engine gives the AI topics to explore during conversation.
 # It identifies both dormant topics from memory AND fresh discoveries,
 # using weighted random selection for natural variety.
-CURIOSITY_ENABLED = True
+CURIOSITY_ENABLED = os.getenv("CURIOSITY_ENABLED", "true").lower() == "true"
 
 # Dormant revival settings - resurface old forgotten topics
 CURIOSITY_DORMANT_DAYS = 7            # Topic "dormant" after 7 days without access
@@ -386,7 +386,7 @@ USE_NATIVE_TOOLS = True  # Always True - legacy mode no longer available
 # =============================================================================
 # Intentions give the AI forward-looking agency: reminders, goals, plans
 # that surface at the right time. Intentions are private to the AI.
-INTENTION_ENABLED = True                    # Enable the intention system
+INTENTION_ENABLED = os.getenv("INTENTION_ENABLED", "true").lower() == "true"
 INTENTION_MAX_PENDING_DISPLAY = 3           # Max pending intentions to show in context
 INTENTION_COMPLETED_TO_MEMORY = True        # Create memories from completed intentions
 
@@ -425,7 +425,7 @@ DEV_MODE_ENABLED = False  # Set programmatically via --dev flag, not env var
 # 2. Go to https://myaccount.google.com/apppasswords
 # 3. Generate a new app password for "Mail"
 # 4. Use that password as APP_EMAIL_PASS
-EMAIL_GATEWAY_ENABLED = False  # Disabled - Telegram is the primary communication channel
+EMAIL_GATEWAY_ENABLED = os.getenv("EMAIL_GATEWAY_ENABLED", "false").lower() == "true"
 EMAIL_ADDRESS = os.getenv("APP_EMAIL_ADDRESS", "")
 EMAIL_PASSWORD = os.getenv("APP_EMAIL_PASS", "")
 EMAIL_DISPLAY_NAME = "Pattern Isaac"
@@ -448,7 +448,7 @@ EMAIL_WHITELIST = []  # Add addresses here when enabling email
 # 3. Copy the bot token to your environment variable
 # 4. Start a chat with your bot and send any message
 # 5. The chat_id will be auto-detected on first message
-TELEGRAM_ENABLED = True
+TELEGRAM_ENABLED = os.getenv("TELEGRAM_ENABLED", "true").lower() == "true"
 TELEGRAM_BOT_TOKEN = os.getenv("telegram_bot", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")  # Auto-detected if empty
 TELEGRAM_POLL_INTERVAL = 2  # Seconds between polling for inbound messages
@@ -471,7 +471,7 @@ TELEGRAM_MAX_PER_HOUR = 30   # Maximum Telegram messages per hour
 #
 # When enabled, Claude can autonomously search the web for current information.
 # Results include citations (title, URL, cited_text) automatically.
-WEB_SEARCH_ENABLED = True                       # Master toggle for web search
+WEB_SEARCH_ENABLED = os.getenv("WEB_SEARCH_ENABLED", "true").lower() == "true"
 WEB_SEARCH_MAX_USES_PER_REQUEST = 3             # Max searches Claude can do per API call
 WEB_SEARCH_TOTAL_ALLOWED_PER_DAY = 30           # Daily budget (resets at midnight)
 
@@ -490,7 +490,7 @@ WEB_SEARCH_TOTAL_ALLOWED_PER_DAY = 30           # Daily budget (resets at midnig
 #
 # Security: Domain lists are managed at runtime by the AI via tools.
 # Config values below serve as defaults; runtime overrides persist in the database.
-WEB_FETCH_ENABLED = True                        # Master toggle for web fetch
+WEB_FETCH_ENABLED = os.getenv("WEB_FETCH_ENABLED", "true").lower() == "true"
 WEB_FETCH_MAX_USES_PER_REQUEST = 5              # Max fetches Claude can do per API call
 WEB_FETCH_TOTAL_ALLOWED_PER_DAY = 50            # Daily budget (resets at midnight)
 WEB_FETCH_MAX_CONTENT_TOKENS = 50000            # Max tokens per fetched page (controls cost)
@@ -556,7 +556,7 @@ REDDIT_RATE_LIMIT_VOTES_PER_HOUR = 30             # Vote cap
 #
 # Requires: pip install pyperclip
 # On Linux: also requires xclip or xsel (sudo apt-get install xclip)
-CLIPBOARD_ENABLED = True                        # Master toggle for clipboard tools
+CLIPBOARD_ENABLED = os.getenv("CLIPBOARD_ENABLED", "true").lower() == "true"
 CLIPBOARD_MAX_READ_SIZE = 10000                 # Truncate clipboard reads beyond this (chars)
 
 # =============================================================================
@@ -567,4 +567,4 @@ CLIPBOARD_MAX_READ_SIZE = 10000                 # Truncate clipboard reads beyon
 #
 # When used, the question is displayed prominently in the UI, and in GUI mode,
 # options can be rendered as clickable buttons for easy response.
-CLARIFICATION_ENABLED = True                    # Master toggle for clarification tool
+CLARIFICATION_ENABLED = os.getenv("CLARIFICATION_ENABLED", "true").lower() == "true"
