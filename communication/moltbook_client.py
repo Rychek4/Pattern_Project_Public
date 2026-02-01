@@ -278,6 +278,9 @@ class MoltbookClient:
         """
         params = {"sort": sort, "limit": min(limit, 25)}
         if submolt:
+            # Strip "m/" prefix if included (e.g. "m/sandbox" -> "sandbox")
+            if submolt.startswith("m/"):
+                submolt = submolt[2:]
             params["submolt"] = submolt
 
         log_info(f"Moltbook feed: sort={sort}, submolt={submolt or 'all'}", prefix="🦞")
@@ -365,6 +368,10 @@ class MoltbookClient:
         rate_error = self._check_rate_limit("posts")
         if rate_error:
             return rate_error
+
+        # Strip "m/" prefix if included (e.g. "m/sandbox" -> "sandbox")
+        if submolt.startswith("m/"):
+            submolt = submolt[2:]
 
         body: Dict[str, Any] = {"title": title, "submolt": submolt}
         if content:
