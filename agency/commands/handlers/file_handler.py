@@ -68,11 +68,18 @@ def _sanitize_filename(filename: str) -> str:
     if filename.startswith("."):
         raise FileSecurityError("Hidden files (starting with '.') not allowed")
 
-    # Sanitize: only allow alphanumeric, dash, underscore, dot
-    # This is a secondary defense - the above checks should catch issues first
-    sanitized = re.sub(r'[^\w\-.]', '_', filename)
+    # Validate characters - reject filenames with problematic characters
+    # rather than silently renaming (which causes read_file to fail on
+    # files that list_files shows, because the name gets transformed)
+    disallowed = re.findall(r'[^\w\s\-.]', filename)
+    if disallowed:
+        unique = ''.join(sorted(set(disallowed)))
+        raise FileSecurityError(
+            f"Filename contains disallowed characters: {unique!r}. "
+            f"Only letters, numbers, spaces, dashes, underscores, and dots are allowed."
+        )
 
-    return sanitized
+    return filename
 
 
 def _validate_extension(filename: str) -> None:
