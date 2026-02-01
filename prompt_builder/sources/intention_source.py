@@ -105,7 +105,7 @@ class IntentionSource(ContextSource):
 
     def _build_empty_context(self) -> str:
         """Build context when there are no intentions."""
-        return "<your_intentions>None active. Use the create_reminder tool to create reminders.</your_intentions>"
+        return "<your_intentions>None active. Use create_reminder to schedule future autonomous pulses (params: when, what, context).</your_intentions>"
 
     def _build_context(self, summary: dict, now: datetime) -> str:
         """Build context with active intentions."""
@@ -128,16 +128,15 @@ class IntentionSource(ContextSource):
         # Add tool usage instructions (native tool use, not bracket syntax)
         lines.extend([
             "Tools:",
-            "  create_reminder — Create a new reminder (params: when, what)",
-            "  complete_reminder — Mark as done with note (params: reminder_id, outcome)",
-            "  dismiss_reminder — Cancel without completing (params: reminder_id)",
-            "  list_reminders — Review all your intentions",
+            "  create_reminder — Schedule an autonomous pulse at a future time (params: when, what, context)",
+            "  complete_reminder — Mark as done; outcome is saved to memory (params: reminder_id, outcome)",
+            "  dismiss_reminder — Cancel without completing; no memory created (params: reminder_id)",
+            "  list_reminders — List all reminders with IDs, statuses, and trigger times",
             "",
             "When addressing a due intention, mark it complete or dismiss it.",
-            "Create reminders when you notice things worth following up on.",
-            "",
-            "Note: Time-based reminders automatically trigger a pulse prompt when due,",
-            "even if the user hasn't messaged. You will receive an automated reminder pulse.",
+            "Create reminders when you want to take future autonomous action — not just to",
+            "remember, but to schedule work. When a reminder fires, you get a full autonomous",
+            "turn with all tools available (search, files, Telegram, memory, etc.).",
             "</your_intentions>",
         ])
 
@@ -153,7 +152,8 @@ class IntentionSource(ContextSource):
             "conversations worth following up on? A question left unanswered?",
             "Something you want to revisit later?",
             "",
-            "Create intentions with the create_reminder tool (params: when, what).",
+            "Use create_reminder to schedule future autonomous actions (params: when, what, context).",
+            "Reminders fire dedicated pulses with full tool access — use them to plan real work.",
             "</your_intentions_pulse>",
         ])
 
@@ -193,7 +193,9 @@ class IntentionSource(ContextSource):
         lines.append(f"You have {total} active intention{'s' if total != 1 else ''}.")
         lines.append("")
         lines.extend([
-            "Tools: complete_reminder, dismiss_reminder, create_reminder",
+            "Tools: complete_reminder (saves outcome to memory), dismiss_reminder (no memory),",
+            "  create_reminder (schedule another autonomous pulse), list_reminders",
+            "You have full tool access during this pulse — act on these intentions now.",
             "</your_intentions_pulse>",
         ])
 
