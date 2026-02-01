@@ -344,10 +344,11 @@ The file must exist in your file storage. Use [[LIST_FILES]] to see available fi
         filename = data.get("filename", "unknown")
         size = data.get("size", 0)
 
-        # Truncate very long content for the continuation prompt
-        max_preview = 2000
-        if len(content) > max_preview:
-            content = content[:max_preview] + f"\n... [truncated, {size} chars total]"
+        # Optionally truncate content (0 = no limit, returns full file)
+        from config import FILE_READ_MAX_CHARS
+        max_chars = FILE_READ_MAX_CHARS
+        if max_chars > 0 and len(content) > max_chars:
+            content = content[:max_chars] + f"\n... [truncated, showing {max_chars} of {size} chars]"
 
         return f"  File: {filename}\n  Content:\n{content}"
 
