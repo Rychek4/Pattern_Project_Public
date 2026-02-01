@@ -226,6 +226,13 @@ class MoltbookClient:
             if not response.ok:
                 error_text = response.text[:200] if response.text else f"HTTP {response.status_code}"
                 log_error(f"Moltbook API error: {response.status_code} - {error_text}")
+                if response.history:
+                    chain = " -> ".join(
+                        f"{r.status_code} {r.url}" for r in response.history
+                    )
+                    log_warning(f"Moltbook redirect chain: {chain} -> {response.url}")
+                    has_auth = "Authorization" in response.request.headers
+                    log_warning(f"Moltbook auth header on final request: {has_auth}")
                 return {
                     "error": True,
                     "message": f"API error ({response.status_code}): {error_text}",
@@ -412,7 +419,7 @@ class MoltbookClient:
             return {"error": True, "message": f"Invalid vote direction: {direction}. Use 'upvote' or 'downvote'."}
 
         log_info(f"Moltbook {direction} on {post_id}", prefix="🦞")
-        return self._request("POST", f"/posts/{post_id}/{direction}")
+        return self._request("POST", f"/posts/{post_id}/{direction}", json_body={})
 
 
 # =============================================================================
