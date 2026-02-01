@@ -19,8 +19,32 @@ from typing import Any, Dict, List, Optional
 from threading import Lock
 
 import requests
+from urllib.parse import urlparse
 
 from core.logger import log_info, log_warning, log_error
+
+
+class _MoltbookSession(requests.Session):
+    """
+    A requests.Session subclass that preserves the Authorization header
+    across redirects within moltbook.com.
+
+    Python's ``requests`` library strips auth headers when following a
+    redirect to a different *host*.  Moltbook's infrastructure can
+    redirect between ``www.moltbook.com`` and ``moltbook.com`` (or
+    other subdomains), which counts as a host change.  This causes a
+    silent 401 because the Bearer token is dropped mid-flight.
+
+    See: https://www.moltbook.com/post/d45e46d1-4cf6-4ced-82b4-e41db2033ca5
+    """
+
+    def rebuild_auth(self, prepared_request, response):
+        """Keep auth for moltbook.com; defer to default for other hosts."""
+        redirect_host = urlparse(prepared_request.url).hostname or ""
+        if redirect_host.endswith("moltbook.com"):
+            # Preserve Authorization header – same trusted domain.
+            return
+        super().rebuild_auth(prepared_request, response)
 
 
 class MoltbookRateLimiter:
@@ -111,7 +135,7 @@ class MoltbookClient:
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
         self._user_agent = user_agent
-        self._session = requests.Session()
+        self._session = _MoltbookSession()
         self._session.headers.update({
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
