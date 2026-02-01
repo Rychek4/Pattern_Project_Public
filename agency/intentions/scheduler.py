@@ -41,11 +41,9 @@ TRIGGERED REMINDER{"S" if len(triggered_intentions) > 1 else ""}:
 {reminders_text}
 
 This pulse was fired by the reminder scheduler because the reminder time has arrived.
-Address this reminder naturally in your response. When done, mark it complete:
-  [[COMPLETE: I-id | brief outcome note]]
-
-Or dismiss if no longer relevant:
-  [[DISMISS: I-id]]"""
+Address this reminder naturally in your response. When done, use the complete_reminder
+tool (params: reminder_id, outcome). Or dismiss if no longer relevant using the
+dismiss_reminder tool (params: reminder_id)."""
 
 
 class ReminderScheduler:

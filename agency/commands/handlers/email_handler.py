@@ -118,8 +118,8 @@ class SendEmailHandler(CommandHandler):
                 error=ToolError(
                     error_type=ToolErrorType.FORMAT_ERROR,
                     message=str(e),
-                    expected_format="[[SEND_EMAIL: recipient@example.com | Subject Line | Email body text]]",
-                    example="[[SEND_EMAIL: user@example.com | Meeting Notes | Here are the meeting notes from today...]]"
+                    expected_format="send_email with to, subject, and body parameters",
+                    example="send_email(to='user@example.com', subject='Meeting Notes', body='Here are the meeting notes from today...')"
                 )
             )
 
