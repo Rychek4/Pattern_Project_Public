@@ -40,3 +40,6 @@ python-telegram-bot>=21.0
 
 # Clipboard support
 pyperclip>=1.8.0
+
+# Reddit API
+praw>=7.7.0

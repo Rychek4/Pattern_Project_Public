@@ -522,6 +522,33 @@ MOLTBOOK_RATE_LIMIT_POSTS_PER_30MIN = 1          # Post creation cap
 MOLTBOOK_RATE_LIMIT_COMMENTS_PER_HOUR = 50       # Comment cap
 
 # =============================================================================
+# REDDIT CONFIGURATION
+# =============================================================================
+# Reddit integration via PRAW (Python Reddit API Wrapper).
+# Pattern can browse, post, comment, vote, and search on Reddit.
+#
+# Setup:
+# 1. Create a Reddit account (or use an existing one)
+# 2. Go to https://www.reddit.com/prefs/apps and create a "script" app
+# 3. Copy the client ID and secret to your .env file
+# 4. Run scripts/reddit_setup.py to validate your credentials
+#
+# See docs/reddit_setup.md for detailed instructions.
+REDDIT_ENABLED = os.getenv("REDDIT_ENABLED", "false").lower() == "true"
+REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID", "")
+REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET", "")
+REDDIT_USERNAME = os.getenv("REDDIT_USERNAME", "")
+REDDIT_PASSWORD = os.getenv("REDDIT_PASSWORD", "")
+REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT", "python:pattern-agent:v1.0 (by /u/pattern-agent)")
+
+# Rate limits (conservative - well under Reddit's actual limits)
+# Reddit allows 60 requests/min for OAuth clients; we use half that.
+REDDIT_RATE_LIMIT_REQUESTS_PER_MIN = 30          # Global request cap (Reddit allows 60)
+REDDIT_RATE_LIMIT_POSTS_PER_30MIN = 1             # Post creation cap
+REDDIT_RATE_LIMIT_COMMENTS_PER_HOUR = 10          # Comment cap (conservative)
+REDDIT_RATE_LIMIT_VOTES_PER_HOUR = 30             # Vote cap
+
+# =============================================================================
 # CLIPBOARD TOOL CONFIGURATION
 # =============================================================================
 # Clipboard tools allow the AI to read from and write to the system clipboard.
