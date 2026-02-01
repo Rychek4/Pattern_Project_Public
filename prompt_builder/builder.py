@@ -246,6 +246,12 @@ def create_default_builder() -> PromptBuilder:
         sources.append(CuriositySource())
         log_info("CuriositySource enabled", prefix="🔍")
 
+    # Pattern breaker source (if enabled) - periodic nudge to break context loops
+    if getattr(config, 'PATTERN_BREAKER_ENABLED', True):
+        from prompt_builder.sources.pattern_breaker import PatternBreakerSource
+        sources.append(PatternBreakerSource())
+        log_info("PatternBreakerSource enabled", prefix="🔄")
+
     # Legacy VisualSource is disabled - the new visual capture system sends images
     # directly to Claude via multimodal messages. VisualSource (which used Gemini
     # for text descriptions) is kept in code for potential fallback but not loaded.

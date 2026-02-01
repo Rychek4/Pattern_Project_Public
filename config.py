@@ -326,6 +326,13 @@ CONVERSATION_EXCHANGE_LIMIT = 15  # Last N exchanges (user + reply pairs)
 MEMORY_PROMOTION_THRESHOLD = 0.85  # Score threshold for core memory promotion
 TOOL_STANCE_ENABLED = True  # Inject proactive tool usage guidance into prompts
 
+# Pattern Breaker - periodic nudge to break self-reinforcing context loops
+# The rolling context window can become an echo chamber where formatting,
+# tone, and structure patterns self-reinforce. This fires a self-check
+# every N user-facing messages, using extended thinking for private assessment.
+PATTERN_BREAKER_ENABLED = True
+PATTERN_BREAKER_INTERVAL = 5   # Nudge every N user-facing messages
+
 # =============================================================================
 # VISUAL CAPTURE CONFIGURATION
 # =============================================================================
