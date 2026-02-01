@@ -73,8 +73,8 @@ class SendTelegramHandler(CommandHandler):
                 error=ToolError(
                     error_type=ToolErrorType.FORMAT_ERROR,
                     message="Telegram message cannot be empty",
-                    expected_format="[[SEND_TELEGRAM: Your message here]]",
-                    example="[[SEND_TELEGRAM: Don't forget your 3pm appointment!]]"
+                    expected_format="send_telegram with message parameter",
+                    example="send_telegram(message=\"Don't forget your 3pm appointment!\")"
                 )
             )
 

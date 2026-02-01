@@ -64,8 +64,8 @@ class SetThoughtsHandler(CommandHandler):
                 error=ToolError(
                     error_type=ToolErrorType.PARSE_ERROR,
                     message=f"Invalid JSON: {e}",
-                    expected_format="[[SET_THOUGHTS: [{...}, {...}]]]",
-                    example='[[SET_THOUGHTS: [{"rank":1,"slug":"example","topic":"Topic","elaboration":"Details..."}]]]'
+                    expected_format="set_active_thoughts with thoughts array parameter",
+                    example='set_active_thoughts(thoughts=[{"rank":1,"slug":"example","topic":"Topic","elaboration":"Details..."}])'
                 )
             )
 
@@ -78,8 +78,8 @@ class SetThoughtsHandler(CommandHandler):
                 error=ToolError(
                     error_type=ToolErrorType.FORMAT_ERROR,
                     message="Expected a JSON array, got " + type(thoughts).__name__,
-                    expected_format="[[SET_THOUGHTS: [{...}, {...}]]]",
-                    example='[[SET_THOUGHTS: [{"rank":1,"slug":"example","topic":"Topic","elaboration":"Details..."}]]]'
+                    expected_format="set_active_thoughts with thoughts array parameter",
+                    example='set_active_thoughts(thoughts=[{"rank":1,"slug":"example","topic":"Topic","elaboration":"Details..."}])'
                 )
             )
 

@@ -105,7 +105,7 @@ class IntentionSource(ContextSource):
 
     def _build_empty_context(self) -> str:
         """Build context when there are no intentions."""
-        return "<your_intentions>None active. Use [[REMIND: when | what]] to create reminders.</your_intentions>"
+        return "<your_intentions>None active. Use the create_reminder tool to create reminders.</your_intentions>"
 
     def _build_context(self, summary: dict, now: datetime) -> str:
         """Build context with active intentions."""
@@ -125,13 +125,13 @@ class IntentionSource(ContextSource):
         lines.append(f"You have {total} active intention{'s' if total != 1 else ''}.")
         lines.append("")
 
-        # Add command instructions
+        # Add tool usage instructions (native tool use, not bracket syntax)
         lines.extend([
-            "Commands:",
-            "  [[REMIND: when | what]] — Create a new reminder",
-            "  [[COMPLETE: I-id | outcome]] — Mark as done with note",
-            "  [[DISMISS: I-id]] — Cancel without completing",
-            "  [[LIST_INTENTIONS]] — Review all your intentions",
+            "Tools:",
+            "  create_reminder — Create a new reminder (params: when, what)",
+            "  complete_reminder — Mark as done with note (params: reminder_id, outcome)",
+            "  dismiss_reminder — Cancel without completing (params: reminder_id)",
+            "  list_reminders — Review all your intentions",
             "",
             "When addressing a due intention, mark it complete or dismiss it.",
             "Create reminders when you notice things worth following up on.",
@@ -153,7 +153,7 @@ class IntentionSource(ContextSource):
             "conversations worth following up on? A question left unanswered?",
             "Something you want to revisit later?",
             "",
-            "Create intentions with: [[REMIND: when | what]]",
+            "Create intentions with the create_reminder tool (params: when, what).",
             "</your_intentions_pulse>",
         ])
 
@@ -184,7 +184,7 @@ class IntentionSource(ContextSource):
         if triggered_count > 0:
             lines.extend([
                 "These are commitments you made to yourself. Address them now or",
-                "consciously dismiss them with [[DISMISS: I-id]].",
+                "consciously dismiss them with the dismiss_reminder tool.",
                 "",
             ])
 
@@ -193,7 +193,7 @@ class IntentionSource(ContextSource):
         lines.append(f"You have {total} active intention{'s' if total != 1 else ''}.")
         lines.append("")
         lines.extend([
-            "Commands: [[COMPLETE: I-id | outcome]], [[DISMISS: I-id]], [[REMIND: when | what]]",
+            "Tools: complete_reminder, dismiss_reminder, create_reminder",
             "</your_intentions_pulse>",
         ])
 

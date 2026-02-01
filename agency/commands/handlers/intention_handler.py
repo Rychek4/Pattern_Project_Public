@@ -68,8 +68,8 @@ class RemindHandler(CommandHandler):
                 error=ToolError(
                     error_type=ToolErrorType.FORMAT_ERROR,
                     message="Missing 'what' part - reminder needs both when and what",
-                    expected_format="[[REMIND: when | what]]",
-                    example="[[REMIND: in 2 hours | ask about the meeting]]"
+                    expected_format="create_reminder with when and what parameters",
+                    example="create_reminder(when='in 2 hours', what='ask about the meeting')"
                 )
             )
 
@@ -91,7 +91,7 @@ class RemindHandler(CommandHandler):
                     error_type=ToolErrorType.PARSE_ERROR,
                     message=f"Could not parse time expression: '{when_str}'",
                     expected_format="Use relative time like 'in X minutes/hours' or 'tomorrow morning'",
-                    example="[[REMIND: in 30 minutes | check on the build]]"
+                    example="create_reminder(when='in 30 minutes', what='check on the build')"
                 )
             )
 
@@ -209,8 +209,8 @@ class CompleteHandler(CommandHandler):
                 error=ToolError(
                     error_type=ToolErrorType.VALIDATION,
                     message=f"Invalid intention ID: '{id_part}' is not a valid number",
-                    expected_format="[[COMPLETE: I-<number> | outcome]]",
-                    example="[[COMPLETE: I-42 | task completed successfully]]"
+                    expected_format="complete_reminder with reminder_id (integer) and outcome parameters",
+                    example="complete_reminder(reminder_id=42, outcome='task completed successfully')"
                 )
             )
 
@@ -337,8 +337,8 @@ class DismissHandler(CommandHandler):
                 error=ToolError(
                     error_type=ToolErrorType.VALIDATION,
                     message=f"Invalid intention ID: '{id_part}' is not a valid number",
-                    expected_format="[[DISMISS: I-<number>]]",
-                    example="[[DISMISS: I-42]]"
+                    expected_format="dismiss_reminder with reminder_id (integer) parameter",
+                    example="dismiss_reminder(reminder_id=42)"
                 )
             )
 

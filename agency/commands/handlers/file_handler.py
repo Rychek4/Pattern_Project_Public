@@ -241,9 +241,9 @@ class ReadFileHandler(CommandHandler):
                     display_text=f"File not found: {filename}",
                     error=ToolError(
                         error_type=ToolErrorType.INVALID_INPUT,
-                        message=f"File '{filename}' does not exist",
-                        expected_format="[[READ_FILE: existing_filename.txt]]",
-                        example="[[READ_FILE: notes.txt]]"
+                        message=f"File '{filename}' does not exist. Use list_files to see available files.",
+                        expected_format="read_file with filename parameter",
+                        example="read_file(filename='notes.txt')"
                     )
                 )
 
@@ -285,8 +285,8 @@ class ReadFileHandler(CommandHandler):
                 error=ToolError(
                     error_type=ToolErrorType.INVALID_INPUT,
                     message=f"Security check failed: {str(e)}",
-                    expected_format="[[READ_FILE: simple_filename.txt]]",
-                    example="[[READ_FILE: notes.txt]]"
+                    expected_format="read_file with simple filename (no paths)",
+                    example="read_file(filename='notes.txt')"
                 )
             )
         except UnicodeDecodeError:
@@ -425,8 +425,8 @@ class WriteFileHandler(CommandHandler):
                 error=ToolError(
                     error_type=ToolErrorType.FORMAT_ERROR,
                     message=str(e),
-                    expected_format="[[WRITE_FILE: filename.txt | content here]]",
-                    example="[[WRITE_FILE: notes.txt | These are my notes.]]"
+                    expected_format="write_file with filename and content parameters",
+                    example="write_file(filename='notes.txt', content='These are my notes.')"
                 )
             )
         except FileSecurityError as e:
@@ -439,8 +439,8 @@ class WriteFileHandler(CommandHandler):
                 error=ToolError(
                     error_type=ToolErrorType.INVALID_INPUT,
                     message=f"Security check failed: {str(e)}",
-                    expected_format="[[WRITE_FILE: simple_filename.txt | content]]",
-                    example="[[WRITE_FILE: notes.txt | My notes here.]]"
+                    expected_format="write_file with simple filename (no paths)",
+                    example="write_file(filename='notes.txt', content='My notes here.')"
                 )
             )
         except Exception as e:
@@ -582,8 +582,8 @@ class AppendFileHandler(CommandHandler):
                 error=ToolError(
                     error_type=ToolErrorType.FORMAT_ERROR,
                     message=str(e),
-                    expected_format="[[APPEND_FILE: filename.txt | content to add]]",
-                    example="[[APPEND_FILE: shopping.txt | Bananas]]"
+                    expected_format="append_file with filename and content parameters",
+                    example="append_file(filename='shopping.txt', content='Bananas')"
                 )
             )
         except FileSecurityError as e:
@@ -596,8 +596,8 @@ class AppendFileHandler(CommandHandler):
                 error=ToolError(
                     error_type=ToolErrorType.INVALID_INPUT,
                     message=f"Security check failed: {str(e)}",
-                    expected_format="[[APPEND_FILE: simple_filename.txt | content]]",
-                    example="[[APPEND_FILE: notes.txt | Additional note.]]"
+                    expected_format="append_file with simple filename (no paths)",
+                    example="append_file(filename='notes.txt', content='Additional note.')"
                 )
             )
         except Exception as e:
