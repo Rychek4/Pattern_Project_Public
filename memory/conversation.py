@@ -120,14 +120,20 @@ class ConversationManager:
             # Record timing
             time_since_last = tracker.record_turn()
 
+            # System turns (pulses, reminders) are pre-marked as processed so
+            # they don't interfere with the windowed context/extraction system.
+            # They're excluded from context window queries and unprocessed counts.
+            pre_processed = role == "system"
+
             # Insert turn
             db.execute(
                 """
                 INSERT INTO conversations
-                (session_id, role, content, input_type, time_since_last_turn_seconds)
-                VALUES (?, ?, ?, ?, ?)
+                (session_id, role, content, input_type, time_since_last_turn_seconds,
+                 processed_for_memory)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (session_id, role, content, input_type, time_since_last)
+                (session_id, role, content, input_type, time_since_last, pre_processed)
             )
 
             # Get the new ID
@@ -350,11 +356,16 @@ class ConversationManager:
             db = get_database()
 
             if exclude_processed:
-                # Get most recent UNPROCESSED turns (spans all sessions)
+                # Get most recent UNPROCESSED user/assistant turns (spans all sessions)
+                # NOTE: System turns (pulses, reminders) are excluded so they don't
+                # consume LIMIT slots — they'd be filtered out downstream anyway,
+                # but consuming slots here caused the context window to return
+                # fewer than CONTEXT_WINDOW_SIZE visible messages.
                 result = db.execute(
                     """
                     SELECT * FROM conversations
                     WHERE processed_for_memory = FALSE
+                      AND role IN ('user', 'assistant')
                     ORDER BY created_at DESC
                     LIMIT ?
                     """,
@@ -362,10 +373,11 @@ class ConversationManager:
                     fetch=True
                 )
             else:
-                # Get most recent turns regardless of processed status
+                # Get most recent user/assistant turns regardless of processed status
                 result = db.execute(
                     """
                     SELECT * FROM conversations
+                    WHERE role IN ('user', 'assistant')
                     ORDER BY created_at DESC
                     LIMIT ?
                     """,
@@ -381,7 +393,11 @@ class ConversationManager:
 
     @db_retry()
     def get_unprocessed_turns(self, limit: int = 100) -> List[ConversationTurn]:
-        """Get turns that haven't been processed for memory extraction."""
+        """Get user/assistant turns that haven't been processed for memory extraction.
+
+        System turns are excluded — they don't contain extractable conversation
+        content and are marked as processed at insert time.
+        """
         with self._lock_manager.acquire("conversation"):
             db = get_database()
 
@@ -389,6 +405,7 @@ class ConversationManager:
                 """
                 SELECT * FROM conversations
                 WHERE processed_for_memory = FALSE
+                  AND role IN ('user', 'assistant')
                 ORDER BY created_at ASC
                 LIMIT ?
                 """,
@@ -420,10 +437,16 @@ class ConversationManager:
 
     @db_retry()
     def get_unprocessed_count(self) -> int:
-        """Get count of unprocessed turns."""
+        """Get count of unprocessed user/assistant turns.
+
+        System turns (pulses, reminders) are excluded so they don't
+        inflate the count and trigger extraction prematurely.
+        """
         db = get_database()
         result = db.execute(
-            "SELECT COUNT(*) as count FROM conversations WHERE processed_for_memory = FALSE",
+            """SELECT COUNT(*) as count FROM conversations
+               WHERE processed_for_memory = FALSE
+                 AND role IN ('user', 'assistant')""",
             fetch=True
         )
         return result[0]["count"] if result else 0

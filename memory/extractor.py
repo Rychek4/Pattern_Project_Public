@@ -527,10 +527,10 @@ class MemoryExtractor:
             MEMORY_MAX_FACTUAL_PER_EXTRACTION
         )
 
-        # Windowed extraction settings (NEW)
+        # Windowed extraction settings
         self.context_window_size = CONTEXT_WINDOW_SIZE          # 30
-        self.overflow_trigger = CONTEXT_OVERFLOW_TRIGGER        # 35
-        self.extraction_batch = CONTEXT_EXTRACTION_BATCH        # 5
+        self.overflow_trigger = CONTEXT_OVERFLOW_TRIGGER        # 40
+        self.extraction_batch = CONTEXT_EXTRACTION_BATCH        # 10
 
         # Episodic extraction settings (topic-based)
         self.min_turns_per_topic = MEMORY_MIN_TURNS_PER_TOPIC
@@ -553,11 +553,11 @@ class MemoryExtractor:
         Check if context window has overflowed and trigger extraction.
 
         Called after each conversation turn is added. If the number of unprocessed
-        turns exceeds the overflow trigger (35), extraction runs in a background
+        turns exceeds the overflow trigger (40), extraction runs in a background
         thread to process the oldest turns leaving the context window.
 
         WINDOWED EXTRACTION LOGIC:
-            if unprocessed_count >= overflow_trigger (35):
+            if unprocessed_count >= overflow_trigger (40):
                 extract oldest (unprocessed_count - context_window_size) turns
                 mark them as processed (removes from context)
 
