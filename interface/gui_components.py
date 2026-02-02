@@ -58,50 +58,53 @@ class Theme:
     success: str
     warning: str
     error: str
+    user_bubble: str = ""  # Background color for user message bubbles
 
 
-# Dark theme (original)
+# Dark theme - Claude.ai inspired neutral warm palette
 DARK_THEME = Theme(
     name="dark",
-    background="#1a1a2e",
-    surface="#16213e",
-    primary="#0f3460",
-    accent="#e94560",
-    text="#eaeaea",
-    text_dim="#888888",
-    user="#4ade80",
-    assistant="#60a5fa",
-    system="#f59e0b",
-    timestamp="#6b7280",
-    pulse="#a855f7",
+    background="#2b2b2b",
+    surface="#313131",
+    primary="#424242",
+    accent="#d4a574",
+    text="#e8e6e3",
+    text_dim="#9a9892",
+    user="#e8e6e3",
+    assistant="#e8e6e3",
+    system="#d4a574",
+    timestamp="#7a7770",
+    pulse="#c4a7e7",
     action="#c4a7e7",
-    code_bg="#2d2d44",
-    border="#3d3d5c",
-    success="#22c55e",
-    warning="#eab308",
-    error="#ef4444",
+    code_bg="#1e1e1e",
+    border="#424240",
+    success="#5bb98c",
+    warning="#d4a574",
+    error="#e07a6b",
+    user_bubble="#3d3d3a",
 )
 
-# Light theme
+# Light theme - Claude.ai inspired warm cream palette
 LIGHT_THEME = Theme(
     name="light",
-    background="#f8fafc",
+    background="#f5f3ef",
     surface="#ffffff",
-    primary="#e2e8f0",
-    accent="#dc2626",
-    text="#1e293b",
-    text_dim="#64748b",
-    user="#15803d",
-    assistant="#1d4ed8",
-    system="#b45309",
-    timestamp="#94a3b8",
+    primary="#e8e4de",
+    accent="#b35c2a",
+    text="#2d2b28",
+    text_dim="#6b6862",
+    user="#2d2b28",
+    assistant="#2d2b28",
+    system="#b35c2a",
+    timestamp="#9a9690",
     pulse="#7c3aed",
     action="#6b21a8",
-    code_bg="#f1f5f9",
-    border="#cbd5e1",
-    success="#16a34a",
-    warning="#ca8a04",
-    error="#dc2626",
+    code_bg="#f0ece6",
+    border="#d6d2cc",
+    success="#3a8a5c",
+    warning="#b35c2a",
+    error="#c44a3a",
+    user_bubble="#ede9e3",
 )
 
 
@@ -136,28 +139,32 @@ class ThemeManager(QObject):
     def get_stylesheet(self) -> str:
         """Generate stylesheet for current theme."""
         t = self._current_theme
+        font_stack = "'Segoe UI', 'Helvetica Neue', 'Arial', sans-serif"
         return f"""
             QMainWindow {{
                 background-color: {t.background};
+                font-family: {font_stack};
             }}
             QFrame {{
                 background-color: {t.surface};
                 border: 1px solid {t.border};
-                border-radius: 5px;
+                border-radius: 8px;
             }}
             QTextBrowser {{
-                background-color: {t.surface};
+                background-color: {t.background};
                 color: {t.text};
-                border: 1px solid {t.border};
-                border-radius: 5px;
-                padding: 10px;
+                border: none;
+                border-radius: 8px;
+                padding: 16px;
+                font-family: {font_stack};
             }}
             QLineEdit {{
                 background-color: {t.surface};
                 color: {t.text};
                 border: 1px solid {t.border};
-                border-radius: 5px;
-                padding: 8px;
+                border-radius: 18px;
+                padding: 10px 16px;
+                font-family: {font_stack};
             }}
             QLineEdit:focus {{
                 border: 1px solid {t.accent};
@@ -166,8 +173,9 @@ class ThemeManager(QObject):
                 background-color: {t.surface};
                 color: {t.text};
                 border: 1px solid {t.border};
-                border-radius: 5px;
-                padding: 8px;
+                border-radius: 18px;
+                padding: 10px 16px;
+                font-family: {font_stack};
             }}
             QTextEdit:focus {{
                 border: 1px solid {t.accent};
@@ -176,14 +184,17 @@ class ThemeManager(QObject):
                 background-color: {t.primary};
                 color: {t.text};
                 border: none;
-                border-radius: 5px;
-                padding: 8px 15px;
+                border-radius: 16px;
+                padding: 8px 16px;
+                font-family: {font_stack};
             }}
             QPushButton:hover {{
                 background-color: {t.accent};
+                color: {t.background};
             }}
             QPushButton:checked {{
                 background-color: {t.accent};
+                color: {t.background};
             }}
             QPushButton:disabled {{
                 background-color: {t.text_dim};
@@ -193,17 +204,19 @@ class ThemeManager(QObject):
                 color: {t.text};
                 background: transparent;
                 border: none;
+                font-family: {font_stack};
             }}
             QComboBox {{
                 background-color: {t.surface};
-                color: {t.pulse};
+                color: {t.text_dim};
                 border: 1px solid {t.border};
-                border-radius: 5px;
-                padding: 4px 8px;
+                border-radius: 12px;
+                padding: 4px 10px;
                 min-width: 80px;
+                font-family: {font_stack};
             }}
             QComboBox:hover {{
-                border: 1px solid {t.pulse};
+                border: 1px solid {t.accent};
             }}
             QComboBox::drop-down {{
                 border: none;
@@ -212,35 +225,59 @@ class ThemeManager(QObject):
                 background-color: {t.surface};
                 color: {t.text};
                 selection-background-color: {t.primary};
+                font-family: {font_stack};
             }}
             QScrollBar:vertical {{
-                background-color: {t.surface};
-                width: 12px;
-                border-radius: 6px;
+                background-color: transparent;
+                width: 8px;
+                border-radius: 4px;
             }}
             QScrollBar::handle:vertical {{
                 background-color: {t.border};
-                border-radius: 6px;
+                border-radius: 4px;
                 min-height: 20px;
             }}
             QScrollBar::handle:vertical:hover {{
                 background-color: {t.text_dim};
             }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+                background: none;
+            }}
             QListWidget {{
                 background-color: {t.surface};
                 color: {t.text};
                 border: 1px solid {t.border};
-                border-radius: 5px;
+                border-radius: 8px;
+                font-family: {font_stack};
             }}
             QListWidget::item {{
                 padding: 8px;
-                border-radius: 3px;
+                border-radius: 4px;
             }}
             QListWidget::item:hover {{
                 background-color: {t.primary};
             }}
             QListWidget::item:selected {{
                 background-color: {t.accent};
+            }}
+            QCheckBox {{
+                color: {t.text};
+                font-family: {font_stack};
+                spacing: 6px;
+            }}
+            QCheckBox::indicator {{
+                width: 16px;
+                height: 16px;
+                border-radius: 4px;
+                border: 1px solid {t.border};
+                background-color: {t.surface};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {t.accent};
+                border-color: {t.accent};
             }}
         """
 
@@ -323,10 +360,11 @@ class MarkdownRenderer:
             block_style = (
                 f"background-color: {self.theme.code_bg}; "
                 f"border: 1px solid {self.theme.border}; "
-                "border-radius: 5px; "
-                "padding: 10px; "
-                "margin: 8px 0; "
-                "font-family: 'Consolas', 'Monaco', monospace; "
+                "border-radius: 8px; "
+                "padding: 14px 16px; "
+                "margin: 12px 0; "
+                "font-family: 'Consolas', 'Monaco', 'Courier New', monospace; "
+                "font-size: 13px; "
                 "white-space: pre-wrap; "
                 "display: block; "
                 "overflow-x: auto;"
@@ -335,7 +373,7 @@ class MarkdownRenderer:
             lang_style = (
                 f"color: {self.theme.text_dim}; "
                 "font-size: 10px; "
-                "margin-bottom: 5px; "
+                "margin-bottom: 6px; "
                 "display: block;"
             )
 
@@ -353,9 +391,10 @@ class MarkdownRenderer:
         pattern = r'`([^`\n]+)`'
         style = (
             f"background-color: {self.theme.code_bg}; "
-            "padding: 2px 5px; "
-            "border-radius: 3px; "
-            "font-family: 'Consolas', 'Monaco', monospace;"
+            "padding: 2px 6px; "
+            "border-radius: 4px; "
+            "font-family: 'Consolas', 'Monaco', 'Courier New', monospace; "
+            "font-size: 13px;"
         )
         return re.sub(pattern, rf'<span style="{style}">\1</span>', text)
 
@@ -364,19 +403,19 @@ class MarkdownRenderer:
         # H3 (###)
         text = re.sub(
             r'^### (.+)$',
-            rf'<h4 style="color: {self.theme.text}; margin: 12px 0 6px 0;">\1</h4>',
+            rf'<h4 style="color: {self.theme.text}; margin: 16px 0 8px 0;">\1</h4>',
             text, flags=re.MULTILINE
         )
         # H2 (##)
         text = re.sub(
             r'^## (.+)$',
-            rf'<h3 style="color: {self.theme.text}; margin: 14px 0 8px 0;">\1</h3>',
+            rf'<h3 style="color: {self.theme.text}; margin: 20px 0 10px 0;">\1</h3>',
             text, flags=re.MULTILINE
         )
         # H1 (#)
         text = re.sub(
             r'^# (.+)$',
-            rf'<h2 style="color: {self.theme.text}; margin: 16px 0 10px 0;">\1</h2>',
+            rf'<h2 style="color: {self.theme.text}; margin: 24px 0 12px 0;">\1</h2>',
             text, flags=re.MULTILINE
         )
         return text
@@ -415,10 +454,10 @@ class MarkdownRenderer:
         """Render > blockquotes."""
         pattern = r'^&gt; (.+)$'
         style = (
-            f"border-left: 3px solid {self.theme.accent}; "
-            "padding-left: 10px; "
+            f"border-left: 3px solid {self.theme.border}; "
+            "padding-left: 14px; "
             f"color: {self.theme.text_dim}; "
-            "margin: 8px 0;"
+            "margin: 12px 0;"
         )
         return re.sub(
             pattern,
@@ -453,18 +492,18 @@ class MarkdownRenderer:
                 if not in_list or list_type != 'ul':
                     if in_list:
                         list_buffer.append('</ul>' if list_type == 'ul' else '</ol>')
-                    list_buffer.append('<ul style="margin: 4px 0; padding-left: 20px;">')
+                    list_buffer.append('<ul style="margin: 8px 0; padding-left: 24px;">')
                     in_list = True
                     list_type = 'ul'
-                list_buffer.append(f'<li>{bullet_match.group(2)}</li>')
+                list_buffer.append(f'<li style="margin: 4px 0;">{bullet_match.group(2)}</li>')
             elif number_match:
                 if not in_list or list_type != 'ol':
                     if in_list:
                         list_buffer.append('</ul>' if list_type == 'ul' else '</ol>')
-                    list_buffer.append('<ol style="margin: 4px 0; padding-left: 20px;">')
+                    list_buffer.append('<ol style="margin: 8px 0; padding-left: 24px;">')
                     in_list = True
                     list_type = 'ol'
-                list_buffer.append(f'<li>{number_match.group(3)}</li>')
+                list_buffer.append(f'<li style="margin: 4px 0;">{number_match.group(3)}</li>')
             else:
                 # Skip blank lines when inside a list to prevent double-spacing
                 if in_list and line.strip() == '':
@@ -1104,7 +1143,7 @@ class QuickActionsBar(QFrame):
         btn = QPushButton(f"{icon} {label}" if icon else label)
         btn.setToolTip(tooltip)
         btn.setMaximumHeight(24)
-        btn.setFont(QFont("Consolas", 9))
+        btn.setFont(QFont("Segoe UI", 9))
         btn.clicked.connect(lambda: self.action_triggered.emit(action_id))
 
         # Insert before stretch
@@ -1143,18 +1182,19 @@ class CancelButton(QPushButton):
         self.hide()  # Hidden by default
 
     def _setup_style(self):
-        self.setFont(QFont("Consolas", 10))
+        self.setFont(QFont("Segoe UI", 10))
         self.setMinimumWidth(70)
         self.setStyleSheet(f"""
             QPushButton {{
                 background-color: {self.theme.error};
                 color: white;
                 border: none;
-                border-radius: 4px;
-                padding: 5px 10px;
+                border-radius: 12px;
+                padding: 5px 12px;
             }}
             QPushButton:hover {{
-                background-color: #dc2626;
+                background-color: {self.theme.error};
+                opacity: 0.8;
             }}
         """)
 
