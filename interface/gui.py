@@ -1221,30 +1221,45 @@ class ChatWindow(QMainWindow):
             formatted_content = self._format_message_text(content, role)
 
         # Build HTML based on role - Claude.ai inspired layout
+        # NOTE: QTextBrowser uses Qt's limited HTML4 subset. Key constraints:
+        #   - background-color on <div> doesn't render; use <table> with bgcolor instead
+        #   - border-radius is not supported in inline HTML (only in QSS)
+        #   - Leading whitespace in HTML strings gets rendered as content
+        #   - margin on <div> behaves unpredictably; use <table> cellpadding/spacing
         if role == "user":
-            # User messages: right-aligned bubble with subtle background
-            msg_html = f"""
-            <div style='margin: 16px 0 16px 80px; background-color: {self._theme.user_bubble};
-                 border-radius: 18px; padding: 14px 18px;' data-msg-id='{msg_id}'>
-                <span style='color: {self._theme.text}; line-height: 1.6;'>{formatted_content}</span>
-                <div style='color: {self._theme.timestamp}; font-size: 10px; margin-top: 6px;'>{timestamp}</div>
-            </div>
-            """
+            # User messages: bubble with background using table for Qt compatibility
+            msg_html = (
+                f'<br/>'
+                f'<table width="100%" cellpadding="0" cellspacing="0"><tr>'
+                f'<td width="80"></td>'
+                f'<td bgcolor="{self._theme.user_bubble}" style="padding: 12px 16px;">'
+                f'<span style="color: {self._theme.text};">{formatted_content}</span>'
+                f'<br/><span style="color: {self._theme.timestamp}; font-size: 9px;">{timestamp}</span>'
+                f'</td></tr></table>'
+            )
         elif role == "assistant":
             # Assistant messages: full-width, no bubble, clean flowing text
-            msg_html = f"""
-            <div style='margin: 16px 40px 16px 0; padding: 4px 0;' data-msg-id='{msg_id}'>
-                <span style='color: {self._theme.text}; line-height: 1.6;'>{formatted_content}</span>
-            </div>
-            """
+            msg_html = (
+                f'<br/>'
+                f'<table width="100%" cellpadding="0" cellspacing="0"><tr>'
+                f'<td style="padding: 4px 0;">'
+                f'<span style="color: {self._theme.text};">{formatted_content}</span>'
+                f'</td>'
+                f'<td width="40"></td>'
+                f'</tr></table>'
+            )
         else:
-            # System messages: subtle centered style
-            msg_html = f"""
-            <div style='margin: 12px 40px; padding: 10px 16px; border-left: 3px solid {self._theme.system};
-                 border-radius: 4px;' data-msg-id='{msg_id}'>
-                <span style='color: {self._theme.system}; font-size: 12px;'>{formatted_content}</span>
-            </div>
-            """
+            # System messages: subtle with left border accent
+            msg_html = (
+                f'<br/>'
+                f'<table width="100%" cellpadding="0" cellspacing="0"><tr>'
+                f'<td width="40"></td>'
+                f'<td style="padding: 8px 14px; border-left: 3px solid {self._theme.system};">'
+                f'<span style="color: {self._theme.system}; font-size: 12px;">{formatted_content}</span>'
+                f'</td>'
+                f'<td width="40"></td>'
+                f'</tr></table>'
+            )
 
         self.chat_display.append(msg_html)
         self.chat_display.moveCursor(QTextCursor.End)
@@ -1386,11 +1401,9 @@ class ChatWindow(QMainWindow):
         self._streaming_msg_id = str(uuid.uuid4())
         self._streaming_text = ""
 
-        # Create the assistant message container (clean, no bubble - matches _append_message style)
-        header_html = f"""
-        <div style='margin: 16px 40px 16px 0; padding: 4px 0;'>
-        </div>
-        """
+        # Create assistant message container using table layout (matches _append_message)
+        # No leading whitespace to avoid Qt rendering it as content
+        header_html = '<br/><table width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding: 4px 0;"> </td><td width="40"></td></tr></table>'
         self.chat_display.append(header_html)
 
         # Record cursor position where streaming content will be inserted
@@ -1422,7 +1435,7 @@ class ChatWindow(QMainWindow):
         cursor.removeSelectedText()
 
         # Insert the updated content
-        cursor.insertHtml(f"<span style='color:{self._theme.text}; line-height: 1.6;'>{display_text}</span>")
+        cursor.insertHtml(f'<span style="color:{self._theme.text};">{display_text}</span>')
         self.chat_display.moveCursor(QTextCursor.End)
 
     def _on_stream_complete(self, full_text: str):
@@ -1461,7 +1474,7 @@ class ChatWindow(QMainWindow):
             cursor.removeSelectedText()
 
             # Insert the final markdown-rendered content
-            cursor.insertHtml(f"<span style='color:{self._theme.text}; line-height: 1.6;'>{formatted_content}</span>")
+            cursor.insertHtml(f'<span style="color:{self._theme.text};">{formatted_content}</span>')
             self.chat_display.moveCursor(QTextCursor.End)
 
         # Clear streaming state
