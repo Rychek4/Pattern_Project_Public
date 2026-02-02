@@ -252,6 +252,12 @@ def create_default_builder() -> PromptBuilder:
         sources.append(PatternBreakerSource())
         log_info("PatternBreakerSource enabled", prefix="🔄")
 
+    # Self-correction source (if enabled) - per-turn nudge to catch own errors
+    if getattr(config, 'SELF_CORRECTION_ENABLED', True):
+        from prompt_builder.sources.self_correction import SelfCorrectionSource
+        sources.append(SelfCorrectionSource())
+        log_info("SelfCorrectionSource enabled", prefix="🔍")
+
     # Legacy VisualSource is disabled - the new visual capture system sends images
     # directly to Claude via multimodal messages. VisualSource (which used Gemini
     # for text descriptions) is kept in code for potential fallback but not loaded.

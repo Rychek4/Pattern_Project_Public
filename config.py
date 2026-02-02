@@ -334,6 +334,14 @@ TOOL_STANCE_ENABLED = True  # Inject proactive tool usage guidance into prompts
 PATTERN_BREAKER_ENABLED = True
 PATTERN_BREAKER_INTERVAL = 5   # Nudge every N user-facing messages
 
+# Self-Correction - per-turn nudge for the AI to catch its own errors
+# Each user-facing turn, a lightweight prompt (~70 tokens) asks the AI to
+# briefly consider whether its previous response contained confabulation,
+# overstated confidence, factual errors, tone issues, or unkept promises.
+# Uses extended thinking for private assessment; corrections only surface
+# when warranted. Skips pulse messages (they have their own reflection).
+SELF_CORRECTION_ENABLED = True
+
 # =============================================================================
 # VISUAL CAPTURE CONFIGURATION
 # =============================================================================
