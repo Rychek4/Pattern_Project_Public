@@ -143,6 +143,18 @@ class ActiveThoughtsManager:
                         "updated_at": row["updated_at"]
                     }
 
+                # Archive current thoughts to history before replacing
+                if existing:
+                    conn.execute(
+                        """
+                        INSERT INTO active_thoughts_history
+                        (archived_at, rank, slug, topic, elaboration, created_at, updated_at)
+                        SELECT ?, rank, slug, topic, elaboration, created_at, updated_at
+                        FROM active_thoughts
+                        """,
+                        (now,)
+                    )
+
                 # Clear existing thoughts
                 conn.execute("DELETE FROM active_thoughts")
 
@@ -198,7 +210,21 @@ class ActiveThoughtsManager:
         """
         try:
             db = get_database()
-            db.execute("DELETE FROM active_thoughts")
+            now = datetime.now().isoformat()
+
+            with db.get_connection() as conn:
+                # Archive current thoughts to history before clearing
+                conn.execute(
+                    """
+                    INSERT INTO active_thoughts_history
+                    (archived_at, rank, slug, topic, elaboration, created_at, updated_at)
+                    SELECT ?, rank, slug, topic, elaboration, created_at, updated_at
+                    FROM active_thoughts
+                    """,
+                    (now,)
+                )
+                conn.execute("DELETE FROM active_thoughts")
+
             log_info("Active thoughts cleared", prefix="💭")
             return True
         except Exception as e:
