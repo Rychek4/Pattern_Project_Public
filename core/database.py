@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from core.logger import log_info, log_success, log_error, log_config, log_section
 
 # Schema version for migrations
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 # SQL schema definition
 SCHEMA_SQL = """
@@ -168,6 +168,19 @@ CREATE TABLE IF NOT EXISTS curiosity_goals (
     interaction_count INTEGER DEFAULT 0
 );
 
+-- Active thoughts history: append-only archive of all thought states over time
+-- Each batch shares an archived_at timestamp, representing the state before a change
+CREATE TABLE IF NOT EXISTS active_thoughts_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    archived_at TIMESTAMP NOT NULL,
+    rank INTEGER NOT NULL,
+    slug TEXT NOT NULL,
+    topic TEXT NOT NULL,
+    elaboration TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+
 -- Indexes for efficient queries
 CREATE INDEX IF NOT EXISTS idx_conversations_session ON conversations(session_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_unprocessed ON conversations(processed_for_memory) WHERE processed_for_memory = FALSE;
@@ -188,6 +201,7 @@ CREATE INDEX IF NOT EXISTS idx_active_thoughts_rank ON active_thoughts(rank);
 CREATE INDEX IF NOT EXISTS idx_curiosity_status ON curiosity_goals(status);
 CREATE INDEX IF NOT EXISTS idx_curiosity_cooldown ON curiosity_goals(cooldown_until);
 CREATE INDEX IF NOT EXISTS idx_curiosity_source ON curiosity_goals(source_memory_id);
+CREATE INDEX IF NOT EXISTS idx_thoughts_history_archived ON active_thoughts_history(archived_at DESC);
 """
 
 # Migration SQL for v1 -> v2
@@ -671,6 +685,32 @@ CREATE INDEX IF NOT EXISTS idx_curiosity_source ON curiosity_goals(source_memory
 PRAGMA foreign_keys=ON;
 """
 
+# Migration SQL for v16 -> v17 (add active_thoughts_history table)
+MIGRATION_V17_SQL = """
+-- Active thoughts history: append-only archive for longitudinal state tracking
+-- Before each thought update, current thoughts are copied here.
+-- This makes active_thoughts the only previously non-reconstructable state
+-- fully recoverable at any historical point in time.
+CREATE TABLE IF NOT EXISTS active_thoughts_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    archived_at TIMESTAMP NOT NULL,
+    rank INTEGER NOT NULL,
+    slug TEXT NOT NULL,
+    topic TEXT NOT NULL,
+    elaboration TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+
+-- Index for finding the latest snapshot before a given date
+CREATE INDEX IF NOT EXISTS idx_thoughts_history_archived ON active_thoughts_history(archived_at DESC);
+
+-- Seed history with current active thoughts (if any) so pre-migration state is preserved
+INSERT INTO active_thoughts_history (archived_at, rank, slug, topic, elaboration, created_at, updated_at)
+SELECT CURRENT_TIMESTAMP, rank, slug, topic, elaboration, created_at, updated_at
+FROM active_thoughts;
+"""
+
 
 class Database:
     """SQLite database manager with WAL mode and thread-safe connections."""
@@ -848,6 +888,10 @@ class Database:
             if from_version < 16:
                 log_config("Applying migration", "v15 → v16 (fix CHECK constraint on curiosity_goals.category)", indent=1)
                 conn.executescript(MIGRATION_V16_SQL)
+
+            if from_version < 17:
+                log_config("Applying migration", "v16 → v17 (add active_thoughts_history table)", indent=1)
+                conn.executescript(MIGRATION_V17_SQL)
 
             # Record new version
             conn.execute(
