@@ -362,7 +362,7 @@ class ChatWindow(QMainWindow):
         # Pulse interval dropdown
         self.pulse_dropdown = QComboBox()
         self.pulse_dropdown.setFont(QFont("Consolas", 11))
-        self.pulse_dropdown.addItems(["3 min", "10 min", "30 min", "1 hour", "6 hours"])
+        self.pulse_dropdown.addItems(["3 min", "10 min", "30 min", "1 hour", "2 hours", "3 hours", "6 hours", "12 hours"])
         self.pulse_dropdown.setCurrentIndex(1)  # Default: 10 min
         self.pulse_dropdown.setToolTip("Set pulse timer interval")
         self.pulse_dropdown.currentIndexChanged.connect(self._on_pulse_interval_changed)
@@ -775,7 +775,10 @@ class ChatWindow(QMainWindow):
             1: 600,    # 10 min
             2: 1800,   # 30 min
             3: 3600,   # 1 hour
-            4: 21600,  # 6 hours
+            4: 7200,   # 2 hours
+            5: 10800,  # 3 hours
+            6: 21600,  # 6 hours
+            7: 43200,  # 12 hours
         }
 
         new_interval = interval_map.get(index, 600)
@@ -810,7 +813,10 @@ class ChatWindow(QMainWindow):
             600: 1,    # 10 min
             1800: 2,   # 30 min
             3600: 3,   # 1 hour
-            21600: 4,  # 6 hours
+            7200: 4,   # 2 hours
+            10800: 5,  # 3 hours
+            21600: 6,  # 6 hours
+            43200: 7,  # 12 hours
         }
 
         index = seconds_to_index.get(seconds)
@@ -1054,8 +1060,8 @@ class ChatWindow(QMainWindow):
         """
         from prompt_builder.sources.system_pulse import PULSE_COMMAND_TO_SECONDS
 
-        # Pattern: [[PULSE:3m]], [[PULSE:10m]], [[PULSE:30m]], [[PULSE:1h]], [[PULSE:6h]]
-        pattern = r'\[\[PULSE:(3m|10m|30m|1h|6h)\]\]'
+        # Pattern: [[PULSE:3m]], [[PULSE:10m]], [[PULSE:30m]], [[PULSE:1h]], [[PULSE:2h]], [[PULSE:3h]], [[PULSE:6h]], [[PULSE:12h]]
+        pattern = r'\[\[PULSE:(3m|10m|30m|1h|2h|3h|6h|12h)\]\]'
         match = re.search(pattern, text)
 
         if match:
@@ -1079,7 +1085,7 @@ class ChatWindow(QMainWindow):
         """
         # Pattern matches the escaped version of [[PULSE:Xm]]
         # In HTML-escaped text, brackets are still brackets
-        pattern = r'\[\[PULSE:(3m|10m|30m|1h|6h)\]\]'
+        pattern = r'\[\[PULSE:(3m|10m|30m|1h|2h|3h|6h|12h)\]\]'
 
         pulse_color = COLORS["pulse"]
 

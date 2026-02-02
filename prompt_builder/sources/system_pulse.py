@@ -19,7 +19,10 @@ PULSE_INTERVAL_OPTIONS = {
     600: "10 minutes",
     1800: "30 minutes",
     3600: "1 hour",
+    7200: "2 hours",
+    10800: "3 hours",
     21600: "6 hours",
+    43200: "12 hours",
 }
 
 # Mapping for tool input validation (used by ToolExecutor)
@@ -28,7 +31,10 @@ PULSE_COMMAND_TO_SECONDS = {
     "10m": 600,
     "30m": 1800,
     "1h": 3600,
+    "2h": 7200,
+    "3h": 10800,
     "6h": 21600,
+    "12h": 43200,
 }
 
 
