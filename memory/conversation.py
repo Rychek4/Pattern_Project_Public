@@ -254,45 +254,46 @@ class ConversationManager:
         - Spans all sessions (cross-session continuity)
         - Excludes processed turns (coordinates with memory extraction)
         - Adds timestamps at format-time (NOT stored in database)
-        - Loads saved context count from previous shutdown (30-40 range)
+        - Loads ALL unprocessed turns (context grows naturally from 30→40)
 
         The timestamps are computed from the stored created_at field, ensuring
         the database remains clean and memory extraction receives raw content.
 
-        CONTEXT PERSISTENCE:
-        On shutdown, the system saves the current unprocessed message count.
-        On boot, this method loads that count to ensure no messages are lost
-        between the context window (30) and extraction trigger (40).
+        DYNAMIC CONTEXT WINDOW:
+        The context window grows naturally as turns accumulate. When
+        unprocessed turns reach CONTEXT_OVERFLOW_TRIGGER (40), extraction
+        fires and consolidates the oldest turns into long-term memory,
+        snapping the window back to CONTEXT_WINDOW_SIZE (30). The agent
+        experiences this growth as increasing context density before
+        consolidation relieves it.
+
+        A safety cap of CONTEXT_OVERFLOW_TRIGGER + CONTEXT_EXTRACTION_BATCH
+        prevents pathological growth if extraction stalls.
 
         Args:
-            limit: Maximum turns to return. If None, uses saved context count
-                   from previous shutdown (clamped to 30-40 range).
+            limit: Maximum turns to return. If None, loads all unprocessed
+                   turns up to the safety cap.
 
         Returns:
             List of {"role": ..., "content": "(timestamp) message"} dicts
         """
         from core.temporal import format_fuzzy_relative_time
-        from core.database import get_database
         from core.logger import log_info
-        from config import CONTEXT_WINDOW_SIZE, CONTEXT_OVERFLOW_TRIGGER
+        from config import CONTEXT_WINDOW_SIZE, CONTEXT_OVERFLOW_TRIGGER, CONTEXT_EXTRACTION_BATCH
 
         # DIAGNOSTIC: Log entry
         log_info("=== get_api_messages START ===", prefix="📜")
 
         # Determine the limit to use
         if limit is None:
-            # Load saved context count from state (persisted at shutdown)
-            db = get_database()
-            saved_count = db.get_state("context_message_count")
-
-            if saved_count is not None:
-                # Clamp to valid range [CONTEXT_WINDOW_SIZE, CONTEXT_OVERFLOW_TRIGGER]
-                limit = max(CONTEXT_WINDOW_SIZE, min(CONTEXT_OVERFLOW_TRIGGER, int(saved_count)))
-                log_info(f"Using saved context count: {saved_count} -> clamped to {limit}", prefix="📜")
-            else:
-                # First boot or no saved state - use default window size
-                limit = CONTEXT_WINDOW_SIZE
-                log_info(f"No saved context count, using default: {limit}", prefix="📜")
+            # Load ALL unprocessed turns - let the context window grow naturally
+            # from CONTEXT_WINDOW_SIZE (30) toward CONTEXT_OVERFLOW_TRIGGER (40).
+            # Extraction fires at the trigger and snaps back to window size.
+            # Safety cap prevents pathological growth if extraction stalls.
+            actual_count = self.get_unprocessed_count()
+            safety_cap = CONTEXT_OVERFLOW_TRIGGER + CONTEXT_EXTRACTION_BATCH
+            limit = min(actual_count, safety_cap)
+            log_info(f"Unprocessed turns: {actual_count}, safety cap: {safety_cap}, limit: {limit}", prefix="📜")
         else:
             log_info(f"Using provided limit: {limit}", prefix="📜")
 

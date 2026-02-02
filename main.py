@@ -335,31 +335,20 @@ def stop_background_services() -> None:
     """Stop all background services gracefully."""
     log_section("Stopping Services", "🛑")
 
-    # Wait for any in-progress memory extraction and save context count
+    # Wait for any in-progress memory extraction to complete cleanly
     try:
         from memory.extractor import get_memory_extractor
-        from memory.conversation import get_conversation_manager
-        from core.database import get_database
 
         extractor = get_memory_extractor()
-        conversation_mgr = get_conversation_manager()
 
-        # Wait for extraction to complete (prevents saving stale count)
+        # Wait for extraction to finish so memories are fully written
         if extractor.wait_for_completion(timeout=5.0):
             log_subsection("Memory extraction completed")
         else:
-            log_subsection("Memory extraction timeout - saving current count")
-
-        # Save unprocessed count for next boot
-        # This ensures we load the right number of messages on restart
-        # (between CONTEXT_WINDOW_SIZE and CONTEXT_OVERFLOW_TRIGGER)
-        unprocessed_count = conversation_mgr.get_unprocessed_count()
-        db = get_database()
-        db.set_state("context_message_count", unprocessed_count)
-        log_subsection(f"Context message count saved: {unprocessed_count}")
+            log_subsection("Memory extraction timeout - some memories may be incomplete")
 
     except Exception as e:
-        log_error(f"Error saving context state: {e}")
+        log_error(f"Error waiting for memory extraction: {e}")
 
     # Stop proactive agent (legacy)
     try:
