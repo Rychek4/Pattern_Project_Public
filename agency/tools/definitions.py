@@ -456,14 +456,14 @@ Use this when:
 - You want to create space or close the distance with the user
 - Maintaining your own sense of timing feels more authentic than the default
 
-Available intervals: 3 minutes, 10 minutes, 30 minutes, 1 hour, 6 hours""",
+Available intervals: 3 minutes, 10 minutes, 30 minutes, 1 hour, 2 hours, 3 hours, 6 hours, 12 hours""",
     "input_schema": {
         "type": "object",
         "properties": {
             "interval": {
                 "type": "string",
-                "enum": ["3m", "10m", "30m", "1h", "6h"],
-                "description": "The new pulse interval: '3m', '10m', '30m', '1h', or '6h'"
+                "enum": ["3m", "10m", "30m", "1h", "2h", "3h", "6h", "12h"],
+                "description": "The new pulse interval: '3m', '10m', '30m', '1h', '2h', '3h', '6h', or '12h'"
             }
         },
         "required": ["interval"]

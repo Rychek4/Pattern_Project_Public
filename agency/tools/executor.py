@@ -579,7 +579,7 @@ class ToolExecutor:
             return ToolResult(
                 tool_use_id=id,
                 tool_name="set_pulse_interval",
-                content=f"Invalid interval '{interval_str}'. Valid options: 3m, 10m, 30m, 1h, 6h",
+                content=f"Invalid interval '{interval_str}'. Valid options: 3m, 10m, 30m, 1h, 2h, 3h, 6h, 12h",
                 is_error=True
             )
 
@@ -596,7 +596,10 @@ class ToolExecutor:
             "10m": "10 minutes",
             "30m": "30 minutes",
             "1h": "1 hour",
+            "2h": "2 hours",
+            "3h": "3 hours",
             "6h": "6 hours",
+            "12h": "12 hours",
         }
         label = interval_labels.get(interval_str, interval_str)
 
