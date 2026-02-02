@@ -70,6 +70,9 @@ def get_colors_from_theme(theme: Theme) -> dict:
 # Initialize with dark theme
 COLORS = get_colors_from_theme(DARK_THEME)
 
+# UI font family - proportional sans-serif for chat, matching Claude.ai style
+UI_FONT_FAMILY = "Segoe UI"
+
 
 class MessageSignals(QObject):
     """Signals for thread-safe message passing to GUI."""
@@ -105,7 +108,7 @@ class ChatInputWidget(QTextEdit):
     def __init__(self):
         super().__init__()
         self.setAcceptRichText(False)
-        self.setPlaceholderText("Type a message... (Ctrl+V to paste images)")
+        self.setPlaceholderText("Reply...")
 
         # Hide scroll bar for single-line mode, show only when needed for multi-line
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
@@ -287,8 +290,8 @@ class ChatWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(8)
+        layout.setContentsMargins(0, 0, 0, 8)
+        layout.setSpacing(6)
 
         # Header frame
         header = self._create_header()
@@ -299,21 +302,26 @@ class ChatWindow(QMainWindow):
         self.chat_display = QTextBrowser()
         self.chat_display.setOpenExternalLinks(False)  # Handle links ourselves for clarification
         self.chat_display.anchorClicked.connect(self._on_link_clicked)
-        self.chat_display.setFont(QFont("Consolas", self._user_settings.font_size))
+        self.chat_display.setFont(QFont(UI_FONT_FAMILY, self._user_settings.font_size))
         self.chat_display.setContextMenuPolicy(Qt.CustomContextMenu)
         self.chat_display.customContextMenuRequested.connect(self._show_chat_context_menu)
         layout.addWidget(self.chat_display, stretch=1)
 
 
-        # Input area with cancel button
+        # Input area - add horizontal padding since central widget has 0 margins
         input_frame = self._create_input_area()
-        layout.addWidget(input_frame)
+        input_container = QWidget()
+        input_container_layout = QHBoxLayout(input_container)
+        input_container_layout.setContentsMargins(12, 0, 12, 0)
+        input_container_layout.addWidget(input_frame)
+        layout.addWidget(input_container)
 
         # Status bar with progress indicator
         status_frame = QFrame()
         status_frame.setFrameStyle(QFrame.NoFrame)
+        status_frame.setStyleSheet("QFrame { border: none; background: transparent; }")
         status_layout = QHBoxLayout(status_frame)
-        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.setContentsMargins(16, 2, 16, 0)
 
         self.status_label = QLabel("Ready")
         self.status_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
@@ -337,22 +345,31 @@ class ChatWindow(QMainWindow):
     def _create_header(self) -> QFrame:
         """Create the header with timer, pulse countdown, and controls."""
         header = QFrame()
-        header.setFrameStyle(QFrame.StyledPanel)
+        header.setFrameStyle(QFrame.NoFrame)
+        header.setStyleSheet(f"""
+            QFrame {{
+                background-color: {self._theme.background};
+                border: none;
+                border-bottom: 1px solid {self._theme.border};
+                border-radius: 0px;
+                padding: 0px;
+            }}
+        """)
         layout = QHBoxLayout(header)
-        layout.setContentsMargins(10, 5, 10, 5)
+        layout.setContentsMargins(12, 6, 12, 6)
 
         # Session timer
         self.timer_label = QLabel("Session: --:--")
-        self.timer_label.setFont(QFont("Consolas", 13, QFont.Bold))
-        self.timer_label.setStyleSheet(f"color: {COLORS['text']};")
+        self.timer_label.setFont(QFont(UI_FONT_FAMILY, 11))
+        self.timer_label.setStyleSheet(f"color: {COLORS['text_dim']};")
         layout.addWidget(self.timer_label)
 
         # Add spacing between session timer and pulse timer
-        layout.addSpacing(30)
+        layout.addSpacing(20)
 
         # Pulse countdown (only if enabled)
         self.pulse_label = QLabel("Pulse: --:--")
-        self.pulse_label.setFont(QFont("Consolas", 13, QFont.Bold))
+        self.pulse_label.setFont(QFont(UI_FONT_FAMILY, 11))
         self.pulse_label.setStyleSheet(f"color: {COLORS['pulse']};")
         self.pulse_label.setToolTip("Time until next system pulse")
         if not config.SYSTEM_PULSE_ENABLED:
@@ -361,7 +378,7 @@ class ChatWindow(QMainWindow):
 
         # Pulse interval dropdown
         self.pulse_dropdown = QComboBox()
-        self.pulse_dropdown.setFont(QFont("Consolas", 11))
+        self.pulse_dropdown.setFont(QFont(UI_FONT_FAMILY, 10))
         self.pulse_dropdown.addItems(["3 min", "10 min", "30 min", "1 hour", "2 hours", "3 hours", "6 hours", "12 hours"])
         self.pulse_dropdown.setCurrentIndex(1)  # Default: 10 min
         self.pulse_dropdown.setToolTip("Set pulse timer interval")
@@ -372,7 +389,7 @@ class ChatWindow(QMainWindow):
 
         # Model switcher dropdown
         self.model_dropdown = QComboBox()
-        self.model_dropdown.setFont(QFont("Consolas", 11))
+        self.model_dropdown.setFont(QFont(UI_FONT_FAMILY, 10))
         self.model_dropdown.addItems(["Opus 4.5", "Sonnet 4.5"])
         self.model_dropdown.setToolTip("Conversation model (affects new messages)")
         self.model_dropdown.currentIndexChanged.connect(self._on_model_changed)
@@ -380,21 +397,21 @@ class ChatWindow(QMainWindow):
 
         # Extended thinking toggle
         self.thinking_checkbox = QCheckBox("Thinking")
-        self.thinking_checkbox.setFont(QFont("Consolas", 10))
+        self.thinking_checkbox.setFont(QFont(UI_FONT_FAMILY, 10))
         self.thinking_checkbox.setToolTip("Enable extended thinking for deeper reasoning (uses more tokens)")
         self.thinking_checkbox.stateChanged.connect(self._on_thinking_changed)
         layout.addWidget(self.thinking_checkbox)
 
         # Font size controls
         self.font_decrease_btn = QPushButton("A-")
-        self.font_decrease_btn.setFont(QFont("Consolas", 10))
-        self.font_decrease_btn.setMaximumWidth(32)
+        self.font_decrease_btn.setFont(QFont(UI_FONT_FAMILY, 9))
+        self.font_decrease_btn.setMaximumWidth(30)
         self.font_decrease_btn.clicked.connect(self._decrease_font_size)
         layout.addWidget(self.font_decrease_btn)
 
         self.font_increase_btn = QPushButton("A+")
-        self.font_increase_btn.setFont(QFont("Consolas", 10))
-        self.font_increase_btn.setMaximumWidth(32)
+        self.font_increase_btn.setFont(QFont(UI_FONT_FAMILY, 9))
+        self.font_increase_btn.setMaximumWidth(30)
         self.font_increase_btn.clicked.connect(self._increase_font_size)
         layout.addWidget(self.font_increase_btn)
 
@@ -403,27 +420,28 @@ class ChatWindow(QMainWindow):
         layout.addStretch()
 
         # Prompt export button
-        self.export_prompt_btn = QPushButton("Export Prompt")
-        self.export_prompt_btn.setFont(QFont("Consolas", 10))
+        self.export_prompt_btn = QPushButton("Export")
+        self.export_prompt_btn.setFont(QFont(UI_FONT_FAMILY, 9))
         self.export_prompt_btn.setToolTip("Export the last AI round (full API payload) to a log file")
         self.export_prompt_btn.clicked.connect(self._export_prompt)
         layout.addWidget(self.export_prompt_btn)
 
         # Theme toggle button
-        self.theme_btn = QPushButton("🌙")
+        self.theme_btn = QPushButton("\u263D")  # Moon symbol
         self.theme_btn.setToolTip("Toggle light/dark theme (Ctrl+T)")
-        self.theme_btn.setMaximumWidth(40)
+        self.theme_btn.setMaximumWidth(34)
         self.theme_btn.clicked.connect(self._toggle_theme)
         layout.addWidget(self.theme_btn)
 
         # Command palette button
-        self.palette_btn = QPushButton("⌘")
+        self.palette_btn = QPushButton("\u2318")  # Command symbol
         self.palette_btn.setToolTip("Command palette (Ctrl+Shift+P)")
-        self.palette_btn.setMaximumWidth(40)
+        self.palette_btn.setMaximumWidth(34)
         self.palette_btn.clicked.connect(self._show_command_palette)
         layout.addWidget(self.palette_btn)
 
         self.settings_btn = QPushButton("Settings")
+        self.settings_btn.setFont(QFont(UI_FONT_FAMILY, 9))
         self.settings_btn.clicked.connect(self._show_settings)
         layout.addWidget(self.settings_btn)
 
@@ -432,19 +450,52 @@ class ChatWindow(QMainWindow):
     def _create_input_area(self) -> QFrame:
         """Create the input area with text field and send button."""
         frame = QFrame()
+        frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {self._theme.surface};
+                border: 1px solid {self._theme.border};
+                border-radius: 22px;
+                padding: 4px;
+            }}
+        """)
         layout = QHBoxLayout(frame)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(8, 2, 4, 2)
+        layout.setSpacing(6)
 
         # Multi-line input with Enter to send, Shift+Enter for newline
         self.input_field = ChatInputWidget()
-        self.input_field.setFont(QFont("Consolas", self._user_settings.font_size))
+        self.input_field.setFont(QFont(UI_FONT_FAMILY, self._user_settings.font_size))
+        self.input_field.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: transparent;
+                border: none;
+                padding: 6px 8px;
+                color: {self._theme.text};
+            }}
+        """)
         self.input_field.send_requested.connect(self._send_message)
         layout.addWidget(self.input_field, stretch=1)
 
-        self.send_btn = QPushButton("Send")
-        self.send_btn.setFont(QFont("Consolas", 11))
+        self.send_btn = QPushButton("\u2191")  # Up arrow character
+        self.send_btn.setFont(QFont(UI_FONT_FAMILY, 14))
         self.send_btn.clicked.connect(self._send_message)
-        self.send_btn.setMinimumWidth(80)
+        self.send_btn.setFixedSize(36, 36)
+        self.send_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {self._theme.accent};
+                color: {self._theme.background};
+                border: none;
+                border-radius: 18px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                opacity: 0.85;
+            }}
+            QPushButton:disabled {{
+                background-color: {self._theme.text_dim};
+                color: {self._theme.surface};
+            }}
+        """)
         layout.addWidget(self.send_btn)
 
         return frame
@@ -536,15 +587,69 @@ class ChatWindow(QMainWindow):
 
         # Update theme button icon
         if theme.name == "dark":
-            self.theme_btn.setText("🌙")
+            self.theme_btn.setText("\u263D")  # Moon
         else:
-            self.theme_btn.setText("☀️")
+            self.theme_btn.setText("\u2600")  # Sun
 
         # Update markdown renderer
         self._markdown_renderer.update_theme(theme)
 
         # Re-apply stylesheet
         self._apply_style()
+
+        # Update inline-styled elements that don't pick up global stylesheet changes
+        self.timer_label.setStyleSheet(f"color: {theme.text_dim};")
+        self.pulse_label.setStyleSheet(f"color: {theme.pulse};")
+        self.status_label.setStyleSheet(f"color: {theme.text_dim}; font-size: 10px;")
+
+        # Update header frame style
+        header_frame = self.timer_label.parent()
+        if header_frame:
+            header_frame.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {theme.background};
+                    border: none;
+                    border-bottom: 1px solid {theme.border};
+                    border-radius: 0px;
+                    padding: 0px;
+                }}
+            """)
+
+        # Update input area styles
+        self.input_field.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: transparent;
+                border: none;
+                padding: 6px 8px;
+                color: {theme.text};
+            }}
+        """)
+        input_frame = self.input_field.parent()
+        if input_frame:
+            input_frame.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {theme.surface};
+                    border: 1px solid {theme.border};
+                    border-radius: 22px;
+                    padding: 4px;
+                }}
+            """)
+        self.send_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {theme.accent};
+                color: {theme.background};
+                border: none;
+                border-radius: 18px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                opacity: 0.85;
+            }}
+            QPushButton:disabled {{
+                background-color: {theme.text_dim};
+                color: {theme.surface};
+            }}
+        """)
 
         # Update component themes
         self.cancel_btn.update_theme(theme)
@@ -914,8 +1019,8 @@ class ChatWindow(QMainWindow):
     def _apply_font_size(self, size: int):
         """Apply font size to chat display and input field."""
         self._user_settings.font_size = size
-        self.chat_display.setFont(QFont("Consolas", size))
-        self.input_field.setFont(QFont("Consolas", size))
+        self.chat_display.setFont(QFont(UI_FONT_FAMILY, size))
+        self.input_field.setFont(QFont(UI_FONT_FAMILY, size))
         self._update_font_tooltips()
 
     def _update_font_tooltips(self):
@@ -975,12 +1080,13 @@ class ChatWindow(QMainWindow):
             Content with `code` converted to styled spans
         """
         pattern = r'`([^`]+)`'
-        code_bg = "#2d2d44"  # Subtle dark background
+        code_bg = self._theme.code_bg
         code_style = (
             f"background-color:{code_bg}; "
-            "padding: 2px 4px; "
-            "border-radius: 3px; "
-            "font-family: monospace;"
+            "padding: 2px 6px; "
+            "border-radius: 4px; "
+            "font-family: 'Consolas', 'Monaco', 'Courier New', monospace; "
+            "font-size: 13px;"
         )
         return re.sub(pattern, rf'<span style="{code_style}">\1</span>', content)
 
@@ -1107,33 +1213,38 @@ class ChatWindow(QMainWindow):
         )
         self._messages.append(msg_data)
 
-        # Color based on role
-        if role == "user":
-            color = self._theme.user
-            prefix = "You"
-        elif role == "assistant":
-            color = self._theme.assistant
-            prefix = "AI"
-        else:
-            color = self._theme.system
-            prefix = "System"
-
-        # Format content with new markdown renderer (for assistant messages)
+        # Format content with markdown renderer (for assistant messages)
         # or simple HTML escape (for user/system)
         if role == "assistant":
             formatted_content = self._markdown_renderer.render(content, role)
         else:
             formatted_content = self._format_message_text(content, role)
 
-        # Build HTML (using msg_html to avoid shadowing html module)
-        msg_html = f"""
-        <div style='margin-bottom: 10px;' data-msg-id='{msg_id}'>
-            <span style='color:{self._theme.timestamp};'>[{timestamp}]</span>
-            <span style='color:{color}; font-weight:bold;'>{prefix}:</span>
-            <br/>
-            <span style='color:{self._theme.text}; margin-left: 20px;'>{formatted_content}</span>
-        </div>
-        """
+        # Build HTML based on role - Claude.ai inspired layout
+        if role == "user":
+            # User messages: right-aligned bubble with subtle background
+            msg_html = f"""
+            <div style='margin: 16px 0 16px 80px; background-color: {self._theme.user_bubble};
+                 border-radius: 18px; padding: 14px 18px;' data-msg-id='{msg_id}'>
+                <span style='color: {self._theme.text}; line-height: 1.6;'>{formatted_content}</span>
+                <div style='color: {self._theme.timestamp}; font-size: 10px; margin-top: 6px;'>{timestamp}</div>
+            </div>
+            """
+        elif role == "assistant":
+            # Assistant messages: full-width, no bubble, clean flowing text
+            msg_html = f"""
+            <div style='margin: 16px 40px 16px 0; padding: 4px 0;' data-msg-id='{msg_id}'>
+                <span style='color: {self._theme.text}; line-height: 1.6;'>{formatted_content}</span>
+            </div>
+            """
+        else:
+            # System messages: subtle centered style
+            msg_html = f"""
+            <div style='margin: 12px 40px; padding: 10px 16px; border-left: 3px solid {self._theme.system};
+                 border-radius: 4px;' data-msg-id='{msg_id}'>
+                <span style='color: {self._theme.system}; font-size: 12px;'>{formatted_content}</span>
+            </div>
+            """
 
         self.chat_display.append(msg_html)
         self.chat_display.moveCursor(QTextCursor.End)
@@ -1270,18 +1381,14 @@ class ChatWindow(QMainWindow):
             log_warning(f"TTS trigger error: {e}")
 
     def _on_stream_start(self, timestamp: str):
-        """Handle start of streaming response - create message header and track position."""
+        """Handle start of streaming response - create message container and track position."""
         # Generate unique ID for this streaming message
         self._streaming_msg_id = str(uuid.uuid4())
         self._streaming_text = ""
 
-        # Create the message header (timestamp + AI label)
-        color = self._theme.assistant
+        # Create the assistant message container (clean, no bubble - matches _append_message style)
         header_html = f"""
-        <div style='margin-bottom: 10px;'>
-            <span style='color:{self._theme.timestamp};'>[{timestamp}]</span>
-            <span style='color:{color}; font-weight:bold;'>AI:</span>
-            <br/>
+        <div style='margin: 16px 40px 16px 0; padding: 4px 0;'>
         </div>
         """
         self.chat_display.append(header_html)
@@ -1315,7 +1422,7 @@ class ChatWindow(QMainWindow):
         cursor.removeSelectedText()
 
         # Insert the updated content
-        cursor.insertHtml(f"<span style='color:{self._theme.text};'>{display_text}</span>")
+        cursor.insertHtml(f"<span style='color:{self._theme.text}; line-height: 1.6;'>{display_text}</span>")
         self.chat_display.moveCursor(QTextCursor.End)
 
     def _on_stream_complete(self, full_text: str):
@@ -1354,7 +1461,7 @@ class ChatWindow(QMainWindow):
             cursor.removeSelectedText()
 
             # Insert the final markdown-rendered content
-            cursor.insertHtml(f"<span style='color:{self._theme.text};'>{formatted_content}</span>")
+            cursor.insertHtml(f"<span style='color:{self._theme.text}; line-height: 1.6;'>{formatted_content}</span>")
             self.chat_display.moveCursor(QTextCursor.End)
 
         # Clear streaming state
@@ -2717,8 +2824,8 @@ class SettingsDialog(QDialog):
         font_size = self.font_spin.value()
         self._user_settings.font_size = font_size
         if self.parent():
-            self.parent().chat_display.setFont(QFont("Consolas", font_size))
-            self.parent().input_field.setFont(QFont("Consolas", font_size))
+            self.parent().chat_display.setFont(QFont(UI_FONT_FAMILY, font_size))
+            self.parent().input_field.setFont(QFont(UI_FONT_FAMILY, font_size))
             self.parent()._update_font_tooltips()
 
         # TTS settings
