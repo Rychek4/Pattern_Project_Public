@@ -305,6 +305,7 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_TO_FILE = True
 LOG_TO_CONSOLE = True
 PROMPT_LOG_PATH = LOGS_DIR / "api_prompts.jsonl"
+PROMPT_EXPORT_PATH = LOGS_DIR / "prompt_export.txt"  # Overwritten each time by Export Prompt button
 
 # =============================================================================
 # CONCURRENCY CONFIGURATION

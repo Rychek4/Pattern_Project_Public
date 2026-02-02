@@ -91,7 +91,8 @@ class ToolResponseHelper:
         tools: Optional[List[Dict[str, Any]]] = None,
         task_type=None,
         thinking_enabled: bool = False,
-        thinking_budget_tokens: Optional[int] = None
+        thinking_budget_tokens: Optional[int] = None,
+        round_recorder=None
     ):
         """
         Initialize the helper.
@@ -103,6 +104,7 @@ class ToolResponseHelper:
             task_type: Task type for router calls (defaults to CONVERSATION)
             thinking_enabled: Whether to enable extended thinking for continuations
             thinking_budget_tokens: Max tokens for thinking (None = use config default)
+            round_recorder: Optional RoundRecorder for prompt export
         """
         self._router = llm_router
         self._system_prompt = system_prompt
@@ -111,6 +113,7 @@ class ToolResponseHelper:
         self._thinking_enabled = thinking_enabled
         self._thinking_budget_tokens = thinking_budget_tokens
         self._processor = get_tool_processor()
+        self._round_recorder = round_recorder
 
     def process_response(
         self,
@@ -227,6 +230,21 @@ class ToolResponseHelper:
             # Add tool results message
             current_history.append(processed.tool_result_message)
 
+            # Record continuation request for prompt export
+            if self._round_recorder:
+                # Resolve model name for recording
+                _model = getattr(config, 'ANTHROPIC_MODEL_CONVERSATION', 'unknown')
+                self._round_recorder.record_request(
+                    system_prompt=self._system_prompt,
+                    messages=current_history,
+                    tools=self._tools,
+                    model=_model,
+                    temperature=0.7,
+                    thinking_enabled=self._thinking_enabled,
+                    thinking_budget_tokens=self._thinking_budget_tokens,
+                    is_streaming=False,
+                )
+
             # Get next response with tools
             cont_start = time.time()
             continuation = self._router.chat(
@@ -239,6 +257,18 @@ class ToolResponseHelper:
                 thinking_budget_tokens=self._thinking_budget_tokens
             )
             current_duration = (time.time() - cont_start) * 1000
+
+            # Record continuation response for prompt export
+            if self._round_recorder and continuation.success:
+                self._round_recorder.record_response(
+                    response_text=continuation.text or "",
+                    thinking_text=getattr(continuation, 'thinking_text', "") or "",
+                    tool_calls=getattr(continuation, 'tool_calls', []) or [],
+                    raw_content=getattr(continuation, 'raw_content', []) or [],
+                    stop_reason=getattr(continuation, 'stop_reason', "") or "",
+                    tokens_in=getattr(continuation, 'tokens_in', 0),
+                    tokens_out=getattr(continuation, 'tokens_out', 0),
+                )
 
             if not continuation.success:
                 # On failure, return accumulated text from successful passes
@@ -326,7 +356,8 @@ def process_with_tools(
     tools: Optional[List[Dict[str, Any]]] = None,
     dev_mode_callbacks: Optional[Dict[str, Callable]] = None,
     thinking_enabled: bool = False,
-    thinking_budget_tokens: Optional[int] = None
+    thinking_budget_tokens: Optional[int] = None,
+    round_recorder=None
 ) -> ToolProcessingResult:
     """
     Convenience function for processing a response with native tools.
@@ -346,6 +377,7 @@ def process_with_tools(
             - emit_command_executed: For Tools tab
         thinking_enabled: Whether to enable extended thinking for continuations
         thinking_budget_tokens: Max tokens for thinking (None = use config default)
+        round_recorder: Optional RoundRecorder for prompt export
 
     Returns:
         ToolProcessingResult with final text and metadata
@@ -355,7 +387,8 @@ def process_with_tools(
         system_prompt=system_prompt,
         tools=tools,
         thinking_enabled=thinking_enabled,
-        thinking_budget_tokens=thinking_budget_tokens
+        thinking_budget_tokens=thinking_budget_tokens,
+        round_recorder=round_recorder
     )
     return helper.process_response(
         response=response,

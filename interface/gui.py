@@ -237,6 +237,10 @@ class ChatWindow(QMainWindow):
         self._reminder_scheduler = None
         self._telegram_listener = None
 
+        # Prompt export recorder
+        from core.round_recorder import RoundRecorder
+        self._round_recorder = RoundRecorder()
+
         # User settings
         from core.user_settings import get_user_settings
         self._user_settings = get_user_settings()
@@ -398,6 +402,13 @@ class ChatWindow(QMainWindow):
 
         layout.addStretch()
 
+        # Prompt export button
+        self.export_prompt_btn = QPushButton("Export Prompt")
+        self.export_prompt_btn.setFont(QFont("Consolas", 10))
+        self.export_prompt_btn.setToolTip("Export the last AI round (full API payload) to a log file")
+        self.export_prompt_btn.clicked.connect(self._export_prompt)
+        layout.addWidget(self.export_prompt_btn)
+
         # Theme toggle button
         self.theme_btn = QPushButton("🌙")
         self.theme_btn.setToolTip("Toggle light/dark theme (Ctrl+T)")
@@ -499,6 +510,19 @@ class ChatWindow(QMainWindow):
     # =========================================================================
     # THEME HANDLING
     # =========================================================================
+
+    def _export_prompt(self):
+        """Export the last AI round's full API payloads to a human-readable file."""
+        if not self._round_recorder.has_data:
+            self._notification_manager.warning("No prompt data to export yet")
+            return
+
+        export_path = str(config.PROMPT_EXPORT_PATH)
+        success = self._round_recorder.export_to_file(export_path)
+        if success:
+            self._notification_manager.info(f"Prompt exported to {export_path}")
+        else:
+            self._notification_manager.warning("Prompt export failed — check logs")
 
     def _toggle_theme(self):
         """Toggle between light and dark themes."""
@@ -1662,6 +1686,19 @@ class ChatWindow(QMainWindow):
             # Read thinking setting for conversation
             thinking_on = self._user_settings.thinking_enabled
 
+            # Start recording this round for prompt export
+            self._round_recorder.start_round()
+            self._round_recorder.record_request(
+                system_prompt=assembled.full_system_prompt,
+                messages=history,
+                tools=tools,
+                model=self._user_settings.conversation_model,
+                temperature=0.7,
+                thinking_enabled=thinking_on,
+                thinking_budget_tokens=getattr(config, 'ANTHROPIC_THINKING_BUDGET_TOKENS', None) if thinking_on else None,
+                is_streaming=True,
+            )
+
             # Stream the response
             final_state = None
             for chunk, state in self._llm_router.chat_stream(
@@ -1706,6 +1743,17 @@ class ChatWindow(QMainWindow):
                 return
 
             log_info(f"Streaming completed successfully: {len(final_state.text)} chars, stop_reason={final_state.stop_reason}", prefix="📨")
+
+            # Record the streaming response for prompt export
+            self._round_recorder.record_response(
+                response_text=final_state.text,
+                thinking_text=final_state.thinking_text,
+                tool_calls=final_state.tool_calls,
+                raw_content=final_state.raw_content,
+                stop_reason=final_state.stop_reason or "",
+                tokens_in=final_state.input_tokens,
+                tokens_out=final_state.output_tokens,
+            )
 
             # Log thinking in dev mode
             if final_state.thinking_text and config.DEV_MODE_ENABLED:
@@ -1765,7 +1813,8 @@ class ChatWindow(QMainWindow):
                     pulse_callback=lambda interval: self._emit_pulse_interval_change(interval),
                     tools=tools,
                     dev_mode_callbacks=dev_callbacks,
-                    thinking_enabled=thinking_on
+                    thinking_enabled=thinking_on,
+                    round_recorder=self._round_recorder
                 )
 
                 final_text = result.final_text
