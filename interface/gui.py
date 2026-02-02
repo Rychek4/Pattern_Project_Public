@@ -1220,31 +1220,42 @@ class ChatWindow(QMainWindow):
         else:
             formatted_content = self._format_message_text(content, role)
 
-        # Build HTML based on role - Claude.ai inspired layout
+        # Build HTML based on role - table layout for Qt compatibility
+        # Qt's QTextBrowser ignores background-color CSS on divs; use bgcolor on td instead.
+        # String concatenation avoids f-string indentation whitespace in Qt rendering.
         if role == "user":
-            # User messages: right-aligned bubble with subtle background
-            msg_html = f"""
-            <div style='margin: 16px 0 16px 80px; background-color: {self._theme.user_bubble};
-                 border-radius: 18px; padding: 14px 18px;' data-msg-id='{msg_id}'>
-                <span style='color: {self._theme.text}; line-height: 1.6;'>{formatted_content}</span>
-                <div style='color: {self._theme.timestamp}; font-size: 10px; margin-top: 6px;'>{timestamp}</div>
-            </div>
-            """
+            # User messages: right-aligned bubble via left spacer, bgcolor for background
+            msg_html = (
+                '<table width="100%" cellspacing="0" cellpadding="0"><tr>'
+                '<td width="80"></td>'
+                '<td bgcolor="' + self._theme.user_bubble + '" style="padding: 14px 18px;">'
+                '<span style="color: ' + self._theme.text + '; line-height: 1.6;">' + formatted_content + '</span>'
+                '<br/><span style="color: ' + self._theme.timestamp + '; font-size: 10px;">' + timestamp + '</span>'
+                '</td>'
+                '</tr></table>'
+            )
         elif role == "assistant":
-            # Assistant messages: full-width, no bubble, clean flowing text
-            msg_html = f"""
-            <div style='margin: 16px 40px 16px 0; padding: 4px 0;' data-msg-id='{msg_id}'>
-                <span style='color: {self._theme.text}; line-height: 1.6;'>{formatted_content}</span>
-            </div>
-            """
+            # Assistant messages: full-width with right spacer, no background
+            msg_html = (
+                '<table width="100%" cellspacing="0" cellpadding="0"><tr>'
+                '<td style="padding: 4px 0;">'
+                '<span style="color: ' + self._theme.text + '; line-height: 1.6;">' + formatted_content + '</span>'
+                '</td>'
+                '<td width="40"></td>'
+                '</tr></table>'
+            )
         else:
-            # System messages: subtle centered style
-            msg_html = f"""
-            <div style='margin: 12px 40px; padding: 10px 16px; border-left: 3px solid {self._theme.system};
-                 border-radius: 4px;' data-msg-id='{msg_id}'>
-                <span style='color: {self._theme.system}; font-size: 12px;'>{formatted_content}</span>
-            </div>
-            """
+            # System messages: spacers on both sides, narrow colored cell as border-left accent
+            msg_html = (
+                '<table width="100%" cellspacing="0" cellpadding="0"><tr>'
+                '<td width="40"></td>'
+                '<td width="3" bgcolor="' + self._theme.system + '"></td>'
+                '<td style="padding: 10px 16px;">'
+                '<span style="color: ' + self._theme.system + '; font-size: 12px;">' + formatted_content + '</span>'
+                '</td>'
+                '<td width="40"></td>'
+                '</tr></table>'
+            )
 
         self.chat_display.append(msg_html)
         self.chat_display.moveCursor(QTextCursor.End)
@@ -1386,12 +1397,8 @@ class ChatWindow(QMainWindow):
         self._streaming_msg_id = str(uuid.uuid4())
         self._streaming_text = ""
 
-        # Create the assistant message container (clean, no bubble - matches _append_message style)
-        header_html = f"""
-        <div style='margin: 16px 40px 16px 0; padding: 4px 0;'>
-        </div>
-        """
-        self.chat_display.append(header_html)
+        # Append a minimal separator; streaming content will be inserted after this position
+        self.chat_display.append('')
 
         # Record cursor position where streaming content will be inserted
         # This position-based approach avoids fragile regex matching on normalized HTML
@@ -1421,8 +1428,16 @@ class ChatWindow(QMainWindow):
         cursor.movePosition(QTextCursor.End, QTextCursor.KeepAnchor)
         cursor.removeSelectedText()
 
-        # Insert the updated content
-        cursor.insertHtml(f"<span style='color:{self._theme.text}; line-height: 1.6;'>{display_text}</span>")
+        # Insert the updated content wrapped in assistant-style table layout
+        stream_html = (
+            '<table width="100%" cellspacing="0" cellpadding="0"><tr>'
+            '<td style="padding: 4px 0;">'
+            '<span style="color:' + self._theme.text + '; line-height: 1.6;">' + display_text + '</span>'
+            '</td>'
+            '<td width="40"></td>'
+            '</tr></table>'
+        )
+        cursor.insertHtml(stream_html)
         self.chat_display.moveCursor(QTextCursor.End)
 
     def _on_stream_complete(self, full_text: str):
@@ -1460,8 +1475,16 @@ class ChatWindow(QMainWindow):
             cursor.movePosition(QTextCursor.End, QTextCursor.KeepAnchor)
             cursor.removeSelectedText()
 
-            # Insert the final markdown-rendered content
-            cursor.insertHtml(f"<span style='color:{self._theme.text}; line-height: 1.6;'>{formatted_content}</span>")
+            # Insert the final markdown-rendered content wrapped in assistant-style table layout
+            final_html = (
+                '<table width="100%" cellspacing="0" cellpadding="0"><tr>'
+                '<td style="padding: 4px 0;">'
+                '<span style="color:' + self._theme.text + '; line-height: 1.6;">' + formatted_content + '</span>'
+                '</td>'
+                '<td width="40"></td>'
+                '</tr></table>'
+            )
+            cursor.insertHtml(final_html)
             self.chat_display.moveCursor(QTextCursor.End)
 
         # Clear streaming state
