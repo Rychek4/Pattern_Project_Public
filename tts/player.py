@@ -538,9 +538,6 @@ class TTSPlayer:
 
     def _fetch_and_queue_pcm(self, text: str, voice_id: str, seq_num: int):
         """Background thread: Fetch PCM audio from ElevenLabs and queue for playback."""
-        preview = text[:40] + "..." if len(text) > 40 else text
-        log_info(f"TTS streaming: seq={seq_num}, {preview}", prefix="[TTS]")
-
         from elevenlabs import VoiceSettings
 
         # Use semaphore to limit concurrent API requests (ElevenLabs limit is 5)
@@ -624,7 +621,6 @@ class TTSPlayer:
 
                     if item is not None:
                         self._audio_queue.put(item)
-                        log_info(f"TTS released seq={self._next_expected_seq}", prefix="[TTS]")
                     else:
                         log_info(f"TTS skipped failed seq={self._next_expected_seq}", prefix="[TTS]")
 
@@ -638,8 +634,6 @@ class TTSPlayer:
 
                 else:
                     # Still waiting for this sequence, and it hasn't timed out
-                    if audio_data is not None:
-                        log_info(f"TTS buffered seq={seq_num}, waiting for seq={self._next_expected_seq}", prefix="[TTS]")
                     break
 
     def stop(self):
