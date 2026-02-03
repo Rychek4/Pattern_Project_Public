@@ -638,8 +638,6 @@ class TTSPlayer:
 
                 else:
                     # Still waiting for this sequence, and it hasn't timed out
-                    if audio_data is not None:
-                        log_info(f"TTS buffered seq={seq_num}, waiting for seq={self._next_expected_seq}", prefix="[TTS]")
                     break
 
     def stop(self):
