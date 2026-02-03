@@ -1927,7 +1927,7 @@ class ChatWindow(QMainWindow):
                     thinking_text=final_state.thinking_text
                 )
 
-                max_passes = getattr(config, 'COMMAND_MAX_PASSES', 3)
+                max_passes = getattr(config, 'COMMAND_MAX_PASSES', 15)
 
                 # Set up dev callbacks
                 dev_callbacks = None

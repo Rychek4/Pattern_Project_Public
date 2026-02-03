@@ -556,7 +556,7 @@ class DevWindow(QMainWindow):
 
         if data.needs_continuation:
             lines.append(
-                f'<div style="color: {COLORS["info"]};">Triggered continuation (Pass 2)</div>'
+                f'<div style="color: {COLORS["info"]};">Triggered continuation</div>'
             )
 
         if data.result_data:

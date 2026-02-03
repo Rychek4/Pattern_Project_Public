@@ -200,7 +200,7 @@ class ChatCLI:
                 pass1_duration = (time.time() - start_time) * 1000
 
                 if response.success:
-                    max_passes = getattr(config, 'COMMAND_MAX_PASSES', 3)
+                    max_passes = getattr(config, 'COMMAND_MAX_PASSES', 15)
 
                     # Set up dev window callbacks for tool/response tracking
                     dev_callbacks = None
