@@ -382,8 +382,14 @@ COMMAND_SEARCH_MIN_SCORE = 0.3  # Minimum relevance score for search results
 # multi-step work to a cheaper, faster model.
 DELEGATION_ENABLED = True
 DELEGATION_MODEL = os.getenv("DELEGATION_MODEL", "claude-3-5-haiku-20241022")
-DELEGATION_MAX_ROUNDS = 5           # Max continuation passes per delegated task
+DELEGATION_MAX_ROUNDS = 15          # Max continuation passes per delegated task (browser workflows need headroom)
 DELEGATION_MAX_TOKENS = 4096        # Max output tokens per sub-agent response
+
+# Browser automation for delegate sub-agents
+# The delegate uses Playwright (headless Chromium) to interact with websites.
+# Requires: pip install playwright && playwright install chromium
+BROWSER_SESSIONS_DIR = DATA_DIR / "browser_sessions"   # Per-service cookie/session persistence
+BROWSER_CREDENTIALS_PATH = DATA_DIR / "credentials.toml"  # Read-only service credentials
 
 # =============================================================================
 # NATIVE TOOL USE CONFIGURATION (DEPRECATED)
