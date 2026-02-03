@@ -86,6 +86,10 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
         tools.append(MOLTBOOK_SUBMOLTS_TOOL)
         tools.append(MOLTBOOK_PROFILE_TOOL)
 
+    # Delegation tool (if enabled)
+    if config.DELEGATION_ENABLED:
+        tools.append(DELEGATE_TASK_TOOL)
+
     # Reddit tools (if enabled)
     if getattr(config, 'REDDIT_ENABLED', False):
         tools.append(REDDIT_FEED_TOOL)
@@ -1222,5 +1226,55 @@ Use when:
             }
         },
         "required": []
+    }
+}
+
+
+# =============================================================================
+# DELEGATION TOOL
+# =============================================================================
+
+DELEGATE_TASK_TOOL: Dict[str, Any] = {
+    "name": "delegate_task",
+    "description": """Spawn a lightweight sub-agent to handle a contained task independently.
+
+The sub-agent runs on a smaller, faster model (Haiku) with its own conversation and
+tool loop. It has NO access to your memories, identity, active thoughts, or
+communication tools — it is a stateless worker that completes a task and returns
+the result to you.
+
+Use this when:
+- A task requires multiple steps but doesn't need personal context
+- You want to preserve your main conversation context (research, file processing)
+- The task is self-contained and can be described in a single prompt
+- You want to offload mechanical work while staying focused on the conversation
+
+Do NOT use when:
+- The task requires knowledge about the user or past conversations
+- The task needs to send messages, set reminders, or modify your state
+- A single tool call would suffice (just use the tool directly)
+- The task requires your full reasoning capabilities
+
+The sub-agent will work through the task using its available tools and return
+its final answer as text. You can then use, edit, or build on that result.""",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "task": {
+                "type": "string",
+                "description": "Clear description of what the sub-agent should accomplish"
+            },
+            "context": {
+                "type": "string",
+                "description": "Optional additional context to help the sub-agent (background info, constraints, format preferences)"
+            },
+            "max_rounds": {
+                "type": "integer",
+                "description": "Optional max continuation rounds (1-10, default 5). Higher values allow more complex multi-step work.",
+                "minimum": 1,
+                "maximum": 10
+            }
+        },
+        "required": ["task"]
     }
 }

@@ -83,6 +83,8 @@ class ToolExecutor:
             "reddit_search": self._exec_reddit_search,
             "reddit_subreddits": self._exec_reddit_subreddits,
             "reddit_profile": self._exec_reddit_profile,
+            # Delegation
+            "delegate_task": self._exec_delegate_task,
         }
 
     def execute(
@@ -1430,6 +1432,63 @@ class ToolExecutor:
                 tool_name="reddit_profile",
                 content=str(e),
                 is_error=True,
+            )
+
+    # =========================================================================
+    # DELEGATION TOOL
+    # =========================================================================
+
+    def _exec_delegate_task(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """
+        Delegate a task to a lightweight sub-agent.
+
+        Spawns an ephemeral Haiku conversation with limited tools.
+        The sub-agent runs to completion and returns its result as text.
+        """
+        if not config.DELEGATION_ENABLED:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="delegate_task",
+                content="Delegation is disabled",
+                is_error=True
+            )
+
+        task = input.get("task", "")
+        if not task:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="delegate_task",
+                content="No task provided",
+                is_error=True
+            )
+
+        context = input.get("context", "")
+        max_rounds = input.get("max_rounds")
+
+        try:
+            from agency.tools.delegate import run_delegated_task
+
+            result_text = run_delegated_task(
+                task=task,
+                context=context,
+                max_rounds=max_rounds
+            )
+
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="delegate_task",
+                content=result_text
+            )
+
+        except Exception as e:
+            log_error(f"Delegation failed: {e}")
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="delegate_task",
+                content=f"Delegation error: {str(e)}",
+                is_error=True
             )
 
 

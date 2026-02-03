@@ -28,6 +28,7 @@ class TaskType(Enum):
     FACT_EXTRACTION = "fact_extraction"  # Legacy: now merged into EXTRACTION
     ANALYSIS = "analysis"          # Analysis tasks
     SIMPLE = "simple"              # Simple/quick tasks
+    DELEGATION = "delegation"      # Lightweight sub-agent tasks (Haiku)
 
 
 @dataclass
@@ -363,6 +364,8 @@ class LLMRouter:
             model = user_model if user_model else config.ANTHROPIC_MODEL_CONVERSATION
         elif task_type in (TaskType.EXTRACTION, TaskType.FACT_EXTRACTION):
             model = config.ANTHROPIC_MODEL_EXTRACTION
+        elif task_type == TaskType.DELEGATION:
+            model = config.DELEGATION_MODEL
         else:
             model = config.ANTHROPIC_MODEL
 
@@ -575,6 +578,8 @@ class LLMRouter:
                     model = user_model if user_model else config.ANTHROPIC_MODEL_CONVERSATION
                 elif task_type in (TaskType.EXTRACTION, TaskType.FACT_EXTRACTION):
                     model = config.ANTHROPIC_MODEL_EXTRACTION  # Sonnet for extraction
+                elif task_type == TaskType.DELEGATION:
+                    model = config.DELEGATION_MODEL  # Haiku for delegated sub-tasks
                 else:
                     model = config.ANTHROPIC_MODEL  # Default (Sonnet) for simple/analysis
 
