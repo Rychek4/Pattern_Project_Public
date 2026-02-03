@@ -369,7 +369,7 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 # =============================================================================
 # AI COMMAND SYSTEM CONFIGURATION
 # =============================================================================
-COMMAND_MAX_PASSES = 3          # Maximum LLM calls per user message (1 = no continuation)
+COMMAND_MAX_PASSES = 15         # Maximum LLM calls per user message (safety cap; typical queries use 1-3)
 COMMAND_SEARCH_LIMIT = 10       # Default memory search result count
 COMMAND_SEARCH_MIN_SCORE = 0.3  # Minimum relevance score for search results
 

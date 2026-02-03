@@ -221,6 +221,10 @@ class ToolResponseHelper:
                     clarification_data=clarification_data
                 )
 
+            # Warn if pass count is unusually high (possible tool loop)
+            if pass_num >= 5:
+                log_warning(f"Query has reached pass {pass_num}, which is unusually high — possible tool loop")
+
             # Build continuation: add assistant message with raw content blocks
             current_history.append({
                 "role": "assistant",
