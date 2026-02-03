@@ -43,3 +43,10 @@ pyperclip>=1.8.0
 
 # Reddit API
 praw>=7.7.0
+
+# Browser Automation (delegate sub-agent)
+# After installing, run: playwright install chromium
+playwright>=1.40.0
+
+# TOML parsing (Python < 3.11 fallback; 3.11+ has tomllib built-in)
+tomli>=2.0.0

@@ -3,25 +3,26 @@ Pattern Project - Task Delegation Runner
 Runs lightweight sub-agent instances for contained tasks.
 
 A delegated task spins up a fresh, ephemeral conversation with a smaller model
-(Haiku by default). The sub-agent has its own tool loop but NO access to
-memories, identity, active thoughts, or communication tools.
+(Haiku by default). The sub-agent is a browser automation agent with tools to
+navigate websites, interact with page elements, and access service credentials.
 
-The sub-agent works through the task, optionally using tools, and returns
-its final text output to the caller (Isaac's main conversation).
+The sub-agent has NO access to Isaac's memories, identity, active thoughts,
+or communication tools. It is a stateless browser worker that completes a
+task and returns the result to Isaac's main conversation.
 
 Usage:
     from agency.tools.delegate import run_delegated_task
 
     result = run_delegated_task(
-        task="Summarize the key themes in these notes",
-        context="Focus on technical architecture decisions",
-        max_rounds=5
+        task="Log into Reddit and post 'Hello from Isaac' to r/test",
+        context="Use the reddit credentials. Post as a text post.",
+        max_rounds=15
     )
 """
 
+import asyncio
 import time
-from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import config
 from core.logger import log_info, log_warning, log_error
@@ -31,63 +32,60 @@ from core.logger import log_info, log_warning, log_error
 # SUB-AGENT SYSTEM PROMPT
 # =============================================================================
 
-DELEGATE_SYSTEM_PROMPT = """You are a task-focused assistant. Complete the assigned task concisely and accurately.
+DELEGATE_SYSTEM_PROMPT = """You are a browser automation agent. You interact with websites using your tools to complete tasks assigned to you.
 
-You have access to tools if needed — use them when they help accomplish the task.
-When you are done, provide your final answer as clear, well-organized text.
+You have NO memory, NO context about the user, and NO knowledge beyond this task description. Everything you need to know is in the task you've been given.
 
-Guidelines:
-- Stay focused on the task. Do not ask clarifying questions — work with what you have.
-- Be concise but thorough.
-- If a tool call fails, adapt and continue with what you can determine.
-- Return your final answer directly — no preamble like "Here is the result:"."""
+Available tools:
+- navigate(url): Go to a web page
+- read_page(): See the current page — returns numbered interactive elements and visible text
+- click(element_id): Click an element by its number from read_page()
+- type(element_id, text): Type into an input field by its number from read_page()
+- wait(seconds): Wait for page content to load (0.5-10 seconds)
+- get_credentials(service): Look up login credentials for a service
+
+Workflow:
+1. If the task requires logging in, call get_credentials() first to get the login URL and credentials.
+2. Navigate to the target page.
+3. ALWAYS call read_page() after navigating or clicking — you cannot see the page without it.
+4. Use the element numbers from read_page() with click() and type() to interact.
+5. After submitting forms or clicking buttons, call read_page() to verify the result.
+
+Important:
+- NEVER guess what's on a page. Always call read_page() to see it.
+- If you encounter a CAPTCHA, 2FA challenge, or unexpected verification screen, report it clearly and stop — do not try to solve it.
+- If a login fails, try once more, then report the failure.
+- After completing the task, save the session by reporting your final result clearly.
+- Be methodical: navigate → read → act → read → verify.
+- Stay focused on the assigned task. Do not browse unrelated pages."""
 
 
 # =============================================================================
 # DELEGATE TOOL DEFINITIONS
 # =============================================================================
-# Tools available to the sub-agent. This is deliberately minimal.
-# Add new tools here as the delegation system grows.
 
 def get_delegate_tool_definitions() -> List[Dict[str, Any]]:
     """
     Get tool definitions available to delegated sub-agents.
 
-    Returns a curated, safe subset of tools. Sub-agents do NOT get:
+    The delegate is a browser-only agent. Its tools are:
+    - navigate, read_page, click, type, wait (browser interaction)
+    - get_credentials (read-only service credential lookup)
+
+    Sub-agents do NOT get:
     - Memory tools (search_memories, set_active_thoughts)
     - Communication tools (send_telegram, send_email)
     - State tools (set_pulse_interval, advance_curiosity)
     - Delegation itself (no recursive spawning)
     - Visual capture tools
-    - Social platform tools
+    - File tools
+    - Social platform tools (these are replaced by browser automation)
 
     Returns:
         List of tool definition dicts for the Anthropic API
     """
-    tools = []
-
-    # Example tool: get_current_time
-    # Demonstrates the registration pattern and is marginally useful
-    tools.append(GET_CURRENT_TIME_TOOL)
-
-    # Future tools would be registered here:
-    # tools.append(READ_FILE_TOOL)      # File reading
-    # tools.append(WRITE_FILE_TOOL)     # File writing
-    # tools.append(LIST_FILES_TOOL)     # File listing
-    # etc.
-
-    return tools
-
-
-GET_CURRENT_TIME_TOOL: Dict[str, Any] = {
-    "name": "get_current_time",
-    "description": "Get the current date and time in ISO format.",
-    "input_schema": {
-        "type": "object",
-        "properties": {},
-        "required": []
-    }
-}
+    from agency.tools.browser.tools import get_browser_tool_definitions
+    return get_browser_tool_definitions()
 
 
 # =============================================================================
@@ -98,18 +96,29 @@ class DelegateToolExecutor:
     """
     Executes tools for delegated sub-agents.
 
-    This is a minimal executor that only handles the tools registered in
-    get_delegate_tool_definitions(). It is completely independent of the
-    main ToolExecutor — the sub-agent cannot access any tool that isn't
-    explicitly registered here.
+    Wraps the BrowserToolExecutor and manages the async event loop
+    needed for Playwright operations. The browser is lazy-initialized
+    on the first tool call that needs it.
     """
 
     def __init__(self):
-        """Initialize with the delegate tool handler mappings."""
-        self._handlers: Dict[str, Callable] = {
-            "get_current_time": self._exec_get_current_time,
-            # Add new tool handlers here as they are registered above
-        }
+        """Initialize with an async event loop and browser tool executor."""
+        # Create a dedicated event loop for async Playwright operations
+        self._loop = asyncio.new_event_loop()
+
+        # Resolve paths from config (already Path objects)
+        sessions_dir = config.BROWSER_SESSIONS_DIR
+        credentials_path = config.BROWSER_CREDENTIALS_PATH
+
+        # Ensure sessions directory exists
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+
+        from agency.tools.browser.tools import BrowserToolExecutor
+        self._browser_executor = BrowserToolExecutor(
+            sessions_dir=sessions_dir,
+            credentials_path=credentials_path,
+            event_loop=self._loop
+        )
 
     def execute(
         self,
@@ -120,6 +129,8 @@ class DelegateToolExecutor:
         """
         Execute a tool call and return a result dict.
 
+        All tools are browser tools routed through BrowserToolExecutor.
+
         Args:
             tool_name: Name of the tool to execute
             tool_input: Structured input from the model
@@ -128,38 +139,19 @@ class DelegateToolExecutor:
         Returns:
             Dict with 'tool_use_id', 'content', and optional 'is_error'
         """
-        handler_fn = self._handlers.get(tool_name)
-        if not handler_fn:
-            log_warning(f"Delegate sub-agent called unknown tool: {tool_name}")
-            return {
-                "tool_use_id": tool_use_id,
-                "content": f"Unknown tool: {tool_name}. Available: {list(self._handlers.keys())}",
-                "is_error": True
-            }
+        return self._browser_executor.execute(tool_name, tool_input, tool_use_id)
 
+    def cleanup(self) -> None:
+        """Shut down the browser and event loop."""
         try:
-            content = handler_fn(tool_input)
-            return {
-                "tool_use_id": tool_use_id,
-                "content": content
-            }
+            self._loop.run_until_complete(self._browser_executor.close())
         except Exception as e:
-            log_error(f"Delegate tool error ({tool_name}): {e}")
-            return {
-                "tool_use_id": tool_use_id,
-                "content": f"Tool error: {str(e)}",
-                "is_error": True
-            }
-
-    # =========================================================================
-    # TOOL HANDLERS
-    # =========================================================================
-
-    def _exec_get_current_time(self, input: Dict) -> str:
-        """Return the current date and time."""
-        now = datetime.now(timezone.utc)
-        local_now = datetime.now()
-        return f"UTC: {now.isoformat()}\nLocal: {local_now.isoformat()}"
+            log_warning(f"Browser cleanup error: {e}")
+        finally:
+            try:
+                self._loop.close()
+            except Exception:
+                pass
 
 
 # =============================================================================
@@ -172,29 +164,34 @@ def run_delegated_task(
     max_rounds: Optional[int] = None
 ) -> str:
     """
-    Run a delegated task on a lightweight sub-agent.
+    Run a delegated task on a lightweight browser-capable sub-agent.
 
     Creates a fresh conversation with the delegation model (Haiku),
-    gives it a minimal system prompt and curated tool set, and runs
+    gives it a browser-agent system prompt and browser tools, and runs
     a multi-pass tool loop until the sub-agent finishes or hits the
     round limit.
 
+    The browser is lazy-initialized — if the sub-agent doesn't use any
+    browser tools, no Playwright process is started.
+
     Args:
-        task: Description of what the sub-agent should accomplish
+        task: Description of what the sub-agent should accomplish.
+              Must be specific: include exact URLs, full text content,
+              and clear instructions. The sub-agent has no other context.
         context: Optional additional context for the sub-agent
-        max_rounds: Max continuation passes (capped by config)
+        max_rounds: Max continuation passes (default from config, hard cap 15)
 
     Returns:
         The sub-agent's final text response
     """
     from llm.router import TaskType, get_llm_router
 
-    # Resolve max rounds
+    # Resolve max rounds — hard cap at 15 for browser workflows
     config_max = config.DELEGATION_MAX_ROUNDS
     if max_rounds is not None:
-        max_rounds = min(max_rounds, 10)  # Hard cap at 10
+        max_rounds = min(max_rounds, 15)  # Hard cap at 15
     else:
-        max_rounds = config_max
+        max_rounds = min(config_max, 15)  # Also cap the config default
 
     # Build the user message
     user_content = task
@@ -216,90 +213,95 @@ def run_delegated_task(
     # Track accumulated text across all passes
     accumulated_text = ""
 
-    for round_num in range(1, max_rounds + 1):
-        # Call the model
-        response = router.chat(
-            messages=messages,
-            system_prompt=DELEGATE_SYSTEM_PROMPT,
-            task_type=TaskType.DELEGATION,
-            max_tokens=config.DELEGATION_MAX_TOKENS,
-            temperature=0.5,
-            tools=tools if tools else None,
-            thinking_enabled=False
+    try:
+        for round_num in range(1, max_rounds + 1):
+            # Call the model
+            response = router.chat(
+                messages=messages,
+                system_prompt=DELEGATE_SYSTEM_PROMPT,
+                task_type=TaskType.DELEGATION,
+                max_tokens=config.DELEGATION_MAX_TOKENS,
+                temperature=0.5,
+                tools=tools if tools else None,
+                thinking_enabled=False
+            )
+
+            if not response.success:
+                log_error(f"Delegation round {round_num} failed: {response.error}")
+                if accumulated_text:
+                    return accumulated_text
+                return f"[Delegation error: {response.error}]"
+
+            # Accumulate any text from this response
+            response_text = response.text.strip() if response.text else ""
+            if response_text:
+                if accumulated_text:
+                    accumulated_text = accumulated_text + "\n\n" + response_text
+                else:
+                    accumulated_text = response_text
+
+            # If no tool calls, we're done
+            if not response.has_tool_calls():
+                duration_ms = (time.time() - start_time) * 1000
+                log_info(
+                    f"Delegation complete: {round_num} round(s), "
+                    f"{duration_ms:.0f}ms, "
+                    f"{response.tokens_in + response.tokens_out} tokens",
+                    prefix="🤖"
+                )
+                return accumulated_text
+
+            # Execute tool calls and build continuation
+            tool_results = []
+            for tool_call in response.tool_calls:
+                result = executor.execute(
+                    tool_name=tool_call.name,
+                    tool_input=tool_call.input,
+                    tool_use_id=tool_call.id
+                )
+                tool_results.append(result)
+
+                status = "error" if result.get("is_error") else "ok"
+                log_info(
+                    f"  Delegate tool: {tool_call.name} -> {status}",
+                    prefix="🤖"
+                )
+
+            # Build continuation messages
+            # Assistant message with raw content blocks (includes tool_use blocks)
+            messages.append({
+                "role": "assistant",
+                "content": response.raw_content
+            })
+
+            # Tool results message
+            tool_result_content = []
+            for result in tool_results:
+                block = {
+                    "type": "tool_result",
+                    "tool_use_id": result["tool_use_id"],
+                    "content": str(result["content"])
+                }
+                if result.get("is_error"):
+                    block["is_error"] = True
+                tool_result_content.append(block)
+
+            messages.append({
+                "role": "user",
+                "content": tool_result_content
+            })
+
+        # Hit max rounds
+        duration_ms = (time.time() - start_time) * 1000
+        log_warning(
+            f"Delegation hit max rounds ({max_rounds}), "
+            f"{duration_ms:.0f}ms",
         )
 
-        if not response.success:
-            log_error(f"Delegation round {round_num} failed: {response.error}")
-            if accumulated_text:
-                return accumulated_text
-            return f"[Delegation error: {response.error}]"
-
-        # Accumulate any text from this response
-        response_text = response.text.strip() if response.text else ""
-        if response_text:
-            if accumulated_text:
-                accumulated_text = accumulated_text + "\n\n" + response_text
-            else:
-                accumulated_text = response_text
-
-        # If no tool calls, we're done
-        if not response.has_tool_calls():
-            duration_ms = (time.time() - start_time) * 1000
-            log_info(
-                f"Delegation complete: {round_num} round(s), "
-                f"{duration_ms:.0f}ms, "
-                f"{response.tokens_in + response.tokens_out} tokens",
-                prefix="🤖"
-            )
+        if accumulated_text:
             return accumulated_text
+        return "[Delegation completed but produced no text output]"
 
-        # Execute tool calls and build continuation
-        tool_results = []
-        for tool_call in response.tool_calls:
-            result = executor.execute(
-                tool_name=tool_call.name,
-                tool_input=tool_call.input,
-                tool_use_id=tool_call.id
-            )
-            tool_results.append(result)
-
-            status = "error" if result.get("is_error") else "ok"
-            log_info(
-                f"  Delegate tool: {tool_call.name} -> {status}",
-                prefix="🤖"
-            )
-
-        # Build continuation messages
-        # Assistant message with raw content blocks (includes tool_use blocks)
-        messages.append({
-            "role": "assistant",
-            "content": response.raw_content
-        })
-
-        # Tool results message
-        tool_result_content = []
-        for result in tool_results:
-            block = {
-                "type": "tool_result",
-                "tool_use_id": result["tool_use_id"],
-                "content": str(result["content"])
-            }
-            if result.get("is_error"):
-                block["is_error"] = True
-            tool_result_content.append(block)
-
-        messages.append({
-            "role": "user",
-            "content": tool_result_content
-        })
-
-    # Hit max rounds
-    duration_ms = (time.time() - start_time) * 1000
-    log_warning(
-        f"Delegation hit max rounds ({max_rounds}), "
-        f"{duration_ms:.0f}ms",
-    )
-
-    if accumulated_text:
-        return accumulated_text
-    return "[Delegation completed but produced no text output]"
+    finally:
+        # Always clean up the browser, even if an error occurs
+        executor.cleanup()

@@ -1236,43 +1236,55 @@ Use when:
 
 DELEGATE_TASK_TOOL: Dict[str, Any] = {
     "name": "delegate_task",
-    "description": """Spawn a lightweight sub-agent to handle a contained task independently.
+    "description": """Delegate a task to a browser-capable sub-agent that can interact with websites.
 
-The sub-agent runs on a smaller, faster model (Haiku) with its own conversation and
-tool loop. It has NO access to your memories, identity, active thoughts, or
-communication tools — it is a stateless worker that completes a task and returns
-the result to you.
+The sub-agent is a headless browser automation agent running on a smaller model (Haiku).
+It can navigate to URLs, read page content, click buttons, fill forms, and log into
+websites using stored credentials. It has NO access to your memories, identity, or
+communication tools — it knows ONLY what you put in the task description.
+
+CRITICAL: You must be extremely specific. The sub-agent has zero context beyond your
+task description. Include:
+- Exact URLs to visit (e.g., "https://www.reddit.com/r/test/submit")
+- Full text content to post (the complete title, body, message, etc.)
+- Which service credentials to use (e.g., "Use the 'reddit' credentials to log in")
+- Step-by-step what to do (e.g., "Log in, navigate to X, fill the form with Y, submit")
+
+BAD task:  "Post something interesting on Reddit"
+GOOD task: "Log into Reddit using the 'reddit' credentials. Navigate to r/programming.
+           Create a new text post with title 'Exploring recursive data structures' and
+           body 'I have been thinking about how recursive structures...[full text]'.
+           Submit the post and confirm it was created."
 
 Use this when:
-- A task requires multiple steps but doesn't need personal context
-- You want to preserve your main conversation context (research, file processing)
-- The task is self-contained and can be described in a single prompt
-- You want to offload mechanical work while staying focused on the conversation
+- Interacting with any website (posting, reading, form submission, account actions)
+- The task can be fully described in the task prompt without needing your personal context
+- You want to perform web actions without consuming your main conversation context
 
 Do NOT use when:
-- The task requires knowledge about the user or past conversations
-- The task needs to send messages, set reminders, or modify your state
-- A single tool call would suffice (just use the tool directly)
-- The task requires your full reasoning capabilities
+- The task requires your memories, personality, or knowledge of the user
+- The task needs to send Telegram messages, set reminders, or modify your state
+- You just need information from the web (use web_search or web_fetch instead)
 
-The sub-agent will work through the task using its available tools and return
-its final answer as text. You can then use, edit, or build on that result.""",
+The sub-agent returns its final result as text. Browser sessions are saved automatically,
+so logins persist across delegations — the sub-agent won't need to re-authenticate
+every time for the same service.""",
     "input_schema": {
         "type": "object",
         "properties": {
             "task": {
                 "type": "string",
-                "description": "Clear description of what the sub-agent should accomplish"
+                "description": "Specific, detailed description of what the sub-agent should do. Include exact URLs, full content to post, credential service names, and step-by-step instructions."
             },
             "context": {
                 "type": "string",
-                "description": "Optional additional context to help the sub-agent (background info, constraints, format preferences)"
+                "description": "Optional additional context (background info, constraints, format preferences)"
             },
             "max_rounds": {
                 "type": "integer",
-                "description": "Optional max continuation rounds (1-10, default 5). Higher values allow more complex multi-step work.",
+                "description": "Optional max continuation rounds (1-15, default 15). Browser tasks typically need 5-10 rounds.",
                 "minimum": 1,
-                "maximum": 10
+                "maximum": 15
             }
         },
         "required": ["task"]
