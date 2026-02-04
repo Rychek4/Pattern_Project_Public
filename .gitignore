@@ -6,9 +6,10 @@ __pycache__/
 # Environment variables
 .env
 
-# Data and logs (local only)
+# Data, logs, and generated charts (local only)
 data/
 logs/
+charts/
 
 # Virtual environments
 venv/
