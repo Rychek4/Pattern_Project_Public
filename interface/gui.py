@@ -240,6 +240,10 @@ class ChatWindow(QMainWindow):
         self._reminder_scheduler = None
         self._telegram_listener = None
 
+        # Deferred retry manager for API failures
+        from llm.retry_manager import get_retry_manager
+        self._retry_manager = get_retry_manager()
+
         # Prompt export recorder
         from core.round_recorder import RoundRecorder
         self._round_recorder = RoundRecorder()
@@ -1508,6 +1512,11 @@ class ChatWindow(QMainWindow):
         self._status_manager.set_thinking()
         self._show_cancel_button()
 
+        # Cancel any pending deferred retry (user has moved on)
+        if self._retry_manager.has_pending():
+            self._retry_manager.cancel()
+            log_info("Deferred retry cancelled - user sent new message", prefix="🔄")
+
         # Reset and pause the pulse timer (user is active)
         if self._system_pulse_timer:
             self._system_pulse_timer.reset()
@@ -1872,10 +1881,18 @@ class ChatWindow(QMainWindow):
                 return
             elif final_state.stop_reason == "error":
                 error_msg = getattr(final_state, '_error_message', 'unknown error')
-                log_error(f"Streaming ended with error: {error_msg}", prefix="📨")
-                log_error(f"final_state.text length: {len(final_state.text) if final_state.text else 0}", prefix="📨")
-                self.signals.update_status.emit("Streaming error", StatusManager.STATUS_ERROR)
-                self.signals.stream_complete.emit("")
+                error_type = getattr(final_state, '_error_type', None)
+                log_error(f"Streaming ended with error ({error_type}): {error_msg}", prefix="📨")
+
+                # Both models unavailable — schedule deferred retry
+                if error_type == "both_models_unavailable":
+                    self._schedule_deferred_retry(user_input, source="gui")
+                    self.signals.stream_complete.emit(
+                        "\u26a0 Both models are currently unavailable. Will retry automatically in 20 minutes."
+                    )
+                else:
+                    self.signals.update_status.emit("Streaming error", StatusManager.STATUS_ERROR)
+                    self.signals.stream_complete.emit("")
                 return
 
             log_info(f"Streaming completed successfully: {len(final_state.text)} chars, stop_reason={final_state.stop_reason}", prefix="📨")
@@ -2266,6 +2283,11 @@ class ChatWindow(QMainWindow):
         """Called when a Telegram message is received (from background thread)."""
         log_info(f"Telegram message received: {message.text[:50]}...", prefix="📱")
 
+        # Cancel any pending deferred retry (user has moved on)
+        if self._retry_manager.has_pending():
+            self._retry_manager.cancel()
+            log_info("Deferred retry cancelled - Telegram message received", prefix="🔄")
+
         # Don't process if already handling something
         if self._is_processing:
             log_warning("Skipping Telegram message - already processing")
@@ -2426,8 +2448,28 @@ class ChatWindow(QMainWindow):
                     except Exception as e:
                         log_warning(f"Failed to send response to Telegram: {e}")
             else:
-                self.signals.update_status.emit(f"Error: {response.error}", StatusManager.STATUS_ERROR)
-                log_error(f"Telegram response error: {response.error}")
+                # Check if both models are down — schedule deferred retry
+                if getattr(response, 'error_type', None) == "both_models_unavailable":
+                    self._schedule_deferred_retry(message.text, source="telegram")
+                    # Notify user via GUI
+                    timestamp = self._get_timestamp()
+                    self.signals.new_message.emit(
+                        "system",
+                        "\u26a0 Both models are currently unavailable. Will retry automatically in 20 minutes.",
+                        timestamp
+                    )
+                    # Notify via Telegram too
+                    try:
+                        if config.TELEGRAM_ENABLED:
+                            from communication.telegram_gateway import get_telegram_gateway
+                            gateway = get_telegram_gateway()
+                            if gateway.is_available():
+                                gateway.send("\u26a0 Both models are currently unavailable. Will retry in 20 minutes.")
+                    except Exception:
+                        pass
+                else:
+                    self.signals.update_status.emit(f"Error: {response.error}", StatusManager.STATUS_ERROR)
+                    log_error(f"Telegram response error: {response.error}")
 
         except Exception as e:
             error_msg = f"Telegram message processing error: {str(e)}"
@@ -2435,6 +2477,239 @@ class ChatWindow(QMainWindow):
             log_error(f"Exception in _process_telegram_message: {error_msg}")
             log_error(f"Traceback:\n{tb}")
             self.signals.update_status.emit(f"Error: {str(e)}", StatusManager.STATUS_ERROR)
+
+        finally:
+            self.signals.response_complete.emit()
+
+    def _schedule_deferred_retry(self, original_input: str, source: str = "gui"):
+        """
+        Schedule a deferred retry when both models are unavailable.
+
+        The retry will re-process the original message through the normal flow
+        after a delay. It is automatically cancelled if the user sends a new
+        message before the timer fires.
+
+        Args:
+            original_input: The original user input text to retry
+            source: "gui" or "telegram" — determines how the retry is processed
+        """
+        def retry_callback():
+            self._process_deferred_retry(original_input, source)
+
+        self._retry_manager.schedule(callback=retry_callback, source=source)
+
+    def _process_deferred_retry(self, original_input: str, source: str):
+        """
+        Process a deferred retry attempt.
+
+        Re-runs the original message through the normal message flow.
+        If it fails again, gives up silently (single retry only).
+        """
+        log_info(f"Processing deferred retry for source={source}", prefix="🔄")
+
+        # Don't retry if already processing something
+        if self._is_processing:
+            log_warning("Deferred retry skipped - already processing a message")
+            return
+
+        if source == "telegram":
+            self._process_deferred_telegram_retry(original_input)
+        else:
+            self._process_deferred_gui_retry(original_input)
+
+    def _process_deferred_gui_retry(self, original_input: str):
+        """Process a deferred GUI message retry in a background thread."""
+        from llm.router import TaskType
+        from agency.tools import get_tool_definitions, process_with_tools
+
+        self._is_processing = True
+
+        try:
+            # Pause timers
+            if self._system_pulse_timer:
+                self._system_pulse_timer.pause()
+            if self._telegram_listener:
+                self._telegram_listener.pause()
+
+            self.signals.update_status.emit("Retrying message...", StatusManager.STATUS_THINKING)
+
+            # Show retry notification in chat
+            timestamp = self._get_timestamp()
+            self.signals.new_message.emit("system", "[Retrying previously failed message]", timestamp)
+
+            # Rebuild prompt and history fresh
+            assembled = self._prompt_builder.build(
+                user_input=original_input,
+                system_prompt=""
+            )
+
+            history = self._conversation_mgr.get_api_messages()
+            user_message = self._capture_visuals_for_message(original_input)
+
+            # Inject relevant memories
+            relevant_memories = assembled.session_context.get("relevant_memories")
+            if relevant_memories:
+                content = user_message.get("content")
+                if isinstance(content, str):
+                    user_message["content"] = f"{relevant_memories}\n\n{content}"
+
+            history.append(user_message)
+            tools = get_tool_definitions()
+
+            # Use non-streaming for retry (simpler, and user isn't actively watching)
+            response = self._llm_router.chat(
+                messages=history,
+                system_prompt=assembled.full_system_prompt,
+                task_type=TaskType.CONVERSATION,
+                temperature=0.7,
+                tools=tools,
+                thinking_enabled=self._user_settings.thinking_enabled
+            )
+
+            if response.success:
+                # Process tool calls if any
+                result = process_with_tools(
+                    llm_router=self._llm_router,
+                    response=response,
+                    history=history,
+                    system_prompt=assembled.full_system_prompt,
+                    max_passes=5,
+                    pulse_callback=lambda interval: self._emit_pulse_interval_change(interval),
+                    tools=tools,
+                    thinking_enabled=self._user_settings.thinking_enabled
+                )
+
+                final_text = result.final_text
+
+                # Prepend deferred notice
+                notice = "\u26a0 Delayed response to your earlier message:\n\n"
+                final_text = notice + final_text
+
+                # Store and display
+                self._conversation_mgr.add_turn(
+                    role="assistant",
+                    content=final_text,
+                    input_type="text"
+                )
+                timestamp = self._get_timestamp()
+                self.signals.new_message.emit("assistant", final_text, timestamp)
+                log_info("Deferred GUI retry succeeded", prefix="🔄")
+            else:
+                log_warning(f"Deferred GUI retry also failed: {response.error}")
+                timestamp = self._get_timestamp()
+                self.signals.new_message.emit(
+                    "system",
+                    "[Retry failed — models still unavailable]",
+                    timestamp
+                )
+
+        except Exception as e:
+            log_error(f"Deferred GUI retry exception: {e}")
+            timestamp = self._get_timestamp()
+            self.signals.new_message.emit(
+                "system",
+                "[Retry failed — unexpected error]",
+                timestamp
+            )
+
+        finally:
+            self.signals.response_complete.emit()
+
+    def _process_deferred_telegram_retry(self, original_input: str):
+        """Process a deferred Telegram message retry."""
+        from llm.router import TaskType
+        from agency.tools import get_tool_definitions, process_with_tools
+
+        self._is_processing = True
+
+        try:
+            # Pause timers
+            if self._system_pulse_timer:
+                self._system_pulse_timer.pause()
+            if self._telegram_listener:
+                self._telegram_listener.pause()
+
+            self.signals.update_status.emit("Retrying Telegram message...", StatusManager.STATUS_THINKING)
+
+            # Rebuild prompt and history fresh
+            assembled = self._prompt_builder.build(
+                user_input=original_input,
+                system_prompt=""
+            )
+
+            history = self._conversation_mgr.get_api_messages()
+            user_message = {"role": "user", "content": original_input}
+
+            # Inject relevant memories
+            relevant_memories = assembled.session_context.get("relevant_memories")
+            if relevant_memories:
+                user_message["content"] = f"{relevant_memories}\n\n{original_input}"
+
+            history.append(user_message)
+            tools = get_tool_definitions()
+
+            response = self._llm_router.chat(
+                messages=history,
+                system_prompt=assembled.full_system_prompt,
+                task_type=TaskType.CONVERSATION,
+                temperature=0.7,
+                tools=tools,
+                thinking_enabled=self._user_settings.thinking_enabled
+            )
+
+            if response.success:
+                result = process_with_tools(
+                    llm_router=self._llm_router,
+                    response=response,
+                    history=history,
+                    system_prompt=assembled.full_system_prompt,
+                    max_passes=5,
+                    pulse_callback=lambda interval: self._emit_pulse_interval_change(interval),
+                    tools=tools,
+                    thinking_enabled=self._user_settings.thinking_enabled
+                )
+
+                final_text = result.final_text
+                notice = "\u26a0 Delayed response to your earlier message:\n\n"
+                final_text = notice + final_text
+
+                # Store response
+                self._conversation_mgr.add_turn(
+                    role="assistant",
+                    content=final_text,
+                    input_type="text"
+                )
+
+                # Display in GUI
+                timestamp = self._get_timestamp()
+                self.signals.new_message.emit("assistant", f"📱 {final_text}", timestamp)
+
+                # Send to Telegram
+                if not result.telegram_sent:
+                    try:
+                        if config.TELEGRAM_ENABLED:
+                            from communication.telegram_gateway import get_telegram_gateway
+                            gateway = get_telegram_gateway()
+                            if gateway.is_available():
+                                gateway.send(final_text)
+                    except Exception as e:
+                        log_warning(f"Failed to send deferred retry response to Telegram: {e}")
+
+                log_info("Deferred Telegram retry succeeded", prefix="🔄")
+            else:
+                log_warning(f"Deferred Telegram retry also failed: {response.error}")
+                # Notify via Telegram
+                try:
+                    if config.TELEGRAM_ENABLED:
+                        from communication.telegram_gateway import get_telegram_gateway
+                        gateway = get_telegram_gateway()
+                        if gateway.is_available():
+                            gateway.send("[Retry failed — models still unavailable]")
+                except Exception:
+                    pass
+
+        except Exception as e:
+            log_error(f"Deferred Telegram retry exception: {e}")
 
         finally:
             self.signals.response_complete.emit()
