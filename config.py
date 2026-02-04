@@ -63,6 +63,23 @@ LLM_PRIMARY_PROVIDER = os.getenv("LLM_PRIMARY_PROVIDER", "anthropic")  # 'anthro
 # Memory extraction was consolidated from 5+ local LLM calls to 1 API call for better quality
 LLM_FALLBACK_ENABLED = True  # Fall back to kobold if anthropic fails (not for extraction)
 
+# API Retry & Failover
+# Layer 1: Automatic retry for transient errors (500, 502, 503, timeouts)
+API_RETRY_MAX_ATTEMPTS = 3                    # Max retries for transient API errors
+API_RETRY_INITIAL_DELAY = 1.0                 # Initial backoff delay in seconds
+API_RETRY_BACKOFF_MULTIPLIER = 2.0            # Exponential backoff multiplier
+
+# Layer 2: Model failover on overload/rate limit
+# Maps each model to its fallback. When primary model is overloaded or rate-limited,
+# the system automatically retries with the alternate model.
+ANTHROPIC_MODEL_FAILOVER = {
+    "claude-opus-4-5-20250929": "claude-sonnet-4-5-20250929",
+    "claude-sonnet-4-5-20250929": "claude-opus-4-5-20250929",
+}
+
+# Layer 3: Deferred retry when all models unavailable
+API_DEFERRED_RETRY_DELAY = 1200               # 20 minutes in seconds
+
 # =============================================================================
 # DATABASE CONFIGURATION
 # =============================================================================

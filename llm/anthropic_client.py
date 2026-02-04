@@ -33,6 +33,7 @@ class AnthropicResponse:
     output_tokens: int
     success: bool
     error: Optional[str] = None
+    error_type: Optional[str] = None  # "overloaded", "rate_limited", "server_error", "auth_error", etc.
     stop_reason: Optional[str] = None
     # Web search fields
     web_searches_used: int = 0
@@ -70,6 +71,8 @@ class StreamingState:
     thinking_text: str = ""  # Accumulated thinking content
     _current_thinking_text: str = ""  # Thinking text for current block
     _current_thinking_signature: str = ""  # Signature for current thinking block
+    # Error classification (set when stop_reason == "error")
+    _error_type: Optional[str] = None  # "overloaded", "rate_limited", "server_error", etc.
 
     def to_response(self) -> AnthropicResponse:
         """Convert streaming state to final AnthropicResponse."""
@@ -145,6 +148,97 @@ class AnthropicClient:
             return True
         except Exception:
             return False
+
+    def _classify_error(self, error: Exception) -> tuple:
+        """
+        Classify an API error for retry/failover decisions.
+
+        Returns:
+            Tuple of (error_type, error_message)
+        """
+        import anthropic
+
+        error_msg = str(error)
+
+        # Check specific anthropic SDK exception types
+        if isinstance(error, anthropic.APITimeoutError):
+            return ("timeout", "Request timed out")
+        elif isinstance(error, anthropic.APIConnectionError):
+            return ("connection_error", "Connection failed")
+        elif isinstance(error, anthropic.RateLimitError):
+            return ("rate_limited", "Rate limit exceeded")
+        elif isinstance(error, anthropic.APIStatusError):
+            status = error.status_code
+            if status == 529:
+                return ("overloaded", "API overloaded")
+            elif status in (500, 502, 503):
+                return ("server_error", f"Server error ({status})")
+            elif status in (401, 403):
+                return ("auth_error", "Authentication failed")
+            elif status == 400:
+                return ("bad_request", error_msg)
+
+        # Fallback: check error message text
+        error_lower = error_msg.lower()
+        if "overloaded" in error_lower:
+            return ("overloaded", "API overloaded")
+        elif "rate" in error_lower:
+            return ("rate_limited", "Rate limit exceeded")
+        elif "authentication" in error_lower or "api key" in error_lower:
+            return ("auth_error", "Invalid API key")
+
+        return ("unknown", error_msg)
+
+    def _is_transient_error(self, error_type: str) -> bool:
+        """Check if an error type is transient (worth retrying same model)."""
+        return error_type in ("timeout", "connection_error", "server_error")
+
+    def _get_retry_after(self, error: Exception) -> Optional[float]:
+        """Extract retry-after delay from a rate limit error, if available."""
+        import anthropic
+        if isinstance(error, anthropic.RateLimitError):
+            response = getattr(error, 'response', None)
+            if response:
+                retry_after = response.headers.get('retry-after')
+                if retry_after:
+                    try:
+                        return float(retry_after)
+                    except (ValueError, TypeError):
+                        pass
+            return 5.0  # Default wait for rate limits
+        return None
+
+    def _call_with_retry(self, client, create_kwargs: dict):
+        """
+        Make a non-streaming API call with automatic retry for transient errors.
+
+        Retries on 500, 502, 503, timeouts, and connection errors with
+        exponential backoff. Non-transient errors (overloaded, rate limited,
+        auth errors) are raised immediately for higher-level handling.
+        """
+        import time
+        import config as cfg
+
+        max_attempts = getattr(cfg, 'API_RETRY_MAX_ATTEMPTS', 3)
+        delay = getattr(cfg, 'API_RETRY_INITIAL_DELAY', 1.0)
+        backoff = getattr(cfg, 'API_RETRY_BACKOFF_MULTIPLIER', 2.0)
+
+        for attempt in range(max_attempts):
+            try:
+                return client.messages.create(**create_kwargs)
+            except Exception as e:
+                error_type, error_msg = self._classify_error(e)
+
+                # Only retry transient errors, and only if we have attempts left
+                if not self._is_transient_error(error_type) or attempt >= max_attempts - 1:
+                    raise
+
+                log_warning(
+                    f"Transient API error (attempt {attempt + 1}/{max_attempts}): "
+                    f"{error_type} - {error_msg}. Retrying in {delay:.1f}s..."
+                )
+                time.sleep(delay)
+                delay *= backoff
 
     def chat(
         self,
@@ -283,11 +377,11 @@ class AnthropicClient:
                 if fetch_cfg.WEB_FETCH_BETA_HEADER:
                     extra_headers["anthropic-beta"] = "web-fetch-2025-09-10"
 
-            # Make the request
+            # Make the request (with automatic retry for transient errors)
             create_kwargs = {**request_params}
             if extra_headers:
                 create_kwargs["extra_headers"] = extra_headers
-            response = client.messages.create(**create_kwargs)
+            response = self._call_with_retry(client, create_kwargs)
 
             # Parse response content
             # Note: All iterations use defensive (x or []) pattern to handle None values
@@ -423,22 +517,15 @@ class AnthropicClient:
             )
 
         except Exception as e:
-            error_msg = str(e)
-
-            # Handle specific error types
-            if "authentication" in error_msg.lower() or "api key" in error_msg.lower():
-                error_msg = "Invalid API key"
-            elif "rate" in error_msg.lower():
-                error_msg = "Rate limit exceeded"
-            elif "overloaded" in error_msg.lower():
-                error_msg = "API overloaded, try again later"
+            error_type, error_msg = self._classify_error(e)
 
             return AnthropicResponse(
                 text="",
                 input_tokens=0,
                 output_tokens=0,
                 success=False,
-                error=error_msg
+                error=error_msg,
+                error_type=error_type
             )
 
     def chat_stream(
@@ -746,26 +833,21 @@ class AnthropicClient:
 
         except Exception as e:
             import traceback
-            error_msg = str(e)
             full_traceback = traceback.format_exc()
 
+            # Classify the error for upstream retry/failover decisions
+            error_type, error_msg = self._classify_error(e)
+
             # DIAGNOSTIC: Log full exception details
-            log_error(f"Streaming error: {error_msg}", prefix="[Stream]")
+            log_error(f"Streaming error ({error_type}): {error_msg}", prefix="[Stream]")
             log_error(f"Exception type: {type(e).__name__}", prefix="[Stream]")
             log_error(f"Full traceback:\n{full_traceback}", prefix="[Stream]")
 
-            # Handle specific error types
-            if "authentication" in error_msg.lower() or "api key" in error_msg.lower():
-                error_msg = "Invalid API key"
-            elif "rate" in error_msg.lower():
-                error_msg = "Rate limit exceeded"
-            elif "overloaded" in error_msg.lower():
-                error_msg = "API overloaded, try again later"
-
-            # Yield error state
+            # Yield error state with classification
             error_state = StreamingState()
             error_state.stop_reason = "error"
-            error_state._error_message = error_msg  # Store for debugging
+            error_state._error_message = error_msg
+            error_state._error_type = error_type
             yield ("", error_state)
 
     def generate(

@@ -40,6 +40,7 @@ class LLMResponse:
     tokens_in: int = 0
     tokens_out: int = 0
     error: Optional[str] = None
+    error_type: Optional[str] = None  # "overloaded", "rate_limited", "server_error", etc.
     # Web search fields
     web_searches_used: int = 0
     citations: List[Any] = None  # List of WebSearchCitation
@@ -104,6 +105,21 @@ class LLMRouter:
         if self._kobold is None:
             self._kobold = get_kobold_client()
         return self._kobold
+
+    def _get_failover_model(self, current_model: str) -> Optional[str]:
+        """
+        Get the failover model for a given model.
+
+        Returns:
+            The failover model name, or None if no failover configured.
+        """
+        import config
+        failover_map = getattr(config, 'ANTHROPIC_MODEL_FAILOVER', {})
+        return failover_map.get(current_model)
+
+    def _is_failover_eligible(self, error_type: Optional[str]) -> bool:
+        """Check if an error type should trigger model failover."""
+        return error_type in ("overloaded", "rate_limited", "server_error", "timeout", "connection_error")
 
     def check_providers(self) -> Dict[LLMProvider, tuple[bool, str]]:
         """
@@ -263,8 +279,63 @@ class LLMRouter:
         if response.success and response.web_fetches_used > 0:
             self._record_web_fetch_usage(response.web_fetches_used)
 
-        # Handle fallback - but NOT for conversation tasks
-        # Falling back to a weaker model for user-facing chat degrades experience
+        # Model failover for Anthropic: try alternate Claude model on overload/rate limit
+        if (not response.success
+                and provider == LLMProvider.ANTHROPIC
+                and self._is_failover_eligible(response.error_type)):
+            # Determine which model was used for this request
+            import config as _cfg
+            if task_type == TaskType.CONVERSATION:
+                from core.user_settings import get_user_settings
+                user_model = get_user_settings().conversation_model
+                primary_model = user_model if user_model else _cfg.ANTHROPIC_MODEL_CONVERSATION
+            elif task_type in (TaskType.EXTRACTION, TaskType.FACT_EXTRACTION):
+                primary_model = _cfg.ANTHROPIC_MODEL_EXTRACTION
+            elif task_type == TaskType.DELEGATION:
+                primary_model = _cfg.DELEGATION_MODEL
+            else:
+                primary_model = _cfg.ANTHROPIC_MODEL
+
+            failover_model = self._get_failover_model(primary_model)
+            if failover_model:
+                log_warning(
+                    f"Model {primary_model} failed ({response.error_type}), "
+                    f"trying failover model: {failover_model}"
+                )
+                failover_response = self._send_to_provider(
+                    provider=LLMProvider.ANTHROPIC,
+                    messages=messages,
+                    system_prompt=system_prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    enable_web_search=enable_web_search,
+                    web_search_max_uses=web_search_max_uses,
+                    enable_web_fetch=enable_web_fetch,
+                    web_fetch_max_uses=web_fetch_max_uses,
+                    web_fetch_config=web_fetch_config,
+                    tools=tools,
+                    task_type=task_type,
+                    thinking_enabled=thinking_enabled,
+                    thinking_budget_tokens=thinking_budget_tokens,
+                    model_override=failover_model
+                )
+
+                if failover_response.success:
+                    # Prepend notification to response text
+                    notice = "\u26a0 Response from fallback model (primary temporarily unavailable)\n\n"
+                    failover_response.text = notice + failover_response.text
+                    log_info(f"Failover to {failover_model} succeeded")
+                    return failover_response
+                else:
+                    # Both models failed - mark as both_unavailable for deferred retry
+                    log_warning(
+                        f"Failover model {failover_model} also failed ({failover_response.error_type}). "
+                        f"Both models unavailable."
+                    )
+                    response.error_type = "both_models_unavailable"
+                    return response
+
+        # Handle fallback to Kobold - but NOT for conversation tasks
         if not response.success and self.fallback_enabled and task_type != TaskType.CONVERSATION:
             fallback_provider = (
                 LLMProvider.KOBOLD if provider == LLMProvider.ANTHROPIC
@@ -286,7 +357,7 @@ class LLMRouter:
                 task_type=task_type
             )
         elif not response.success and task_type == TaskType.CONVERSATION:
-            log_warning(f"{provider.value} failed for CONVERSATION task - not falling back to preserve quality")
+            log_warning(f"{provider.value} failed for CONVERSATION task - error_type={response.error_type}")
 
         return response
 
@@ -396,6 +467,7 @@ class LLMRouter:
             client = self._get_anthropic()
             final_state = None
             chunk_count = 0
+            content_yielded_to_caller = False
 
             for chunk, state in client.chat_stream(
                 messages=messages,
@@ -414,8 +486,17 @@ class LLMRouter:
             ):
                 final_state = state
                 chunk_count += 1
+
+                # Intercept error states before yielding to caller
+                # (only if no content has been sent to the user yet)
+                if state.stop_reason == "error" and not content_yielded_to_caller:
+                    # Don't yield this error - we'll try failover below
+                    continue
+
                 if chunk_count == 1:
                     log_info(f"First chunk received", prefix="🔍")
+                if chunk:
+                    content_yielded_to_caller = True
                 yield (chunk, state)
 
             # DIAGNOSTIC: Log streaming completion
@@ -428,6 +509,78 @@ class LLMRouter:
                 if final_state.stop_reason == "error":
                     error_msg = getattr(final_state, '_error_message', 'unknown')
                     log_error(f"Stream ended with error: {error_msg}", prefix="🔍")
+
+            # Model failover: if primary stream failed before yielding content, try alternate model
+            if (final_state
+                    and final_state.stop_reason == "error"
+                    and not content_yielded_to_caller):
+                error_type = getattr(final_state, '_error_type', None)
+                error_msg = getattr(final_state, '_error_message', 'unknown')
+
+                if self._is_failover_eligible(error_type):
+                    failover_model = self._get_failover_model(model)
+                    if failover_model:
+                        log_warning(
+                            f"Streaming model {model} failed ({error_type}), "
+                            f"trying failover: {failover_model}"
+                        )
+
+                        # Try failover model
+                        failover_state = None
+                        failover_content_yielded = False
+                        notification = "\u26a0 Response from fallback model (primary temporarily unavailable)\n\n"
+
+                        for fb_chunk, fb_state in client.chat_stream(
+                            messages=messages,
+                            system_prompt=final_system_prompt,
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                            enable_web_search=enable_web_search,
+                            web_search_max_uses=web_search_max_uses,
+                            enable_web_fetch=enable_web_fetch,
+                            web_fetch_max_uses=web_fetch_max_uses,
+                            web_fetch_config=web_fetch_config,
+                            tools=tools,
+                            model=failover_model,
+                            thinking_enabled=thinking_enabled,
+                            thinking_budget_tokens=thinking_budget_tokens
+                        ):
+                            failover_state = fb_state
+
+                            # If failover also errors before content, break out
+                            if fb_state.stop_reason == "error" and not failover_content_yielded:
+                                break
+
+                            # Yield notification prefix before first real content
+                            if not failover_content_yielded and fb_chunk:
+                                yield (notification, fb_state)
+                                failover_content_yielded = True
+
+                            yield (fb_chunk, fb_state)
+
+                        if failover_content_yielded:
+                            # Failover succeeded - record usage and return
+                            log_info(f"Streaming failover to {failover_model} succeeded")
+                            if failover_state and failover_state.web_searches_used > 0:
+                                self._record_web_search_usage(failover_state.web_searches_used)
+                            if failover_state and failover_state.web_fetches_used > 0:
+                                self._record_web_fetch_usage(failover_state.web_fetches_used)
+                            return
+
+                        # Both models failed
+                        log_warning(
+                            f"Failover model {failover_model} also failed. Both models unavailable."
+                        )
+                        both_failed_state = StreamingState()
+                        both_failed_state.stop_reason = "error"
+                        both_failed_state._error_message = "Both models unavailable"
+                        both_failed_state._error_type = "both_models_unavailable"
+                        yield ("", both_failed_state)
+                        return
+
+                # Not failover-eligible or no failover model — yield original error
+                yield ("", final_state)
+                return
 
             # Record web search usage after streaming complete
             if final_state and final_state.web_searches_used > 0:
@@ -562,16 +715,19 @@ class LLMRouter:
         tools: Optional[List[Dict[str, Any]]] = None,
         task_type: TaskType = TaskType.CONVERSATION,
         thinking_enabled: bool = False,
-        thinking_budget_tokens: Optional[int] = None
+        thinking_budget_tokens: Optional[int] = None,
+        model_override: Optional[str] = None
     ) -> LLMResponse:
         """Send request to a specific provider."""
         try:
             if provider == LLMProvider.ANTHROPIC:
                 client = self._get_anthropic()
 
-                # Select model based on task type
+                # Select model: use override if provided, else based on task type
                 import config
-                if task_type == TaskType.CONVERSATION:
+                if model_override:
+                    model = model_override
+                elif task_type == TaskType.CONVERSATION:
                     # Check user preference first, fall back to config
                     from core.user_settings import get_user_settings
                     user_model = get_user_settings().conversation_model
@@ -606,6 +762,7 @@ class LLMRouter:
                     tokens_in=response.input_tokens,
                     tokens_out=response.output_tokens,
                     error=response.error,
+                    error_type=response.error_type,
                     web_searches_used=response.web_searches_used,
                     web_fetches_used=response.web_fetches_used,
                     citations=response.citations,
