@@ -85,6 +85,10 @@ class ToolExecutor:
             "reddit_profile": self._exec_reddit_profile,
             # Delegation
             "delegate_task": self._exec_delegate_task,
+            # Growth threads (pulse-only)
+            "set_growth_thread": self._exec_set_growth_thread,
+            "remove_growth_thread": self._exec_remove_growth_thread,
+            "store_core_memory": self._exec_store_core_memory,
         }
 
     def execute(
@@ -1490,6 +1494,139 @@ class ToolExecutor:
                 content=f"Delegation error: {str(e)}",
                 is_error=True
             )
+
+
+    # =========================================================================
+    # GROWTH THREAD TOOLS (Pulse-only)
+    # =========================================================================
+
+    def _exec_set_growth_thread(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Create or update a growth thread."""
+        from agency.growth_threads import get_growth_thread_manager
+
+        slug = input.get("slug", "")
+        stage = input.get("stage", "")
+        content = input.get("content", "")
+
+        if not slug or not stage or not content:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="set_growth_thread",
+                content="Error: slug, stage, and content are all required.",
+                is_error=True
+            )
+
+        manager = get_growth_thread_manager()
+
+        # Check if this is an update or create
+        existing = manager.get_by_slug(slug)
+        success, error = manager.set(slug, stage, content)
+
+        if not success:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="set_growth_thread",
+                content=f"Error: {error}",
+                is_error=True
+            )
+
+        if existing:
+            if existing.stage != stage:
+                return ToolResult(
+                    tool_use_id=id,
+                    tool_name="set_growth_thread",
+                    content=f"Growth thread '{slug}' updated: {existing.stage} → {stage}"
+                )
+            else:
+                return ToolResult(
+                    tool_use_id=id,
+                    tool_name="set_growth_thread",
+                    content=f"Growth thread '{slug}' content updated (stage: {stage})"
+                )
+        else:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="set_growth_thread",
+                content=f"Growth thread '{slug}' created (stage: {stage})"
+            )
+
+    def _exec_remove_growth_thread(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Remove a growth thread."""
+        from agency.growth_threads import get_growth_thread_manager
+
+        slug = input.get("slug", "")
+
+        if not slug:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="remove_growth_thread",
+                content="Error: slug is required.",
+                is_error=True
+            )
+
+        manager = get_growth_thread_manager()
+        success, error = manager.remove(slug)
+
+        if not success:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="remove_growth_thread",
+                content=f"Error: {error}",
+                is_error=True
+            )
+
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="remove_growth_thread",
+            content=f"Growth thread '{slug}' removed."
+        )
+
+    def _exec_store_core_memory(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Store a permanent core memory."""
+        from prompt_builder.sources.core_memory import CoreMemorySource
+
+        content = input.get("content", "")
+        category = input.get("category", "")
+
+        if not content or not category:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="store_core_memory",
+                content="Error: content and category are both required.",
+                is_error=True
+            )
+
+        valid_categories = ("identity", "relationship", "preference", "fact")
+        if category not in valid_categories:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="store_core_memory",
+                content=f"Error: category must be one of: {', '.join(valid_categories)}",
+                is_error=True
+            )
+
+        source = CoreMemorySource()
+        memory_id = source.add(content, category)
+
+        if memory_id is None:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="store_core_memory",
+                content="Error: Failed to store core memory.",
+                is_error=True
+            )
+
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="store_core_memory",
+            content=f"Core memory stored (id={memory_id}, category={category}): {content[:80]}..."
+        )
 
 
 # Global instance

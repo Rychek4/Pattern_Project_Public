@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from core.logger import log_info, log_success, log_error, log_config, log_section
 
 # Schema version for migrations
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 # SQL schema definition
 SCHEMA_SQL = """
@@ -181,6 +181,18 @@ CREATE TABLE IF NOT EXISTS active_thoughts_history (
     updated_at TIMESTAMP NOT NULL
 );
 
+-- Growth threads: AI's long-term developmental aspirations
+-- Tracks patterns the AI wants to integrate over weeks/months
+CREATE TABLE IF NOT EXISTS growth_threads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug TEXT NOT NULL UNIQUE,
+    content TEXT NOT NULL,
+    stage TEXT NOT NULL DEFAULT 'seed' CHECK (stage IN ('seed', 'growing', 'integrating', 'dormant', 'abandoned')),
+    stage_changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Indexes for efficient queries
 CREATE INDEX IF NOT EXISTS idx_conversations_session ON conversations(session_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_unprocessed ON conversations(processed_for_memory) WHERE processed_for_memory = FALSE;
@@ -202,6 +214,8 @@ CREATE INDEX IF NOT EXISTS idx_curiosity_status ON curiosity_goals(status);
 CREATE INDEX IF NOT EXISTS idx_curiosity_cooldown ON curiosity_goals(cooldown_until);
 CREATE INDEX IF NOT EXISTS idx_curiosity_source ON curiosity_goals(source_memory_id);
 CREATE INDEX IF NOT EXISTS idx_thoughts_history_archived ON active_thoughts_history(archived_at DESC);
+CREATE INDEX IF NOT EXISTS idx_growth_threads_stage ON growth_threads(stage);
+CREATE INDEX IF NOT EXISTS idx_growth_threads_slug ON growth_threads(slug);
 """
 
 # Migration SQL for v1 -> v2
@@ -712,6 +726,28 @@ FROM active_thoughts;
 """
 
 
+# Migration SQL for v17 -> v18 (add growth_threads table)
+MIGRATION_V18_SQL = """
+-- Growth threads: AI's long-term developmental aspirations
+-- Tracks patterns the AI wants to integrate over weeks/months.
+-- Unlike active thoughts (volatile, replaced wholesale) or memories (passive, backward-looking),
+-- growth threads operate on a weeks-to-months timescale and represent "what I am becoming."
+CREATE TABLE IF NOT EXISTS growth_threads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug TEXT NOT NULL UNIQUE,
+    content TEXT NOT NULL,
+    stage TEXT NOT NULL DEFAULT 'seed' CHECK (stage IN ('seed', 'growing', 'integrating', 'dormant', 'abandoned')),
+    stage_changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Indexes for growth threads
+CREATE INDEX IF NOT EXISTS idx_growth_threads_stage ON growth_threads(stage);
+CREATE INDEX IF NOT EXISTS idx_growth_threads_slug ON growth_threads(slug);
+"""
+
+
 class Database:
     """SQLite database manager with WAL mode and thread-safe connections."""
 
@@ -892,6 +928,10 @@ class Database:
             if from_version < 17:
                 log_config("Applying migration", "v16 → v17 (add active_thoughts_history table)", indent=1)
                 conn.executescript(MIGRATION_V17_SQL)
+
+            if from_version < 18:
+                log_config("Applying migration", "v17 → v18 (add growth_threads table)", indent=1)
+                conn.executescript(MIGRATION_V18_SQL)
 
             # Record new version
             conn.execute(

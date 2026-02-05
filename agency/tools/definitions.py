@@ -11,9 +11,12 @@ from typing import List, Dict, Any
 import config
 
 
-def get_tool_definitions() -> List[Dict[str, Any]]:
+def get_tool_definitions(is_pulse: bool = False) -> List[Dict[str, Any]]:
     """
     Get all available tool definitions based on current config.
+
+    Args:
+        is_pulse: If True, include pulse-only tools (growth threads, store_core_memory)
 
     Returns:
         List of tool definition dicts for the Anthropic API
@@ -100,6 +103,14 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
         tools.append(REDDIT_SEARCH_TOOL)
         tools.append(REDDIT_SUBREDDITS_TOOL)
         tools.append(REDDIT_PROFILE_TOOL)
+
+    # Pulse-only tools: growth threads and core memory storage
+    # These are reflective tools used during autonomous pulse moments,
+    # not during regular conversation.
+    if is_pulse:
+        tools.append(SET_GROWTH_THREAD_TOOL)
+        tools.append(REMOVE_GROWTH_THREAD_TOOL)
+        tools.append(STORE_CORE_MEMORY_TOOL)
 
     return tools
 
@@ -1288,5 +1299,118 @@ every time for the same service.""",
             }
         },
         "required": ["task"]
+    }
+}
+
+
+# =============================================================================
+# GROWTH THREAD TOOLS (Pulse-only)
+# =============================================================================
+# Growth threads are long-term developmental aspirations that the AI manages
+# during pulse reflection. These tools are only available during pulse sessions.
+
+SET_GROWTH_THREAD_TOOL: Dict[str, Any] = {
+    "name": "set_growth_thread",
+    "description": """Create or update a growth thread — a long-term developmental aspiration.
+
+Growth threads track patterns you want to integrate over weeks or months. They sit
+between active thoughts (volatile, present-tense) and memories (passive, past-tense),
+representing "what I am becoming."
+
+If the slug already exists, updates its content and/or stage. If the slug is new,
+creates a new thread.
+
+Content should start with a FOCUS: line (the thread's anchor — what you're working on),
+followed by the evolving narrative of your experience with this pattern.
+
+Stages:
+- seed: "I think I see something." Pattern noticed but not confirmed.
+- growing: "This is real." Confirmed pattern, actively practicing.
+- integrating: "This is becoming natural." Behavior happening without conscious effort.
+- dormant: "No relevant context lately." Still valid, just paused.
+- abandoned: "This wasn't useful." Will be removed.
+
+Keep active threads (seed + growing + integrating) between 3 and 5.""",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "slug": {
+                "type": "string",
+                "description": "Short identifier for the thread (e.g., 'calibrating-detail-level')"
+            },
+            "stage": {
+                "type": "string",
+                "enum": ["seed", "growing", "integrating", "dormant", "abandoned"],
+                "description": "Current stage of the thread"
+            },
+            "content": {
+                "type": "string",
+                "description": "The evolving prose. Start with 'FOCUS: ...' line, then narrative."
+            }
+        },
+        "required": ["slug", "stage", "content"]
+    }
+}
+
+REMOVE_GROWTH_THREAD_TOOL: Dict[str, Any] = {
+    "name": "remove_growth_thread",
+    "description": """Remove a growth thread by slug.
+
+Use this after:
+- Promoting an integrated thread to core memory (call store_core_memory first)
+- Abandoning a thread that's no longer useful
+
+This permanently deletes the thread from the database.""",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "slug": {
+                "type": "string",
+                "description": "The slug of the growth thread to remove"
+            }
+        },
+        "required": ["slug"]
+    }
+}
+
+
+# =============================================================================
+# CORE MEMORY STORAGE TOOL (Pulse-only)
+# =============================================================================
+# Allows the AI to write permanent core memories during pulse reflection,
+# primarily for promoting integrated growth threads.
+
+STORE_CORE_MEMORY_TOOL: Dict[str, Any] = {
+    "name": "store_core_memory",
+    "description": """Store a permanent core memory that will always be included in your context.
+
+Core memories are foundational knowledge that never decays. Use this during pulse
+reflection to capture something you've permanently integrated — typically when
+promoting a growth thread that has reached the INTEGRATED stage.
+
+This creates a new discrete entry (not an update to your narrative). The content
+should be a concise sentence capturing what you've internalized.
+
+Categories:
+- identity: Who you are, how you think, what you've become
+- relationship: Permanent knowledge about your relationship with the user
+- preference: Lasting preferences (yours or the user's)
+- fact: Permanent factual knowledge
+
+Use sparingly. Core memories are permanent and always consume context tokens.""",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "content": {
+                "type": "string",
+                "description": "The core memory content — a concise, permanent sentence"
+            },
+            "category": {
+                "type": "string",
+                "enum": ["identity", "relationship", "preference", "fact"],
+                "description": "Category for the core memory"
+            }
+        },
+        "required": ["content", "category"]
     }
 }

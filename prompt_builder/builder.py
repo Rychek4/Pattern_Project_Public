@@ -214,6 +214,7 @@ def create_default_builder() -> PromptBuilder:
     from prompt_builder.sources.intention_source import IntentionSource
     from prompt_builder.sources.dev_mode import DevModeSource
     from prompt_builder.sources.active_thoughts import ActiveThoughtsSource
+    from prompt_builder.sources.growth_threads import GrowthThreadsSource
 
     builder = PromptBuilder()
 
@@ -227,6 +228,7 @@ def create_default_builder() -> PromptBuilder:
         DevModeSource(),        # Dev mode awareness (priority 5) - first if enabled
         CoreMemorySource(),     # Core identity (priority 10)
         ActiveThoughtsSource(), # AI's working memory (priority 18)
+        GrowthThreadsSource(),  # AI's developmental aspirations (priority 20)
         IntentionSource(),      # AI's forward-looking memory (priority 22)
         SystemPulseSource(),
         AICommandsSource(),
