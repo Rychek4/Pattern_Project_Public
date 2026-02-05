@@ -212,7 +212,7 @@ New sources can be added without modifying PromptBuilder.
 ### Environment Variables
 ```bash
 ANTHROPIC_API_KEY=sk-ant-...
-ANTHROPIC_MODEL=claude-sonnet-4-20250514
+ANTHROPIC_MODEL=claude-sonnet-4-5-20250929
 KOBOLD_API_URL=http://127.0.0.1:5001
 LLM_PRIMARY_PROVIDER=anthropic
 LOG_LEVEL=INFO
