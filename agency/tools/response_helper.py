@@ -143,6 +143,7 @@ class ToolResponseHelper:
         """
         import config
         from llm.router import TaskType
+        from interface.process_panel import ProcessEventType, get_process_event_bus
 
         task_type = self._task_type or TaskType.CONVERSATION
         current_response = response
@@ -160,6 +161,8 @@ class ToolResponseHelper:
         # This fixes a bug where text from early passes was lost if later
         # continuations returned empty text
         accumulated_text = ""
+
+        event_bus = get_process_event_bus()
 
         for pass_num in range(1, max_passes + 1):
             # Create fresh context for each pass to avoid cross-contamination
@@ -208,6 +211,35 @@ class ToolResponseHelper:
                 clarification_requested = True
                 clarification_data = context["clarification_requested"]
 
+            # Emit tool invocations to process panel
+            if current_response.has_tool_calls():
+                for tc in current_response.tool_calls:
+                    tool_detail = tc.name
+                    tool_input = tc.input if hasattr(tc, 'input') else {}
+                    if isinstance(tool_input, dict):
+                        if tc.name == "search_memories" and "query" in tool_input:
+                            tool_detail = f"{tc.name}: {tool_input['query']}"
+                        elif tc.name == "send_telegram" and "message" in tool_input:
+                            preview = tool_input["message"][:40]
+                            tool_detail = f"{tc.name}: {preview}..."
+                        elif tc.name == "send_email" and "subject" in tool_input:
+                            tool_detail = f"{tc.name}: {tool_input['subject']}"
+                        elif tc.name == "read_file" and "path" in tool_input:
+                            tool_detail = f"{tc.name}: {tool_input['path']}"
+                        elif tc.name == "write_file" and "path" in tool_input:
+                            tool_detail = f"{tc.name}: {tool_input['path']}"
+                        elif tc.name == "create_reminder" and "what" in tool_input:
+                            preview = tool_input["what"][:40]
+                            tool_detail = f"{tc.name}: {preview}"
+                        elif tc.name == "advance_curiosity" and "note" in tool_input:
+                            preview = tool_input["note"][:40]
+                            tool_detail = f"{tc.name}: {preview}"
+                    event_bus.emit_event(
+                        ProcessEventType.TOOL_INVOKED,
+                        detail=tool_detail,
+                        round_number=pass_num
+                    )
+
             # If no continuation needed (no tool calls or stop_reason != "tool_use")
             if not processed.needs_continuation:
                 return ToolProcessingResult(
@@ -249,6 +281,13 @@ class ToolResponseHelper:
                     is_streaming=False,
                 )
 
+            # Emit continuation start to process panel
+            event_bus.emit_event(
+                ProcessEventType.CONTINUATION_START,
+                round_number=pass_num + 1,
+                is_active=True
+            )
+
             # Get next response with tools
             cont_start = time.time()
             continuation = self._router.chat(
@@ -272,6 +311,18 @@ class ToolResponseHelper:
                     stop_reason=getattr(continuation, 'stop_reason', "") or "",
                     tokens_in=getattr(continuation, 'tokens_in', 0),
                     tokens_out=getattr(continuation, 'tokens_out', 0),
+                )
+
+            # Emit continuation complete to process panel
+            cont_round = pass_num + 1
+            if continuation.success:
+                token_detail = ""
+                if hasattr(continuation, 'tokens_out') and continuation.tokens_out:
+                    token_detail = f"{continuation.tokens_out} tokens"
+                event_bus.emit_event(
+                    ProcessEventType.STREAM_COMPLETE,
+                    detail=token_detail,
+                    round_number=cont_round
                 )
 
             if not continuation.success:

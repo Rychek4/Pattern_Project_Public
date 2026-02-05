@@ -48,6 +48,9 @@ from interface.gui_components import (
     KeyboardShortcutManager, StatusManager,
     CancelButton
 )
+from interface.process_panel import (
+    ProcessPanel, ProcessEventType, get_process_event_bus
+)
 
 # Legacy color dict for backwards compatibility (maps from theme)
 def get_colors_from_theme(theme: Theme) -> dict:
@@ -302,14 +305,27 @@ class ChatWindow(QMainWindow):
         layout.addWidget(header)
 
 
-        # Chat display
+        # Main content area: process panel + chat display side by side
+        content_area = QWidget()
+        content_area.setStyleSheet("background: transparent; border: none;")
+        content_layout = QHBoxLayout(content_area)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
+
+        # Process panel (left side)
+        self._process_panel = ProcessPanel()
+        content_layout.addWidget(self._process_panel)
+
+        # Chat display (right side, takes remaining space)
         self.chat_display = QTextBrowser()
         self.chat_display.setOpenExternalLinks(False)  # Handle links ourselves for clarification
         self.chat_display.anchorClicked.connect(self._on_link_clicked)
         self.chat_display.setFont(QFont(UI_FONT_FAMILY, self._user_settings.font_size))
         self.chat_display.setContextMenuPolicy(Qt.CustomContextMenu)
         self.chat_display.customContextMenuRequested.connect(self._show_chat_context_menu)
-        layout.addWidget(self.chat_display, stretch=1)
+        content_layout.addWidget(self.chat_display, stretch=1)
+
+        layout.addWidget(content_area, stretch=1)
 
 
         # Input area - add horizontal padding since central widget has 0 margins
@@ -1533,6 +1549,9 @@ class ChatWindow(QMainWindow):
             display_text = f"[Image] {text}" if text else "[Image attached]"
         self.signals.new_message.emit("user", display_text, timestamp)
 
+        # Emit to process panel
+        get_process_event_bus().emit_event(ProcessEventType.MESSAGE_RECEIVED)
+
         # Process in background thread
         self._processing_thread = threading.Thread(
             target=self._process_message,
@@ -1751,6 +1770,9 @@ class ChatWindow(QMainWindow):
             self._is_first_message_of_session = False
             log_info(f"Prompt built: {len(assembled.full_system_prompt)} chars system prompt", prefix="📨")
 
+            # Emit to process panel
+            get_process_event_bus().emit_event(ProcessEventType.PROMPT_ASSEMBLED)
+
             # Emit prompt assembly to dev window
             if config.DEV_MODE_ENABLED:
                 from interface.dev_window import emit_prompt_assembly
@@ -1807,6 +1829,9 @@ class ChatWindow(QMainWindow):
                             block["text"] = f"{relevant_memories}\n\n{block.get('text', '')}"
                             break
 
+            # Emit memories injected to process panel
+            get_process_event_bus().emit_event(ProcessEventType.MEMORIES_INJECTED)
+
             history.append(user_message)
             log_info(f"History now has {len(history)} messages (after appending user message)", prefix="📨")
 
@@ -1822,6 +1847,11 @@ class ChatWindow(QMainWindow):
             timestamp = self._get_timestamp()
             self.signals.stream_start.emit(timestamp)
             log_info("Starting streaming API call...", prefix="📨")
+
+            # Emit stream start to process panel
+            get_process_event_bus().emit_event(
+                ProcessEventType.STREAM_START, is_active=True
+            )
 
             # Initialize sentence buffer for TTS
             sentence_buffer = SentenceBuffer()
@@ -1896,6 +1926,16 @@ class ChatWindow(QMainWindow):
                 return
 
             log_info(f"Streaming completed successfully: {len(final_state.text)} chars, stop_reason={final_state.stop_reason}", prefix="📨")
+
+            # Emit stream complete to process panel
+            token_detail = ""
+            if final_state.output_tokens:
+                token_detail = f"{final_state.output_tokens} tokens"
+            get_process_event_bus().emit_event(
+                ProcessEventType.STREAM_COMPLETE,
+                detail=token_detail,
+                round_number=1
+            )
 
             # Record the streaming response for prompt export
             self._round_recorder.record_response(
@@ -2006,6 +2046,9 @@ class ChatWindow(QMainWindow):
             self.signals.stream_complete.emit(final_text)
             log_info("=== _process_message COMPLETE ===", prefix="📨")
 
+            # Emit processing complete to process panel
+            get_process_event_bus().emit_event(ProcessEventType.PROCESSING_COMPLETE)
+
         except Exception as e:
             error_msg = f"Message processing error: {str(e)}"
             tb = traceback.format_exc()
@@ -2015,6 +2058,11 @@ class ChatWindow(QMainWindow):
             log_error(f"Traceback:\n{tb}", prefix="📨")
             self.signals.update_status.emit(f"Error: {str(e)}", StatusManager.STATUS_ERROR)
             self.signals.stream_complete.emit("")
+
+            # Emit error to process panel
+            get_process_event_bus().emit_event(
+                ProcessEventType.PROCESSING_ERROR, detail=str(e)
+            )
 
         finally:
             log_info("_process_message finally block - emitting response_complete", prefix="📨")
@@ -2320,6 +2368,9 @@ class ChatWindow(QMainWindow):
         self._is_processing = True
         self.signals.update_status.emit("Processing Telegram message...", StatusManager.STATUS_THINKING)
 
+        # Emit to process panel
+        get_process_event_bus().emit_event(ProcessEventType.TELEGRAM_RECEIVED)
+
         try:
             # Pause timers during processing
             if self._system_pulse_timer:
@@ -2479,6 +2530,7 @@ class ChatWindow(QMainWindow):
             self.signals.update_status.emit(f"Error: {str(e)}", StatusManager.STATUS_ERROR)
 
         finally:
+            get_process_event_bus().emit_event(ProcessEventType.PROCESSING_COMPLETE)
             self.signals.response_complete.emit()
 
     def _schedule_deferred_retry(self, original_input: str, source: str = "gui"):
@@ -2746,6 +2798,9 @@ class ChatWindow(QMainWindow):
 
         log_info("=== PULSE: Starting _process_pulse() ===", prefix="⏱️")
 
+        # Emit to process panel
+        get_process_event_bus().emit_event(ProcessEventType.PULSE_FIRED)
+
         try:
             self._is_processing = True
 
@@ -2781,6 +2836,7 @@ class ChatWindow(QMainWindow):
                 system_prompt="",
                 additional_context={"is_pulse": True}
             )
+            get_process_event_bus().emit_event(ProcessEventType.PROMPT_ASSEMBLED)
 
             # Get conversation history (uses saved context count from shutdown)
             history = self._conversation_mgr.get_api_messages()
@@ -2798,6 +2854,9 @@ class ChatWindow(QMainWindow):
             # Get LLM response WITH tools enabled
             from llm.router import TaskType
 
+            get_process_event_bus().emit_event(
+                ProcessEventType.STREAM_START, is_active=True
+            )
             response = self._llm_router.chat(
                 messages=history,
                 system_prompt=assembled.full_system_prompt,
@@ -2808,6 +2867,17 @@ class ChatWindow(QMainWindow):
             )
 
             log_info(f"PULSE: Router returned, success={response.success}", prefix="⏱️")
+
+            # Emit initial response to process panel
+            if response.success:
+                token_detail = ""
+                if hasattr(response, 'tokens_out') and response.tokens_out:
+                    token_detail = f"{response.tokens_out} tokens"
+                get_process_event_bus().emit_event(
+                    ProcessEventType.STREAM_COMPLETE,
+                    detail=token_detail,
+                    round_number=1
+                )
 
             if response.success:
                 # Set up dev window callbacks for tool/response tracking
@@ -2874,6 +2944,7 @@ class ChatWindow(QMainWindow):
 
         finally:
             log_info("=== PULSE: _process_pulse() completing ===", prefix="⏱️")
+            get_process_event_bus().emit_event(ProcessEventType.PROCESSING_COMPLETE)
             self.signals.response_complete.emit()
 
     def _on_reminder_fired(self, triggered_intentions):
@@ -2908,6 +2979,9 @@ class ChatWindow(QMainWindow):
         stored_message = "[Reminder Pulse]"
 
         log_info("=== REMINDER: Starting _process_reminder_pulse() ===", prefix="⏰")
+
+        # Emit to process panel
+        get_process_event_bus().emit_event(ProcessEventType.REMINDER_FIRED)
 
         try:
             self._is_processing = True
@@ -3022,6 +3096,7 @@ class ChatWindow(QMainWindow):
 
         finally:
             log_info("=== REMINDER: _process_reminder_pulse() completing ===", prefix="⏰")
+            get_process_event_bus().emit_event(ProcessEventType.PROCESSING_COMPLETE)
             self.signals.response_complete.emit()
 
     def _update_status(self, status: str):
