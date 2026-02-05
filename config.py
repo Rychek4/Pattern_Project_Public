@@ -73,8 +73,8 @@ API_RETRY_BACKOFF_MULTIPLIER = 2.0            # Exponential backoff multiplier
 # Maps each model to its fallback. When primary model is overloaded or rate-limited,
 # the system automatically retries with the alternate model.
 ANTHROPIC_MODEL_FAILOVER = {
-    "claude-opus-4-5-20250929": "claude-sonnet-4-5-20250929",
-    "claude-sonnet-4-5-20250929": "claude-opus-4-5-20250929",
+    "claude-opus-4-6": "claude-sonnet-4-5-20250929",
+    "claude-sonnet-4-5-20250929": "claude-opus-4-6",
 }
 
 # Layer 3: Deferred retry when all models unavailable
@@ -415,7 +415,7 @@ COMMAND_SEARCH_MIN_SCORE = 0.3  # Minimum relevance score for search results
 # This preserves the main conversation's context window while offloading
 # multi-step work to a cheaper, faster model.
 DELEGATION_ENABLED = True
-DELEGATION_MODEL = os.getenv("DELEGATION_MODEL", "claude-3-5-haiku-20241022")
+DELEGATION_MODEL = os.getenv("DELEGATION_MODEL", "claude-haiku-4-5-20251001")
 DELEGATION_MAX_ROUNDS = 15          # Max continuation passes per delegated task (browser workflows need headroom)
 DELEGATION_MAX_TOKENS = 4096        # Max output tokens per sub-agent response
 
@@ -528,7 +528,7 @@ TELEGRAM_MAX_PER_HOUR = 30   # Maximum Telegram messages per hour
 # Requires enabling in Anthropic Console (organization setting).
 #
 # Pricing: $10 per 1,000 searches + standard token costs (results are input tokens)
-# Supported models: Claude 3.5 Sonnet, 3.5 Haiku, 3.7 Sonnet, and newer
+# Supported models: Claude Sonnet 4.5, Haiku 4.5, and newer
 #
 # When enabled, Claude can autonomously search the web for current information.
 # Results include citations (title, URL, cited_text) automatically.
@@ -543,7 +543,7 @@ WEB_SEARCH_TOTAL_ALLOWED_PER_DAY = 30           # Daily budget (resets at midnig
 # Requires beta header: web-fetch-2025-09-10 (toggled via WEB_FETCH_BETA_HEADER)
 #
 # Pricing: Standard token costs (fetched content counted as input tokens)
-# Supported models: Claude Opus 4.1, Opus 4, Sonnet 4, Haiku 3.5+
+# Supported models: Claude Opus 4.6, Sonnet 4.5, Haiku 4.5+
 #
 # When enabled alongside web search, Claude can search for sources then fetch
 # full content for deep analysis. Claude can ONLY fetch URLs explicitly provided
