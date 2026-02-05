@@ -285,6 +285,23 @@ CURIOSITY_WEIGHT_FRESHNESS = 1.8      # Weight multiplier for fresh discoveries
 CURIOSITY_WEIGHT_IMPORTANCE = 2.0     # Weight multiplier for memory importance
 
 # =============================================================================
+# GROWTH THREADS CONFIGURATION
+# =============================================================================
+# Growth threads are long-term developmental aspirations that sit between
+# active thoughts and memories. They track patterns the AI wants to integrate
+# over weeks or months, evolving through stages: seed → growing → integrating.
+GROWTH_THREADS_ENABLED = os.getenv("GROWTH_THREADS_ENABLED", "true").lower() == "true"
+
+# Maximum active threads (seed + growing + integrating) at any time
+GROWTH_THREADS_MAX_ACTIVE = 5
+
+# Prompt priority: after active thoughts (18), before intentions (22)
+GROWTH_THREADS_PRIORITY = 20
+
+# Valid stages for growth threads
+GROWTH_THREAD_STAGES = ('seed', 'growing', 'integrating', 'dormant', 'abandoned')
+
+# =============================================================================
 # HTTP API CONFIGURATION
 # =============================================================================
 HTTP_ENABLED = True

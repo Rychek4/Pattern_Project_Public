@@ -643,8 +643,8 @@ class ChatCLI:
             # (role="user" is an API constraint, but content clarifies it's automated)
             history.append({"role": "user", "content": PULSE_PROMPT})
 
-            # Get tool definitions for native tool use
-            tools = get_tool_definitions()
+            # Get tool definitions for native tool use (pulse-only tools included)
+            tools = get_tool_definitions(is_pulse=True)
 
             # Callback for pulse interval changes
             def on_pulse_change(interval: int):
@@ -661,7 +661,7 @@ class ChatCLI:
                     system_prompt=assembled.full_system_prompt,
                     task_type=TaskType.CONVERSATION,
                     temperature=0.7,
-                    tools=tools,  # Enable native tools for pulse responses
+                    tools=tools,  # Enable native tools for pulse responses (includes pulse-only tools)
                     thinking_enabled=get_user_settings().thinking_enabled
                 )
 

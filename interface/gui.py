@@ -2792,8 +2792,8 @@ class ChatWindow(QMainWindow):
             # The AI can still request screenshots on-demand via [[SCREENSHOT]] if needed.
             history.append({"role": "user", "content": pulse_prompt})
 
-            # Get tool definitions for native tool use
-            tools = get_tool_definitions()
+            # Get tool definitions for native tool use (pulse-only tools included)
+            tools = get_tool_definitions(is_pulse=True)
 
             # Get LLM response WITH tools enabled
             from llm.router import TaskType
