@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, List, Callable, TYPE_CHECKING
 
 from core.logger import log_info, log_warning, log_error
+from interface.process_panel import ProcessEventType, get_process_event_bus
 import config
 
 if TYPE_CHECKING:
@@ -118,6 +119,10 @@ class ToolExecutor:
         handler_fn = self._handlers.get(tool_name)
         if not handler_fn:
             log_warning(f"Unknown tool: {tool_name}")
+            get_process_event_bus().emit_event(
+                ProcessEventType.PROCESSING_ERROR,
+                detail=f"Unknown tool: {tool_name}"
+            )
             return ToolResult(
                 tool_use_id=tool_use_id,
                 tool_name=tool_name,
@@ -130,6 +135,10 @@ class ToolExecutor:
             return handler_fn(tool_input, tool_use_id, context)
         except Exception as e:
             log_error(f"Tool execution error ({tool_name}): {e}")
+            get_process_event_bus().emit_event(
+                ProcessEventType.PROCESSING_ERROR,
+                detail=f"{tool_name}: {str(e)[:80]}"
+            )
             return ToolResult(
                 tool_use_id=tool_use_id,
                 tool_name=tool_name,
