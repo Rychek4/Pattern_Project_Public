@@ -614,12 +614,22 @@ class MemoryExtractor:
         Run extraction in background thread and clear the in-progress flag when done.
         """
         import time
+        from interface.process_panel import ProcessEventType, get_process_event_bus
+
         start_time = time.time()
         log_info("=== EXTRACTION THREAD START ===", prefix="🧠")
+
+        event_bus = get_process_event_bus()
+        event_bus.emit_event(ProcessEventType.MEMORY_EXTRACTION, detail="extracting...")
+
         try:
-            self.extract_memories()
+            memories_created = self.extract_memories()
             duration = (time.time() - start_time) * 1000
             log_info(f"=== EXTRACTION THREAD COMPLETE ({duration:.0f}ms) ===", prefix="🧠")
+            event_bus.emit_event(
+                ProcessEventType.MEMORY_EXTRACTION,
+                detail=f"{memories_created} memories, {duration:.0f}ms"
+            )
         except Exception as e:
             import traceback
             duration = (time.time() - start_time) * 1000

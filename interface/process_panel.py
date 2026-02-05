@@ -44,6 +44,9 @@ class ProcessEventType(Enum):
     PULSE_FIRED = auto()
     REMINDER_FIRED = auto()
     TELEGRAM_RECEIVED = auto()
+    DELEGATION_START = auto()
+    DELEGATION_TOOL = auto()
+    DELEGATION_COMPLETE = auto()
 
 
 # =============================================================================
@@ -78,6 +81,9 @@ class ProcessEvent:
             ProcessEventType.PULSE_FIRED: "System Pulse",
             ProcessEventType.REMINDER_FIRED: "Reminder",
             ProcessEventType.TELEGRAM_RECEIVED: "Telegram Received",
+            ProcessEventType.DELEGATION_START: "Delegation Started",
+            ProcessEventType.DELEGATION_TOOL: "Delegate",
+            ProcessEventType.DELEGATION_COMPLETE: "Delegation Complete",
         }
         return labels.get(self.event_type, "Unknown")
 
@@ -136,6 +142,7 @@ COLOR_TOOL = "#c4a7e7"         # Purple - tool invocation
 COLOR_ERROR = "#e07a6b"        # Red - error
 COLOR_SYSTEM = "#5bb98c"       # Green - system events (pulse, extraction)
 COLOR_CONNECTOR = "#3a3a3a"    # Very dim connector lines
+COLOR_DELEGATION = "#6bb5e0"   # Blue - delegation events
 COLOR_TEXT = "#e8e6e3"         # Primary text
 COLOR_TEXT_DIM = "#7a7770"     # Dimmed text
 COLOR_TEXT_DETAIL = "#9a9892"  # Detail/metadata text
@@ -209,6 +216,9 @@ class ProcessNodeWidget(QFrame):
             ProcessEventType.PULSE_FIRED: COLOR_SYSTEM,
             ProcessEventType.REMINDER_FIRED: COLOR_SYSTEM,
             ProcessEventType.PROCESSING_COMPLETE: COLOR_SYSTEM,
+            ProcessEventType.DELEGATION_START: COLOR_DELEGATION,
+            ProcessEventType.DELEGATION_TOOL: COLOR_DELEGATION,
+            ProcessEventType.DELEGATION_COMPLETE: COLOR_DELEGATION,
         }
         return type_colors.get(self._event.event_type, COLOR_COMPLETE)
 
@@ -224,6 +234,12 @@ class ProcessNodeWidget(QFrame):
                 label = f"Tool: {tool_name}"
             # Clear detail since we used it in the label
             # (detail will show the extra info after ":" if present)
+
+        # For delegation sub-tool calls, show tool name
+        if self._event.event_type == ProcessEventType.DELEGATION_TOOL:
+            tool_name = self._event.detail.split(":")[0] if ":" in self._event.detail else self._event.detail
+            if tool_name:
+                label = f"Delegate: {tool_name}"
 
         # For continuation rounds, show round number
         if self._event.event_type == ProcessEventType.CONTINUATION_START:
@@ -256,10 +272,11 @@ class ProcessNodeWidget(QFrame):
         """Build the HTML for the detail line."""
         detail = self._event.detail
 
-        # For tool invocations, only show the part after ":"
-        if self._event.event_type == ProcessEventType.TOOL_INVOKED and ":" in detail:
+        # For tool invocations and delegation sub-tools, only show the part after ":"
+        tool_detail_types = (ProcessEventType.TOOL_INVOKED, ProcessEventType.DELEGATION_TOOL)
+        if self._event.event_type in tool_detail_types and ":" in detail:
             detail = detail.split(":", 1)[1].strip()
-        elif self._event.event_type == ProcessEventType.TOOL_INVOKED:
+        elif self._event.event_type in tool_detail_types:
             # No extra detail beyond tool name
             return ""
 
@@ -509,6 +526,14 @@ class ProcessPanel(QFrame):
         elif event.event_type == ProcessEventType.PROCESSING_ERROR:
             self._add_node(event)
             self._mark_all_active_complete()
+        elif event.event_type in (
+            ProcessEventType.DELEGATION_START,
+            ProcessEventType.DELEGATION_TOOL,
+            ProcessEventType.DELEGATION_COMPLETE,
+        ):
+            # Delegation events belong inside the current round
+            event.round_number = self._current_round
+            self._add_node_to_round(event)
         else:
             self._add_node(event)
 

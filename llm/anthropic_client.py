@@ -43,6 +43,8 @@ class AnthropicResponse:
     # Native tool use fields
     tool_calls: List[ToolCall] = field(default_factory=list)
     raw_content: List[Any] = field(default_factory=list)  # Original content blocks for continuation
+    # Server-side tool details (web_search, web_fetch) for process panel
+    server_tool_details: List[Dict[str, Any]] = field(default_factory=list)
     # Extended thinking fields
     thinking_text: str = ""  # Claude's internal reasoning (not shown to user by default)
 
@@ -67,6 +69,8 @@ class StreamingState:
     _current_tool_id: Optional[str] = None
     _current_tool_name: Optional[str] = None
     _current_tool_input_json: str = ""
+    # Server-side tool details (web_search, web_fetch)
+    server_tool_details: List[Dict[str, Any]] = field(default_factory=list)
     # Extended thinking
     thinking_text: str = ""  # Accumulated thinking content
     _current_thinking_text: str = ""  # Thinking text for current block
@@ -87,6 +91,7 @@ class StreamingState:
             citations=self.citations,
             tool_calls=self.tool_calls,
             raw_content=self.raw_content,
+            server_tool_details=self.server_tool_details,
             thinking_text=self.thinking_text
         )
 
@@ -392,6 +397,7 @@ class AnthropicClient:
             web_fetches_used = 0
             citations: List[WebSearchCitation] = []
             tool_calls: List[ToolCall] = []
+            server_tool_details: List[Dict[str, Any]] = []
 
             # Safely iterate over response content blocks
             content_blocks = getattr(response, "content", None) or []
@@ -417,10 +423,14 @@ class AnthropicClient:
                     if tool_name == "web_search":
                         # Claude invoked web search (built-in tool)
                         web_searches_used += 1
+                        tool_input = getattr(block, "input", {}) or {}
+                        server_tool_details.append({"name": "web_search", "input": tool_input})
                         log_info(f"Web search invoked ({web_searches_used})", prefix="🔍")
                     elif tool_name == "web_fetch":
                         # Claude invoked web fetch (built-in tool)
                         web_fetches_used += 1
+                        tool_input = getattr(block, "input", {}) or {}
+                        server_tool_details.append({"name": "web_fetch", "input": tool_input})
                         log_info(f"Web fetch invoked ({web_fetches_used})", prefix="🌐")
                     else:
                         # Native tool call - capture it
@@ -513,6 +523,7 @@ class AnthropicClient:
                 citations=citations,
                 tool_calls=tool_calls,
                 raw_content=raw_content_list,
+                server_tool_details=server_tool_details,
                 thinking_text=thinking_text
             )
 
@@ -771,6 +782,12 @@ class AnthropicClient:
                                     input=tool_input
                                 ))
                                 log_info(f"Tool call: {state._current_tool_name}", prefix="🔧")
+                            else:
+                                # Track server-side tool details for process panel
+                                state.server_tool_details.append({
+                                    "name": state._current_tool_name,
+                                    "input": tool_input
+                                })
 
                             # Add to raw_content
                             state.raw_content.append({

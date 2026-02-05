@@ -1981,6 +1981,7 @@ class ChatWindow(QMainWindow):
                     raw_content=final_state.raw_content,
                     web_searches_used=final_state.web_searches_used,
                     citations=final_state.citations,
+                    server_tool_details=final_state.server_tool_details,
                     thinking_text=final_state.thinking_text
                 )
 
@@ -2798,8 +2799,11 @@ class ChatWindow(QMainWindow):
 
         log_info("=== PULSE: Starting _process_pulse() ===", prefix="⏱️")
 
-        # Emit to process panel
-        get_process_event_bus().emit_event(ProcessEventType.PULSE_FIRED)
+        # Emit to process panel with interval detail
+        get_process_event_bus().emit_event(
+            ProcessEventType.PULSE_FIRED,
+            detail=f"interval: {interval_label}"
+        )
 
         try:
             self._is_processing = True
@@ -2980,8 +2984,19 @@ class ChatWindow(QMainWindow):
 
         log_info("=== REMINDER: Starting _process_reminder_pulse() ===", prefix="⏰")
 
-        # Emit to process panel
-        get_process_event_bus().emit_event(ProcessEventType.REMINDER_FIRED)
+        # Emit to process panel with reminder details
+        reminder_detail = ""
+        if triggered_intentions:
+            previews = []
+            for intention in triggered_intentions:
+                content = getattr(intention, 'content', '')
+                if content:
+                    previews.append(content[:50])
+            reminder_detail = "; ".join(previews) if previews else ""
+        get_process_event_bus().emit_event(
+            ProcessEventType.REMINDER_FIRED,
+            detail=reminder_detail
+        )
 
         try:
             self._is_processing = True

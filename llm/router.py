@@ -50,6 +50,8 @@ class LLMResponse:
     stop_reason: Optional[str] = None
     tool_calls: List[ToolCall] = None
     raw_content: List[Any] = None  # Original content blocks for continuation
+    # Server-side tool details (web_search, web_fetch) for process panel
+    server_tool_details: List[Any] = None
     # Extended thinking fields
     thinking_text: str = ""  # Claude's internal reasoning (not shown to user by default)
 
@@ -60,6 +62,8 @@ class LLMResponse:
             self.tool_calls = []
         if self.raw_content is None:
             self.raw_content = []
+        if self.server_tool_details is None:
+            self.server_tool_details = []
 
     def has_tool_calls(self) -> bool:
         """Check if response contains tool calls (excluding web_search)."""
@@ -769,6 +773,7 @@ class LLMRouter:
                     stop_reason=response.stop_reason,
                     tool_calls=response.tool_calls,
                     raw_content=response.raw_content,
+                    server_tool_details=response.server_tool_details,
                     thinking_text=response.thinking_text
                 )
 

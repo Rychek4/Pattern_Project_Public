@@ -42,6 +42,114 @@ if TYPE_CHECKING:
     from llm.anthropic_client import AnthropicResponse
 
 
+def _build_tool_detail(tool_name: str, tool_input: Any) -> str:
+    """
+    Build a human-readable detail string for a tool invocation.
+
+    Format: "tool_name: relevant_detail"
+    The process panel splits on ":" to show tool name as label
+    and everything after as the detail line.
+    """
+    if not isinstance(tool_input, dict):
+        return tool_name
+
+    # Memory tools
+    if tool_name == "search_memories" and "query" in tool_input:
+        return f"{tool_name}: {tool_input['query']}"
+
+    # Communication tools
+    if tool_name == "send_telegram" and "message" in tool_input:
+        return f"{tool_name}: {tool_input['message'][:60]}"
+    if tool_name == "send_email" and "subject" in tool_input:
+        return f"{tool_name}: {tool_input['subject']}"
+
+    # File tools
+    if tool_name == "read_file" and "path" in tool_input:
+        return f"{tool_name}: {tool_input['path']}"
+    if tool_name == "write_file" and "path" in tool_input:
+        return f"{tool_name}: {tool_input['path']}"
+    if tool_name == "append_file" and "path" in tool_input:
+        return f"{tool_name}: {tool_input['path']}"
+
+    # Reminder tools
+    if tool_name == "create_reminder" and "what" in tool_input:
+        when = tool_input.get("when", "")
+        what = tool_input["what"][:50]
+        if when:
+            return f"{tool_name}: {what} (at {when})"
+        return f"{tool_name}: {what}"
+    if tool_name == "complete_reminder" and "intention_id" in tool_input:
+        outcome = tool_input.get("outcome", "")[:40]
+        return f"{tool_name}: #{tool_input['intention_id']}" + (f" - {outcome}" if outcome else "")
+    if tool_name == "dismiss_reminder" and "intention_id" in tool_input:
+        return f"{tool_name}: #{tool_input['intention_id']}"
+
+    # Curiosity tools
+    if tool_name == "advance_curiosity" and "note" in tool_input:
+        return f"{tool_name}: {tool_input['note'][:50]}"
+    if tool_name == "resolve_curiosity" and "status" in tool_input:
+        notes = tool_input.get("notes", "")[:40]
+        return f"{tool_name}: {tool_input['status']}" + (f" - {notes}" if notes else "")
+
+    # Pulse tool
+    if tool_name == "set_pulse_interval" and "interval" in tool_input:
+        return f"{tool_name}: {tool_input['interval']}"
+
+    # Active thoughts
+    if tool_name == "set_active_thoughts" and "thoughts" in tool_input:
+        thoughts = tool_input["thoughts"]
+        if isinstance(thoughts, list) and thoughts:
+            return f"{tool_name}: {thoughts[0][:40]}..."
+        return tool_name
+
+    # Delegation tool
+    if tool_name == "delegate_task" and "task" in tool_input:
+        return f"{tool_name}: {tool_input['task'][:80]}"
+
+    # Visual capture
+    if tool_name == "capture_screenshot":
+        return f"{tool_name}: screen capture"
+    if tool_name == "capture_webcam":
+        return f"{tool_name}: webcam capture"
+
+    # Clipboard
+    if tool_name == "set_clipboard" and "text" in tool_input:
+        return f"{tool_name}: {tool_input['text'][:40]}"
+
+    # Server-side tools (web_search, web_fetch)
+    if tool_name == "web_search" and "query" in tool_input:
+        return f"{tool_name}: {tool_input['query']}"
+    if tool_name == "web_fetch" and "url" in tool_input:
+        return f"{tool_name}: {tool_input['url']}"
+
+    # Social platform tools
+    if tool_name in ("reddit_search", "moltbook_search") and "query" in tool_input:
+        return f"{tool_name}: {tool_input['query']}"
+    if tool_name in ("reddit_create_post", "moltbook_create_post") and "title" in tool_input:
+        return f"{tool_name}: {tool_input['title'][:50]}"
+    if tool_name in ("reddit_comment", "moltbook_comment") and "body" in tool_input:
+        return f"{tool_name}: {tool_input['body'][:50]}"
+    if tool_name in ("reddit_feed", "moltbook_feed"):
+        subreddit = tool_input.get("subreddit") or tool_input.get("submolt", "")
+        if subreddit:
+            return f"{tool_name}: {subreddit}"
+
+    # Domain management
+    if tool_name == "manage_fetch_domains" and "domain" in tool_input:
+        action = tool_input.get("action", "")
+        return f"{tool_name}: {action} {tool_input['domain']}"
+
+    # Growth threads
+    if tool_name == "set_growth_thread" and "slug" in tool_input:
+        return f"{tool_name}: {tool_input['slug']}"
+
+    # Core memory
+    if tool_name == "store_core_memory" and "content" in tool_input:
+        return f"{tool_name}: {tool_input['content'][:50]}"
+
+    return tool_name
+
+
 @dataclass
 class ToolProcessingResult:
     """
@@ -214,31 +322,24 @@ class ToolResponseHelper:
             # Emit tool invocations to process panel
             if current_response.has_tool_calls():
                 for tc in current_response.tool_calls:
-                    tool_detail = tc.name
-                    tool_input = tc.input if hasattr(tc, 'input') else {}
-                    if isinstance(tool_input, dict):
-                        if tc.name == "search_memories" and "query" in tool_input:
-                            tool_detail = f"{tc.name}: {tool_input['query']}"
-                        elif tc.name == "send_telegram" and "message" in tool_input:
-                            preview = tool_input["message"][:40]
-                            tool_detail = f"{tc.name}: {preview}..."
-                        elif tc.name == "send_email" and "subject" in tool_input:
-                            tool_detail = f"{tc.name}: {tool_input['subject']}"
-                        elif tc.name == "read_file" and "path" in tool_input:
-                            tool_detail = f"{tc.name}: {tool_input['path']}"
-                        elif tc.name == "write_file" and "path" in tool_input:
-                            tool_detail = f"{tc.name}: {tool_input['path']}"
-                        elif tc.name == "create_reminder" and "what" in tool_input:
-                            preview = tool_input["what"][:40]
-                            tool_detail = f"{tc.name}: {preview}"
-                        elif tc.name == "advance_curiosity" and "note" in tool_input:
-                            preview = tool_input["note"][:40]
-                            tool_detail = f"{tc.name}: {preview}"
+                    tool_detail = _build_tool_detail(tc.name, tc.input if hasattr(tc, 'input') else {})
                     event_bus.emit_event(
                         ProcessEventType.TOOL_INVOKED,
                         detail=tool_detail,
                         round_number=pass_num
                     )
+
+            # Emit server-side tool calls (web_search, web_fetch) to process panel
+            server_tools = getattr(current_response, 'server_tool_details', []) or []
+            for st in server_tools:
+                tool_name = st.get("name", "")
+                tool_input = st.get("input", {})
+                tool_detail = _build_tool_detail(tool_name, tool_input)
+                event_bus.emit_event(
+                    ProcessEventType.TOOL_INVOKED,
+                    detail=tool_detail,
+                    round_number=pass_num
+                )
 
             # If no continuation needed (no tool calls or stop_reason != "tool_use")
             if not processed.needs_continuation:

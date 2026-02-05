@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Optional
 
 import config
 from core.logger import log_info, log_warning, log_error
+from interface.process_panel import ProcessEventType, get_process_event_bus
 
 
 # =============================================================================
@@ -210,6 +211,13 @@ def run_delegated_task(
     log_info(f"Delegation started: {task[:80]}... (max {max_rounds} rounds)", prefix="🤖")
     start_time = time.time()
 
+    # Emit delegation start to process panel
+    event_bus = get_process_event_bus()
+    event_bus.emit_event(
+        ProcessEventType.DELEGATION_START,
+        detail=f"{task[:100]} (max {max_rounds} rounds)"
+    )
+
     # Track accumulated text across all passes
     accumulated_text = ""
 
@@ -249,6 +257,10 @@ def run_delegated_task(
                     f"{response.tokens_in + response.tokens_out} tokens",
                     prefix="🤖"
                 )
+                event_bus.emit_event(
+                    ProcessEventType.DELEGATION_COMPLETE,
+                    detail=f"{round_num} round(s), {duration_ms:.0f}ms"
+                )
                 return accumulated_text
 
             # Execute tool calls and build continuation
@@ -265,6 +277,27 @@ def run_delegated_task(
                 log_info(
                     f"  Delegate tool: {tool_call.name} -> {status}",
                     prefix="🤖"
+                )
+
+                # Emit delegate sub-tool call to process panel
+                tool_input = tool_call.input if hasattr(tool_call, 'input') else {}
+                tool_detail = tool_call.name
+                if isinstance(tool_input, dict):
+                    if tool_call.name == "navigate" and "url" in tool_input:
+                        tool_detail = f"{tool_call.name}: {tool_input['url']}"
+                    elif tool_call.name == "click" and "element_id" in tool_input:
+                        tool_detail = f"{tool_call.name}: element #{tool_input['element_id']}"
+                    elif tool_call.name == "type" and "text" in tool_input:
+                        tool_detail = f"{tool_call.name}: {tool_input['text'][:50]}"
+                    elif tool_call.name == "wait" and "seconds" in tool_input:
+                        tool_detail = f"{tool_call.name}: {tool_input['seconds']}s"
+                    elif tool_call.name == "get_credentials" and "service" in tool_input:
+                        tool_detail = f"{tool_call.name}: {tool_input['service']}"
+                if status == "error":
+                    tool_detail += " [error]"
+                event_bus.emit_event(
+                    ProcessEventType.DELEGATION_TOOL,
+                    detail=tool_detail
                 )
 
             # Build continuation messages
@@ -296,6 +329,10 @@ def run_delegated_task(
         log_warning(
             f"Delegation hit max rounds ({max_rounds}), "
             f"{duration_ms:.0f}ms",
+        )
+        event_bus.emit_event(
+            ProcessEventType.DELEGATION_COMPLETE,
+            detail=f"hit max rounds ({max_rounds}), {duration_ms:.0f}ms"
         )
 
         if accumulated_text:
