@@ -1937,6 +1937,18 @@ class ChatWindow(QMainWindow):
                 round_number=1
             )
 
+            # Emit server-side tool calls (web_search, web_fetch) to process panel
+            # These are not in tool_calls so they won't be emitted by process_with_tools()
+            if final_state.server_tool_details:
+                from agency.tools.response_helper import _build_tool_detail
+                for st in final_state.server_tool_details:
+                    tool_detail = _build_tool_detail(st.get("name", ""), st.get("input", {}))
+                    get_process_event_bus().emit_event(
+                        ProcessEventType.TOOL_INVOKED,
+                        detail=tool_detail,
+                        round_number=1
+                    )
+
             # Record the streaming response for prompt export
             self._round_recorder.record_response(
                 response_text=final_state.text,

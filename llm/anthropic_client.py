@@ -712,6 +712,23 @@ class AnthropicClient:
                                     state.web_fetches_used += 1
                                     log_info(f"Web fetch invoked ({state.web_fetches_used})", prefix="🌐")
 
+                            elif block_type == "server_tool_use":
+                                # Server-side tool call (web_search, web_fetch)
+                                state._current_tool_id = getattr(content_block, "id", "")
+                                state._current_tool_name = getattr(content_block, "name", "")
+                                state._current_tool_input_json = ""
+
+                                if state._current_tool_name == "web_search":
+                                    state.web_searches_used += 1
+                                    log_info(f"Server web search invoked ({state.web_searches_used})", prefix="🔍")
+                                elif state._current_tool_name == "web_fetch":
+                                    state.web_fetches_used += 1
+                                    log_info(f"Server web fetch invoked ({state.web_fetches_used})", prefix="🌐")
+
+                            elif block_type in ("web_search_tool_result", "web_fetch_tool_result"):
+                                # Server tool results arrive atomically - store for processing at block stop
+                                state._current_server_result = content_block
+
                     elif event_type == "content_block_delta":
                         delta = getattr(event, "delta", None)
                         if delta:
@@ -801,6 +818,45 @@ class AnthropicClient:
                             state._current_tool_id = None
                             state._current_tool_name = None
                             state._current_tool_input_json = ""
+
+                        elif current_block_type == "server_tool_use" and state._current_tool_name:
+                            # Finalize server-side tool call
+                            tool_input = {}
+                            if state._current_tool_input_json:
+                                try:
+                                    tool_input = json.loads(state._current_tool_input_json)
+                                except json.JSONDecodeError:
+                                    log_error(f"Failed to parse server tool input JSON", prefix="[Stream]")
+
+                            state.server_tool_details.append({
+                                "name": state._current_tool_name,
+                                "input": tool_input
+                            })
+
+                            # Add to raw_content as server_tool_use (not tool_use)
+                            state.raw_content.append({
+                                "type": "server_tool_use",
+                                "id": state._current_tool_id or "",
+                                "name": state._current_tool_name,
+                                "input": tool_input
+                            })
+
+                            # Reset tool tracking
+                            state._current_tool_id = None
+                            state._current_tool_name = None
+                            state._current_tool_input_json = ""
+
+                        elif current_block_type in ("web_search_tool_result", "web_fetch_tool_result"):
+                            # Finalize server tool result block
+                            result_block = getattr(state, '_current_server_result', None)
+                            if result_block:
+                                block_content = getattr(result_block, "content", None) or []
+                                state.raw_content.append({
+                                    "type": current_block_type,
+                                    "tool_use_id": getattr(result_block, "tool_use_id", ""),
+                                    "content": block_content
+                                })
+                                state._current_server_result = None
 
                         elif current_block_type == "text":
                             # Add text block to raw_content
