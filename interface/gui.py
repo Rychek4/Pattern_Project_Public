@@ -9,7 +9,6 @@ Features:
 - Light/dark theme support
 - Full markdown rendering
 - Draft persistence
-- Command palette
 - Keyboard shortcuts
 - Toast notifications
 - Image paste from clipboard
@@ -43,7 +42,6 @@ from interface.gui_components import (
     Theme, DARK_THEME, LIGHT_THEME,
     ThemeManager, get_theme_manager,
     MarkdownRenderer, MessageData,
-    CommandPalette, Command,
     NotificationManager, DraftManager,
     KeyboardShortcutManager, StatusManager,
     CancelButton
@@ -200,7 +198,6 @@ class ChatWindow(QMainWindow):
     - Header: Session timer, controls, theme toggle
     - Chat display: Rich HTML with timestamps and markdown
     - Input: Text entry with send button and image paste
-    - Command palette: All commands accessible via Ctrl+Shift+P
     - Keyboard shortcuts: Full navigation
     - Notifications: Toast alerts
     """
@@ -259,7 +256,6 @@ class ChatWindow(QMainWindow):
         self._setup_signals()
         self._setup_timers()
         self._setup_keyboard_shortcuts()
-        self._setup_command_palette()
         self._setup_draft_manager()
         self._apply_style()
         self._init_model_dropdown()
@@ -359,9 +355,6 @@ class ChatWindow(QMainWindow):
         # Notification manager
         self._notification_manager = NotificationManager(self)
 
-        # Command palette (hidden by default)
-        self._command_palette = CommandPalette(self._theme, self)
-
     def _create_header(self) -> QFrame:
         """Create the header with timer, pulse countdown, and controls."""
         header = QFrame()
@@ -425,13 +418,13 @@ class ChatWindow(QMainWindow):
         # Font size controls
         self.font_decrease_btn = QPushButton("A-")
         self.font_decrease_btn.setFont(QFont(UI_FONT_FAMILY, 9))
-        self.font_decrease_btn.setMaximumWidth(30)
+        self.font_decrease_btn.setMaximumWidth(36)
         self.font_decrease_btn.clicked.connect(self._decrease_font_size)
         layout.addWidget(self.font_decrease_btn)
 
         self.font_increase_btn = QPushButton("A+")
         self.font_increase_btn.setFont(QFont(UI_FONT_FAMILY, 9))
-        self.font_increase_btn.setMaximumWidth(30)
+        self.font_increase_btn.setMaximumWidth(36)
         self.font_increase_btn.clicked.connect(self._increase_font_size)
         layout.addWidget(self.font_increase_btn)
 
@@ -445,20 +438,6 @@ class ChatWindow(QMainWindow):
         self.export_prompt_btn.setToolTip("Export the last AI round (full API payload) to a log file")
         self.export_prompt_btn.clicked.connect(self._export_prompt)
         layout.addWidget(self.export_prompt_btn)
-
-        # Theme toggle button
-        self.theme_btn = QPushButton("\u263D")  # Moon symbol
-        self.theme_btn.setToolTip("Toggle light/dark theme (Ctrl+T)")
-        self.theme_btn.setMaximumWidth(34)
-        self.theme_btn.clicked.connect(self._toggle_theme)
-        layout.addWidget(self.theme_btn)
-
-        # Command palette button
-        self.palette_btn = QPushButton("\u2318")  # Command symbol
-        self.palette_btn.setToolTip("Command palette (Ctrl+Shift+P)")
-        self.palette_btn.setMaximumWidth(34)
-        self.palette_btn.clicked.connect(self._show_command_palette)
-        layout.addWidget(self.palette_btn)
 
         self.settings_btn = QPushButton("Settings")
         self.settings_btn.setFont(QFont(UI_FONT_FAMILY, 9))
@@ -535,12 +514,6 @@ class ChatWindow(QMainWindow):
         """Setup keyboard shortcuts."""
         self._shortcut_manager = KeyboardShortcutManager(self)
 
-        # Command palette
-        self._shortcut_manager.register("Ctrl+Shift+P", self._show_command_palette, "Command palette")
-
-        # Theme toggle
-        self._shortcut_manager.register("Ctrl+T", self._toggle_theme, "Toggle theme")
-
         # Copy last message
         self._shortcut_manager.register("Ctrl+Shift+C", self._copy_last_message, "Copy last message")
 
@@ -549,22 +522,6 @@ class ChatWindow(QMainWindow):
 
         # Scroll to bottom
         self._shortcut_manager.register("Ctrl+End", self._scroll_to_bottom, "Scroll to bottom")
-
-    def _setup_command_palette(self):
-        """Setup command palette with available commands."""
-        commands = [
-            Command("toggle_theme", "Toggle Theme", "Ctrl+T", self._toggle_theme,
-                   "Switch between light and dark themes"),
-            Command("copy_last", "Copy Last Response", "Ctrl+Shift+C", self._copy_last_message,
-                   "Copy the last AI response to clipboard"),
-            Command("extract_memories", "Extract Memories", "", self._trigger_extraction,
-                   "Force memory extraction now"),
-            Command("scroll_bottom", "Scroll to Bottom", "Ctrl+End", self._scroll_to_bottom,
-                   "Jump to latest messages"),
-            Command("focus_input", "Focus Input", "Escape", self._focus_input,
-                   "Move focus to message input"),
-        ]
-        self._command_palette.set_commands(commands)
 
     def _setup_draft_manager(self):
         """Setup draft persistence."""
@@ -595,21 +552,11 @@ class ChatWindow(QMainWindow):
         else:
             self._notification_manager.warning("Prompt export failed — check logs")
 
-    def _toggle_theme(self):
-        """Toggle between light and dark themes."""
-        self._theme_manager.toggle()
-
     def _on_theme_changed(self, theme: Theme):
         """Handle theme change."""
         global COLORS
         self._theme = theme
         COLORS = get_colors_from_theme(theme)
-
-        # Update theme button icon
-        if theme.name == "dark":
-            self.theme_btn.setText("\u263D")  # Moon
-        else:
-            self.theme_btn.setText("\u2600")  # Sun
 
         # Update markdown renderer
         self._markdown_renderer.update_theme(theme)
@@ -673,7 +620,6 @@ class ChatWindow(QMainWindow):
 
         # Update component themes
         self.cancel_btn.update_theme(theme)
-        self._command_palette.update_theme(theme)
 
         # Notify user
         self._notification_manager.info(f"Switched to {theme.name} theme")
@@ -687,21 +633,6 @@ class ChatWindow(QMainWindow):
             self._notification_manager.success("Memory extraction completed")
         except Exception as e:
             self._notification_manager.error(f"Extraction failed: {e}")
-
-    # =========================================================================
-    # COMMAND PALETTE
-    # =========================================================================
-
-    def _show_command_palette(self):
-        """Show the command palette."""
-        # Position it centered near top
-        palette_x = (self.width() - self._command_palette.width()) // 2
-        palette_y = 80
-
-        global_pos = self.mapToGlobal(self.rect().topLeft())
-        self._command_palette.move(global_pos.x() + palette_x, global_pos.y() + palette_y)
-        self._command_palette.show()
-        self._command_palette.search_input.setFocus()
 
     # =========================================================================
     # CHAT CONTEXT MENU
