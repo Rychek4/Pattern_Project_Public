@@ -47,6 +47,7 @@ class ProcessEventType(Enum):
     DELEGATION_START = auto()
     DELEGATION_TOOL = auto()
     DELEGATION_COMPLETE = auto()
+    CURIOSITY_SELECTED = auto()
 
 
 # =============================================================================
@@ -61,29 +62,31 @@ class ProcessEvent:
     detail: str = ""
     round_number: int = 0
     is_active: bool = False
+    origin: str = "user"  # "user", "isaac", or "system"
 
     @property
     def label(self) -> str:
         """Human-readable label for this event type."""
         labels = {
-            ProcessEventType.MESSAGE_RECEIVED: "Message Received",
-            ProcessEventType.PROMPT_ASSEMBLED: "Prompt Assembled",
-            ProcessEventType.MEMORIES_INJECTED: "Memories Injected",
-            ProcessEventType.STREAM_START: "Streaming",
-            ProcessEventType.STREAMING: "Streaming",
-            ProcessEventType.STREAM_COMPLETE: "Response",
+            ProcessEventType.MESSAGE_RECEIVED: "You said something",
+            ProcessEventType.PROMPT_ASSEMBLED: "Gathering thoughts",
+            ProcessEventType.MEMORIES_INJECTED: "Recalling past conversations",
+            ProcessEventType.STREAM_START: "Thinking...",
+            ProcessEventType.STREAMING: "Thinking...",
+            ProcessEventType.STREAM_COMPLETE: "Responded",
             ProcessEventType.TOOL_INVOKED: "Tool",
-            ProcessEventType.CONTINUATION_START: "Thinking",
-            ProcessEventType.ROUND_COMPLETE: "Round Complete",
-            ProcessEventType.PROCESSING_COMPLETE: "Complete",
-            ProcessEventType.PROCESSING_ERROR: "Error",
-            ProcessEventType.MEMORY_EXTRACTION: "Memory Extraction",
-            ProcessEventType.PULSE_FIRED: "System Pulse",
-            ProcessEventType.REMINDER_FIRED: "Reminder",
-            ProcessEventType.TELEGRAM_RECEIVED: "Telegram Received",
-            ProcessEventType.DELEGATION_START: "Delegation Started",
+            ProcessEventType.CONTINUATION_START: "Thinking further...",
+            ProcessEventType.ROUND_COMPLETE: "Round complete",
+            ProcessEventType.PROCESSING_COMPLETE: "Settled",
+            ProcessEventType.PROCESSING_ERROR: "Something went wrong",
+            ProcessEventType.MEMORY_EXTRACTION: "Reflecting on what to remember",
+            ProcessEventType.PULSE_FIRED: "Checking in",
+            ProcessEventType.REMINDER_FIRED: "Remembered something he promised",
+            ProcessEventType.TELEGRAM_RECEIVED: "You sent a Telegram",
+            ProcessEventType.DELEGATION_START: "Asking for help with a task",
             ProcessEventType.DELEGATION_TOOL: "Delegate",
-            ProcessEventType.DELEGATION_COMPLETE: "Delegation Complete",
+            ProcessEventType.DELEGATION_COMPLETE: "Got the help he needed",
+            ProcessEventType.CURIOSITY_SELECTED: "Got curious about something",
         }
         return labels.get(self.event_type, "Unknown")
 
@@ -104,13 +107,15 @@ class ProcessEventBus(QObject):
     event_emitted = pyqtSignal(object)  # ProcessEvent
 
     def emit_event(self, event_type: ProcessEventType, detail: str = "",
-                   round_number: int = 0, is_active: bool = False):
+                   round_number: int = 0, is_active: bool = False,
+                   origin: str = "user"):
         """Emit a process event to all subscribers."""
         event = ProcessEvent(
             event_type=event_type,
             detail=detail,
             round_number=round_number,
-            is_active=is_active
+            is_active=is_active,
+            origin=origin
         )
         self.event_emitted.emit(event)
 
@@ -149,6 +154,11 @@ COLOR_TEXT_DETAIL = "#9a9892"  # Detail/metadata text
 COLOR_ROUND_BG = "#2e2e2e"    # Round group background
 COLOR_ROUND_BORDER = "#424240" # Round group border
 COLOR_SEPARATOR = "#3a3a3a"    # Message separator
+
+# Origin-based left border colors (per message group)
+COLOR_BORDER_ISAAC = "#c4a7e7"   # Purple - Isaac-initiated
+COLOR_BORDER_USER = "#6bb5e0"    # Blue - User-initiated
+COLOR_BORDER_SYSTEM = "#5bb98c"  # Green - System-initiated
 
 
 # =============================================================================
@@ -216,6 +226,7 @@ class ProcessNodeWidget(QFrame):
             ProcessEventType.PULSE_FIRED: COLOR_SYSTEM,
             ProcessEventType.REMINDER_FIRED: COLOR_SYSTEM,
             ProcessEventType.PROCESSING_COMPLETE: COLOR_SYSTEM,
+            ProcessEventType.CURIOSITY_SELECTED: COLOR_SYSTEM,
             ProcessEventType.DELEGATION_START: COLOR_DELEGATION,
             ProcessEventType.DELEGATION_TOOL: COLOR_DELEGATION,
             ProcessEventType.DELEGATION_COMPLETE: COLOR_DELEGATION,
@@ -232,29 +243,12 @@ class ProcessNodeWidget(QFrame):
             tool_name = self._event.detail.split(":")[0] if ":" in self._event.detail else self._event.detail
             if tool_name:
                 label = f"Tool: {tool_name}"
-            # Clear detail since we used it in the label
-            # (detail will show the extra info after ":" if present)
 
         # For delegation sub-tool calls, show tool name
         if self._event.event_type == ProcessEventType.DELEGATION_TOOL:
             tool_name = self._event.detail.split(":")[0] if ":" in self._event.detail else self._event.detail
             if tool_name:
                 label = f"Delegate: {tool_name}"
-
-        # For continuation rounds, show round number
-        if self._event.event_type == ProcessEventType.CONTINUATION_START:
-            if self._event.round_number > 0:
-                label = f"Thinking (R{self._event.round_number})"
-
-        # For streaming with round number
-        if self._event.event_type in (ProcessEventType.STREAM_START, ProcessEventType.STREAMING):
-            if self._event.round_number > 1:
-                label = f"Streaming (R{self._event.round_number})"
-
-        # For stream complete with tokens
-        if self._event.event_type == ProcessEventType.STREAM_COMPLETE:
-            if self._event.round_number > 0:
-                label = f"Response (R{self._event.round_number})"
 
         # Build timestamp
         time_str = self._event.timestamp.strftime("%H:%M:%S")
@@ -367,6 +361,53 @@ class MessageSeparatorWidget(QFrame):
 
 
 # =============================================================================
+# MESSAGE GROUP WIDGET
+# =============================================================================
+
+class MessageGroupWidget(QFrame):
+    """
+    Container for all nodes within a single message processing group.
+
+    Each group has a 3px left border colored by origin:
+    - Purple: Isaac-initiated (pulses, reminders, curiosity)
+    - Blue: User-initiated (messages, telegrams)
+    - Green: System-initiated
+    """
+
+    def __init__(self, origin: str = "user", parent=None):
+        super().__init__(parent)
+        self._origin = origin
+        self._setup_ui()
+
+    def _setup_ui(self):
+        border_color = {
+            "isaac": COLOR_BORDER_ISAAC,
+            "user": COLOR_BORDER_USER,
+            "system": COLOR_BORDER_SYSTEM,
+        }.get(self._origin, COLOR_BORDER_USER)
+
+        self.setFrameStyle(QFrame.NoFrame)
+        self.setStyleSheet(f"""
+            MessageGroupWidget {{
+                background: transparent;
+                border: none;
+                border-left: 3px solid {border_color};
+                margin: 0px;
+                padding: 0px 0px 0px 6px;
+            }}
+        """)
+
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 2, 0, 2)
+        self._layout.setSpacing(2)
+        self._layout.setAlignment(Qt.AlignTop)
+
+    def add_node(self, node):
+        """Add a process node or round group to this message group."""
+        self._layout.addWidget(node)
+
+
+# =============================================================================
 # PROCESS PANEL WIDGET
 # =============================================================================
 
@@ -393,6 +434,7 @@ class ProcessPanel(QFrame):
         self._events: List[ProcessEvent] = []
         self._current_round: int = 0
         self._current_round_widget: Optional[RoundGroupWidget] = None
+        self._current_message_group: Optional[MessageGroupWidget] = None
         self._has_content: bool = False
         self._user_scrolled_up: bool = False
         self._streaming_node: Optional[ProcessNodeWidget] = None
@@ -417,7 +459,7 @@ class ProcessPanel(QFrame):
         outer_layout.setSpacing(0)
 
         # Header
-        header = QLabel("Process")
+        header = QLabel("Isaac")
         header.setFont(QFont("Segoe UI", 9, QFont.Bold))
         header.setAlignment(Qt.AlignLeft)
         header.setStyleSheet(f"""
@@ -551,7 +593,11 @@ class ProcessPanel(QFrame):
         self._mark_all_active_complete()
         self._has_content = True
 
-        # Add the entry node
+        # Create a new message group container with origin-based border
+        self._current_message_group = MessageGroupWidget(origin=event.origin)
+        self._content_layout.addWidget(self._current_message_group)
+
+        # Add the entry node inside the group
         self._add_node(event)
 
     def _handle_stream_start(self, event: ProcessEvent):
@@ -658,9 +704,12 @@ class ProcessPanel(QFrame):
     # =========================================================================
 
     def _add_node(self, event: ProcessEvent) -> ProcessNodeWidget:
-        """Add a standalone node to the content area."""
+        """Add a standalone node to the current message group (or content area)."""
         node = ProcessNodeWidget(event)
-        self._content_layout.addWidget(node)
+        if self._current_message_group:
+            self._current_message_group.add_node(node)
+        else:
+            self._content_layout.addWidget(node)
         return node
 
     def _add_node_to_round(self, event: ProcessEvent) -> ProcessNodeWidget:
@@ -668,12 +717,16 @@ class ProcessPanel(QFrame):
         node = ProcessNodeWidget(event)
         if self._current_round_widget:
             self._current_round_widget.add_node(node)
+        elif self._current_message_group:
+            self._current_message_group.add_node(node)
         else:
-            # No round group - add directly
             self._content_layout.addWidget(node)
         return node
 
     def _start_round_group(self, round_number: int):
-        """Start a new visual round group."""
+        """Start a new visual round group inside the current message group."""
         self._current_round_widget = RoundGroupWidget(round_number)
-        self._content_layout.addWidget(self._current_round_widget)
+        if self._current_message_group:
+            self._current_message_group.add_node(self._current_round_widget)
+        else:
+            self._content_layout.addWidget(self._current_round_widget)
