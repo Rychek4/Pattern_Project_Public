@@ -620,7 +620,7 @@ class MemoryExtractor:
         log_info("=== EXTRACTION THREAD START ===", prefix="🧠")
 
         event_bus = get_process_event_bus()
-        event_bus.emit_event(ProcessEventType.MEMORY_EXTRACTION, detail="extracting...")
+        event_bus.emit_event(ProcessEventType.MEMORY_EXTRACTION, detail="Deciding what matters...")
 
         try:
             memories_created = self.extract_memories()
@@ -628,7 +628,7 @@ class MemoryExtractor:
             log_info(f"=== EXTRACTION THREAD COMPLETE ({duration:.0f}ms) ===", prefix="🧠")
             event_bus.emit_event(
                 ProcessEventType.MEMORY_EXTRACTION,
-                detail=f"{memories_created} memories, {duration:.0f}ms"
+                detail=f"Kept {memories_created} memories"
             )
         except Exception as e:
             import traceback

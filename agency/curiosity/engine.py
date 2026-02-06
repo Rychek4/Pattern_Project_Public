@@ -14,6 +14,7 @@ from agency.curiosity.ledger import (
     GoalStatus
 )
 from core.logger import log_info, log_error
+from interface.process_panel import get_process_event_bus, ProcessEventType
 import config
 
 
@@ -129,6 +130,7 @@ class CuriosityEngine:
         # Activate directly (bypass analyzer/selector pipeline)
         new_goal = self._ledger.activate_goal(ai_candidate)
         self._emit_dev_update("ai_specified", new_goal)
+        self._emit_curiosity_event(new_goal)
 
         log_info(f"AI-specified curiosity activated: {next_topic[:50]}...", prefix="🔍")
         return new_goal
@@ -150,13 +152,17 @@ class CuriosityEngine:
         if not candidates:
             log_info("No curiosity candidates found, using fallback", prefix="🔍")
             fallback = self._analyzer.get_fallback_candidate()
-            return self._ledger.activate_goal(fallback)
+            goal = self._ledger.activate_goal(fallback)
+            self._emit_curiosity_event(goal)
+            return goal
 
         # Select via weighted random
         selected = self._selector.select(candidates)
 
         # Activate and return
-        return self._ledger.activate_goal(selected)
+        goal = self._ledger.activate_goal(selected)
+        self._emit_curiosity_event(goal)
+        return goal
 
     def get_goal_history(self, limit: int = 20):
         """
@@ -218,3 +224,14 @@ class CuriosityEngine:
             log_info(f"Curiosity DEV update emitted: event={event}, goal_id={goal.id}", prefix="🔍")
         except Exception as e:
             log_info(f"Failed to emit dev curiosity update: {e}", prefix="🔍")
+
+    def _emit_curiosity_event(self, goal: CuriosityGoal) -> None:
+        """Emit curiosity selection to the process panel."""
+        try:
+            get_process_event_bus().emit_event(
+                ProcessEventType.CURIOSITY_SELECTED,
+                detail=goal.content[:80] if goal.content else "",
+                origin="isaac"
+            )
+        except Exception:
+            pass  # Process panel may not be initialized yet

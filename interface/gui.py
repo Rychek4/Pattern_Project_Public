@@ -1550,7 +1550,7 @@ class ChatWindow(QMainWindow):
         self.signals.new_message.emit("user", display_text, timestamp)
 
         # Emit to process panel
-        get_process_event_bus().emit_event(ProcessEventType.MESSAGE_RECEIVED)
+        get_process_event_bus().emit_event(ProcessEventType.MESSAGE_RECEIVED, origin="user")
 
         # Process in background thread
         self._processing_thread = threading.Thread(
@@ -2382,7 +2382,7 @@ class ChatWindow(QMainWindow):
         self.signals.update_status.emit("Processing Telegram message...", StatusManager.STATUS_THINKING)
 
         # Emit to process panel
-        get_process_event_bus().emit_event(ProcessEventType.TELEGRAM_RECEIVED)
+        get_process_event_bus().emit_event(ProcessEventType.TELEGRAM_RECEIVED, origin="user")
 
         try:
             # Pause timers during processing
@@ -2814,7 +2814,8 @@ class ChatWindow(QMainWindow):
         # Emit to process panel with interval detail
         get_process_event_bus().emit_event(
             ProcessEventType.PULSE_FIRED,
-            detail=f"interval: {interval_label}"
+            detail="Choosing what to do",
+            origin="isaac"
         )
 
         try:
@@ -3007,7 +3008,8 @@ class ChatWindow(QMainWindow):
             reminder_detail = "; ".join(previews) if previews else ""
         get_process_event_bus().emit_event(
             ProcessEventType.REMINDER_FIRED,
-            detail=reminder_detail
+            detail=reminder_detail,
+            origin="isaac"
         )
 
         try:
