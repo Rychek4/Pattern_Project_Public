@@ -81,8 +81,16 @@ def _build_tool_detail(tool_name: str, tool_input: Any) -> str:
     if tool_name == "complete_reminder" and "intention_id" in tool_input:
         outcome = tool_input.get("outcome", "")[:40]
         return f"{tool_name}: #{tool_input['intention_id']}" + (f" - {outcome}" if outcome else "")
-    if tool_name == "dismiss_reminder" and "intention_id" in tool_input:
-        return f"{tool_name}: #{tool_input['intention_id']}"
+    if tool_name == "dismiss_reminder" and "reminder_id" in tool_input:
+        reminder_id = tool_input["reminder_id"]
+        try:
+            from agency.intentions import get_intention_manager
+            intention = get_intention_manager().get_intention(reminder_id)
+            if intention:
+                return f"{tool_name}: {intention.content[:50]} (I-{reminder_id})"
+        except Exception:
+            pass
+        return f"{tool_name}: I-{reminder_id}"
 
     # Curiosity tools
     if tool_name == "advance_curiosity" and "note" in tool_input:
