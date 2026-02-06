@@ -99,7 +99,9 @@ def _build_tool_detail(tool_name: str, tool_input: Any) -> str:
     if tool_name == "set_active_thoughts" and "thoughts" in tool_input:
         thoughts = tool_input["thoughts"]
         if isinstance(thoughts, list) and thoughts:
-            return f"{tool_name}: {thoughts[0][:40]}..."
+            first = thoughts[0]
+            preview = first.get("topic", str(first)) if isinstance(first, dict) else str(first)
+            return f"{tool_name}: {preview[:40]}..."
         return tool_name
 
     # Delegation tool
