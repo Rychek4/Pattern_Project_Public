@@ -275,6 +275,34 @@ class LLMRouter:
             thinking_budget_tokens=thinking_budget_tokens
         )
 
+        # If web_fetch domain was blocked by Anthropic's crawler, retry without web_fetch
+        # This happens when the model tries to fetch a domain that blocks Anthropic's user agent
+        # (e.g., reddit.com). The API returns 400 instead of a tool error, so we retry without
+        # web_fetch to let the model continue without that capability.
+        if (not response.success
+                and response.error_type == "web_fetch_domain_blocked"
+                and enable_web_fetch):
+            log_warning(
+                f"Web fetch blocked by domain restriction, retrying without web_fetch: "
+                f"{response.error}"
+            )
+            response = self._send_to_provider(
+                provider=provider,
+                messages=messages,
+                system_prompt=system_prompt,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                enable_web_search=enable_web_search,
+                web_search_max_uses=web_search_max_uses,
+                enable_web_fetch=False,
+                web_fetch_max_uses=None,
+                web_fetch_config=None,
+                tools=tools,
+                task_type=task_type,
+                thinking_enabled=thinking_enabled,
+                thinking_budget_tokens=thinking_budget_tokens
+            )
+
         # Record web search usage if any were used
         if response.success and response.web_searches_used > 0:
             self._record_web_search_usage(response.web_searches_used)
