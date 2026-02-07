@@ -447,8 +447,21 @@ class ToolResponseHelper:
             if not continuation.success:
                 # On failure, return accumulated text from successful passes
                 log_warning(f"Continuation failed on pass {pass_num + 1}: {continuation.error}")
+
+                # Surface the failure to the user so they know the round was truncated
+                error_note = ""
+                error_type = getattr(continuation, 'error_type', None)
+                if error_type == "web_fetch_domain_blocked":
+                    error_note = "\n\n⚠️ Web fetch was blocked for a domain that restricts automated access. The response may be incomplete."
+                elif continuation.error:
+                    error_note = f"\n\n⚠️ An error interrupted processing. The response may be incomplete."
+
+                final_text = accumulated_text
+                if error_note:
+                    final_text = (accumulated_text + error_note) if accumulated_text else error_note.strip()
+
                 return ToolProcessingResult(
-                    final_text=accumulated_text,
+                    final_text=final_text,
                     final_provider=current_response.provider.value if hasattr(current_response.provider, 'value') else str(current_response.provider),
                     passes_executed=pass_num,
                     telegram_sent=telegram_sent,

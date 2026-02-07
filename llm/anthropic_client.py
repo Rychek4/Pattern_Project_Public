@@ -181,6 +181,8 @@ class AnthropicClient:
             elif status in (401, 403):
                 return ("auth_error", "Authentication failed")
             elif status == 400:
+                if "domains are not accessible" in error_msg:
+                    return ("web_fetch_domain_blocked", error_msg)
                 return ("bad_request", error_msg)
 
         # Fallback: check error message text
