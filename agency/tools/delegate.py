@@ -53,6 +53,7 @@ Workflow:
 5. After submitting forms or clicking buttons, call read_page() to verify the result.
 
 Important:
+- Before making any tool calls, output a brief numbered plan (3-7 steps) of exactly what you will do. Then execute against that plan step by step.
 - NEVER guess what's on a page. Always call read_page() to see it.
 - If you encounter a CAPTCHA, 2FA challenge, or unexpected verification screen, report it clearly and stop — do not try to solve it.
 - If a login fails, try once more, then report the failure.
@@ -229,7 +230,7 @@ def run_delegated_task(
                 system_prompt=DELEGATE_SYSTEM_PROMPT,
                 task_type=TaskType.DELEGATION,
                 max_tokens=config.DELEGATION_MAX_TOKENS,
-                temperature=0.5,
+                temperature=config.DELEGATION_TEMPERATURE,
                 tools=tools if tools else None,
                 thinking_enabled=False
             )
