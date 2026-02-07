@@ -418,6 +418,7 @@ DELEGATION_ENABLED = True
 DELEGATION_MODEL = os.getenv("DELEGATION_MODEL", "claude-haiku-4-5-20251001")
 DELEGATION_MAX_ROUNDS = 15          # Max continuation passes per delegated task (browser workflows need headroom)
 DELEGATION_MAX_TOKENS = 4096        # Max output tokens per sub-agent response
+DELEGATION_TEMPERATURE = 0.2        # Low temp for deterministic tool execution; 0.2 preserves error-recovery variance
 
 # Browser automation for delegate sub-agents
 # The delegate uses Playwright (headless Chromium) to interact with websites.
