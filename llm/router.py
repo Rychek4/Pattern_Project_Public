@@ -542,6 +542,53 @@ class LLMRouter:
                     error_msg = getattr(final_state, '_error_message', 'unknown')
                     log_error(f"Stream ended with error: {error_msg}", prefix="🔍")
 
+            # Web fetch domain blocked: retry stream without web_fetch before trying failover
+            # This mirrors the chat() retry at lines 278-304.
+            if (final_state
+                    and final_state.stop_reason == "error"
+                    and not content_yielded_to_caller
+                    and enable_web_fetch):
+                blocked_error_type = getattr(final_state, '_error_type', None)
+                if blocked_error_type == "web_fetch_domain_blocked":
+                    log_warning(
+                        f"Web fetch blocked by domain restriction, "
+                        f"retrying stream without web_fetch: "
+                        f"{getattr(final_state, '_error_message', 'unknown')}"
+                    )
+                    retry_state = None
+                    retry_content_yielded = False
+                    for retry_chunk, retry_st in client.chat_stream(
+                        messages=messages,
+                        system_prompt=final_system_prompt,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        enable_web_search=enable_web_search,
+                        web_search_max_uses=web_search_max_uses,
+                        enable_web_fetch=False,
+                        web_fetch_max_uses=None,
+                        web_fetch_config=None,
+                        tools=tools,
+                        model=model,
+                        thinking_enabled=thinking_enabled,
+                        thinking_budget_tokens=thinking_budget_tokens
+                    ):
+                        retry_state = retry_st
+                        if retry_st.stop_reason == "error" and not retry_content_yielded:
+                            break
+                        if retry_chunk:
+                            retry_content_yielded = True
+                        yield (retry_chunk, retry_st)
+
+                    if retry_content_yielded:
+                        log_info("Stream retry without web_fetch succeeded")
+                        if retry_state and retry_state.web_searches_used > 0:
+                            self._record_web_search_usage(retry_state.web_searches_used)
+                        return
+
+                    # Retry also failed — update final_state for failover below
+                    if retry_state:
+                        final_state = retry_state
+
             # Model failover: if primary stream failed before yielding content, try alternate model
             if (final_state
                     and final_state.stop_reason == "error"
