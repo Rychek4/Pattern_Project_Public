@@ -49,14 +49,20 @@ NAVIGATE_TOOL: Dict[str, Any] = {
 READ_PAGE_TOOL: Dict[str, Any] = {
     "name": "read_page",
     "description": (
-        "Read the current page. Returns a numbered list of interactive elements "
-        "(links, buttons, inputs, etc.) and the visible text content. "
-        "Always call this after navigating to understand the page structure. "
-        "Use the element numbers with click() and type() to interact."
+        "Read the current page. Always call this after navigating to understand "
+        "the page structure. Use the element numbers with click() and type(). "
+        "Modes: 'full' (default) = elements + text, 'summary' = elements only "
+        "(faster, good for forms/navigation), 'text' = text only (for reading content)."
     ),
     "input_schema": {
         "type": "object",
-        "properties": {},
+        "properties": {
+            "mode": {
+                "type": "string",
+                "enum": ["full", "summary", "text"],
+                "description": "Read mode: 'full' (elements + text), 'summary' (elements only), 'text' (text only). Default: full"
+            }
+        },
         "required": []
     }
 }
@@ -282,10 +288,12 @@ class BrowserToolExecutor:
 
     def _exec_read_page(self, input: Dict) -> str:
         """Read the current page content and interactive elements."""
+        mode = input.get("mode", "full")
+
         async def _read():
             from agency.tools.browser.page_reader import read_page
             page = await self._engine.get_page()
-            return await read_page(page)
+            return await read_page(page, mode=mode)
 
         return self._run_async(_read())
 

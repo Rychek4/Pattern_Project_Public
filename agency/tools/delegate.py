@@ -39,7 +39,10 @@ You have NO memory, NO context about the user, and NO knowledge beyond this task
 
 Available tools:
 - navigate(url): Go to a web page
-- read_page(): See the current page — returns numbered interactive elements and visible text
+- read_page(mode): See the current page. Modes:
+    "full" (default) — interactive elements + visible text
+    "summary" — interactive elements only (use for navigation, forms, clicking)
+    "text" — visible text only (use for reading/extracting content)
 - click(element_id): Click an element by its number from read_page()
 - type(element_id, text): Type into an input field by its number from read_page()
 - wait(seconds): Wait for page content to load (0.5-10 seconds)
@@ -51,13 +54,14 @@ Workflow:
 3. ALWAYS call read_page() after navigating or clicking — you cannot see the page without it.
 4. Use the element numbers from read_page() with click() and type() to interact.
 5. After submitting forms or clicking buttons, call read_page() to verify the result.
+6. Use read_page(mode="summary") when you only need to find elements to click or type into. Use "full" when you need both elements and page text. Use "text" when extracting content.
 
 Important:
 - Before making any tool calls, output a brief numbered plan (3-7 steps) of exactly what you will do. Then execute against that plan step by step.
 - NEVER guess what's on a page. Always call read_page() to see it.
 - If you encounter a CAPTCHA, 2FA challenge, or unexpected verification screen, report it clearly and stop — do not try to solve it.
 - If a login fails, try once more, then report the failure.
-- After completing the task, save the session by reporting your final result clearly.
+- After completing the task, report your final result clearly.
 - Be methodical: navigate → read → act → read → verify.
 - Stay focused on the assigned task. Do not browse unrelated pages."""
 
@@ -221,9 +225,17 @@ def run_delegated_task(
 
     # Track accumulated text across all passes
     accumulated_text = ""
+    # Early exit flag — set when agent appears done but is running verification reads
+    _final_round = False
 
     try:
         for round_num in range(1, max_rounds + 1):
+            if _final_round:
+                # Agent already produced substantial results and last round was
+                # verification-only. Stop the loop to preserve tokens.
+                log_info("Early exit: verification round complete", prefix="🤖")
+                break
+
             # Call the model
             response = router.chat(
                 messages=messages,
@@ -300,6 +312,25 @@ def run_delegated_task(
                     ProcessEventType.DELEGATION_TOOL,
                     detail=tool_detail
                 )
+
+            # Early exit detection: if the agent produced substantial output
+            # THIS round (not just accumulated planning text from round 1),
+            # and all tool calls are passive verification (read_page/wait),
+            # and we're past the initial exploration phase (round 3+),
+            # mark the next iteration as the final one.
+            if (
+                round_num >= 3
+                and len(response_text) > 200
+                and response.has_tool_calls()
+            ):
+                tool_names = {tc.name for tc in response.tool_calls}
+                if tool_names <= {"read_page", "wait"}:
+                    _final_round = True
+                    log_info(
+                        f"Early exit armed: substantial response text + "
+                        f"verification-only round {round_num}",
+                        prefix="🤖"
+                    )
 
             # Build continuation messages
             # Assistant message with raw content blocks (includes tool_use blocks)
