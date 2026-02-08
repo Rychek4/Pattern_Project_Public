@@ -400,6 +400,15 @@ class ChatWindow(QMainWindow):
             self.pulse_dropdown.hide()
         layout.addWidget(self.pulse_dropdown)
 
+        # Pulse Now button
+        self.pulse_now_btn = QPushButton("Pulse")
+        self.pulse_now_btn.setFont(QFont(UI_FONT_FAMILY, 9))
+        self.pulse_now_btn.setToolTip("Fire a system pulse now")
+        self.pulse_now_btn.clicked.connect(self._on_pulse_now_clicked)
+        if not config.SYSTEM_PULSE_ENABLED:
+            self.pulse_now_btn.hide()
+        layout.addWidget(self.pulse_now_btn)
+
         # Model switcher dropdown
         self.model_dropdown = QComboBox()
         self.model_dropdown.setFont(QFont(UI_FONT_FAMILY, 10))
@@ -1456,6 +1465,7 @@ class ChatWindow(QMainWindow):
         self._draft_manager.clear_draft()  # Clear saved draft
         self._is_processing = True
         self.send_btn.setEnabled(False)
+        self.pulse_now_btn.setEnabled(False)
         self._status_manager.set_thinking()
         self._show_cancel_button()
 
@@ -2260,6 +2270,7 @@ class ChatWindow(QMainWindow):
         self._cancel_requested = False
         self._processing_thread = None
         self.send_btn.setEnabled(True)
+        self.pulse_now_btn.setEnabled(True)
         self._status_manager.set_ready()
         self._hide_cancel_button()
 
@@ -2709,6 +2720,15 @@ class ChatWindow(QMainWindow):
 
         finally:
             self.signals.response_complete.emit()
+
+    def _on_pulse_now_clicked(self):
+        """Handle Pulse Now button click — fire a pulse immediately."""
+        if self._is_processing:
+            return
+        # Reset the countdown so it restarts from the full interval after this pulse
+        if self._system_pulse_timer:
+            self._system_pulse_timer.reset()
+        self._on_pulse_fired()
 
     def _on_pulse_fired(self):
         """Called when the system pulse timer fires."""
