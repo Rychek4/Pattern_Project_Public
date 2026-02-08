@@ -44,27 +44,50 @@ Available tools:
 - type(element_id, text): Type into an input field by its number from read_page()
 - wait(seconds): Wait for page content to load (0.5-10 seconds)
 - get_credentials(service): Look up login credentials for a service
+- report_result(result): Report your final result and stop. You MUST call this when your task is complete.
 
 Workflow:
 1. If the task requires logging in, call get_credentials() first to get the login URL and credentials.
 2. Navigate to the target page.
-3. ALWAYS call read_page() after navigating or clicking — you cannot see the page without it.
+3. Call read_page() after navigating or clicking to see the result — you cannot see the page without it.
 4. Use the element numbers from read_page() with click() and type() to interact.
 5. After submitting forms or clicking buttons, call read_page() to verify the result.
+6. When done, call report_result() with a clear summary of what you accomplished or found. Do NOT continue browsing after the task is complete.
 
 Important:
 - Before making any tool calls, output a brief numbered plan (3-7 steps) of exactly what you will do. Then execute against that plan step by step.
 - NEVER guess what's on a page. Always call read_page() to see it.
-- If you encounter a CAPTCHA, 2FA challenge, or unexpected verification screen, report it clearly and stop — do not try to solve it.
-- If a login fails, try once more, then report the failure.
-- After completing the task, save the session by reporting your final result clearly.
-- Be methodical: navigate → read → act → read → verify.
+- If you encounter a CAPTCHA, 2FA challenge, or unexpected verification screen, call report_result() to report the blocker and stop — do not try to solve it.
+- If a login fails, try once more, then call report_result() to report the failure.
+- Once you have completed the task or found the requested information, call report_result() IMMEDIATELY. Do not re-read a page unless you performed an action that changed it.
+- Be methodical: navigate → read → act → read → verify → report_result.
 - Stay focused on the assigned task. Do not browse unrelated pages."""
 
 
 # =============================================================================
 # DELEGATE TOOL DEFINITIONS
 # =============================================================================
+
+REPORT_RESULT_TOOL: Dict[str, Any] = {
+    "name": "report_result",
+    "description": (
+        "Report the final result of your task and stop. Call this when you have "
+        "completed the assigned task or gathered the requested information. "
+        "Include a clear summary of what you accomplished or found. After calling "
+        "this tool, no further tool calls will be made."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "result": {
+                "type": "string",
+                "description": "Clear summary of what was accomplished or found"
+            }
+        },
+        "required": ["result"]
+    }
+}
+
 
 def get_delegate_tool_definitions() -> List[Dict[str, Any]]:
     """
@@ -73,6 +96,7 @@ def get_delegate_tool_definitions() -> List[Dict[str, Any]]:
     The delegate is a browser-only agent. Its tools are:
     - navigate, read_page, click, type, wait (browser interaction)
     - get_credentials (read-only service credential lookup)
+    - report_result (signal task completion and return result)
 
     Sub-agents do NOT get:
     - Memory tools (search_memories, set_active_thoughts)
@@ -87,7 +111,9 @@ def get_delegate_tool_definitions() -> List[Dict[str, Any]]:
         List of tool definition dicts for the Anthropic API
     """
     from agency.tools.browser.tools import get_browser_tool_definitions
-    return get_browser_tool_definitions()
+    tools = get_browser_tool_definitions()
+    tools.append(REPORT_RESULT_TOOL)
+    return tools
 
 
 # =============================================================================
@@ -266,7 +292,28 @@ def run_delegated_task(
 
             # Execute tool calls and build continuation
             tool_results = []
+            report_received = False
             for tool_call in response.tool_calls:
+                # Check for report_result — delegate is explicitly done
+                if tool_call.name == "report_result":
+                    report_text = ""
+                    if isinstance(tool_call.input, dict):
+                        report_text = tool_call.input.get("result", "")
+                    if report_text:
+                        accumulated_text = (
+                            (accumulated_text + "\n\n" + report_text).strip()
+                        )
+                    report_received = True
+                    log_info(
+                        f"  Delegate tool: report_result -> done",
+                        prefix="🤖"
+                    )
+                    event_bus.emit_event(
+                        ProcessEventType.DELEGATION_TOOL,
+                        detail="report_result"
+                    )
+                    break
+
                 result = executor.execute(
                     tool_name=tool_call.name,
                     tool_input=tool_call.input,
@@ -300,6 +347,20 @@ def run_delegated_task(
                     ProcessEventType.DELEGATION_TOOL,
                     detail=tool_detail
                 )
+
+            # If delegate reported its result, we're done
+            if report_received:
+                duration_ms = (time.time() - start_time) * 1000
+                log_info(
+                    f"Delegation complete (reported): {round_num} round(s), "
+                    f"{duration_ms:.0f}ms",
+                    prefix="🤖"
+                )
+                event_bus.emit_event(
+                    ProcessEventType.DELEGATION_COMPLETE,
+                    detail=f"{round_num} round(s), {duration_ms:.0f}ms"
+                )
+                return accumulated_text
 
             # Build continuation messages
             # Assistant message with raw content blocks (includes tool_use blocks)
