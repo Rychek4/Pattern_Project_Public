@@ -12,7 +12,7 @@ The Pattern Project intentionally has **no base system prompt** for conversation
 
 ### Pulse Trigger Prompt
 
-**Location**: `agency/system_pulse.py:17-29`
+**Location**: `agency/system_pulse.py` — `get_pulse_prompt()`
 
 ```python
 def get_pulse_prompt(interval_label: str = "10 minutes") -> str:
@@ -33,7 +33,7 @@ PULSE_PROMPT = get_pulse_prompt("10 minutes")
 
 ### Stored Message
 
-**Location**: `agency/system_pulse.py:36`
+**Location**: `agency/system_pulse.py` — `PULSE_STORED_MESSAGE`
 
 ```python
 PULSE_STORED_MESSAGE = "[System Pulse]"
@@ -47,7 +47,7 @@ PULSE_STORED_MESSAGE = "[System Pulse]"
 
 ### Empty Intentions Context
 
-**Location**: `prompt_builder/sources/intention_source.py:97-111`
+**Location**: `prompt_builder/sources/intention_source.py` — `_build_empty_context()`
 
 ```python
 def _build_empty_context(self) -> str:
@@ -68,7 +68,7 @@ This gives you continuity of care across conversations.
 
 ### Active Intentions Context Template
 
-**Location**: `prompt_builder/sources/intention_source.py:113-144`
+**Location**: `prompt_builder/sources/intention_source.py` — `_build_context()`
 
 ```python
 def _build_context(self, summary: dict, now: datetime) -> str:
@@ -95,7 +95,7 @@ def _build_context(self, summary: dict, now: datetime) -> str:
 
 ## 3. System Pulse Control Prompt
 
-**Location**: `prompt_builder/sources/system_pulse.py:74-93`
+**Location**: `prompt_builder/sources/system_pulse.py` — `get_context()`
 
 ```python
 lines = [
@@ -129,7 +129,7 @@ lines = [
 
 ### Memory Search Handler
 
-**Location**: `agency/commands/handlers/memory_search.py:86-96`
+**Location**: `agency/commands/handlers/memory_search.py` — `get_instructions()`
 
 ```python
 def get_instructions(self) -> str:
@@ -146,7 +146,7 @@ The search executes and results are provided for you to continue your response."
 
 ### Remind Handler
 
-**Location**: `agency/commands/handlers/intention_handler.py:124-138`
+**Location**: `agency/commands/handlers/intention_handler.py` — `RemindHandler.get_instructions()`
 
 ```python
 def get_instructions(self) -> str:
@@ -167,7 +167,7 @@ private — the user won't see them, but you'll be reminded at the right time.""
 
 ### Complete Handler
 
-**Location**: `agency/commands/handlers/intention_handler.py:264-269`
+**Location**: `agency/commands/handlers/intention_handler.py` — `CompleteHandler.get_instructions()`
 
 ```python
 def get_instructions(self) -> str:
@@ -180,7 +180,7 @@ The outcome becomes part of your memory."""
 
 ### Dismiss Handler
 
-**Location**: `agency/commands/handlers/intention_handler.py:328-332`
+**Location**: `agency/commands/handlers/intention_handler.py` — `DismissHandler.get_instructions()`
 
 ```python
 def get_instructions(self) -> str:
@@ -192,7 +192,7 @@ Use when an intention is no longer relevant."""
 
 ### List Intentions Handler
 
-**Location**: `agency/commands/handlers/intention_handler.py:404-408`
+**Location**: `agency/commands/handlers/intention_handler.py` — `ListIntentionsHandler.get_instructions()`
 
 ```python
 def get_instructions(self) -> str:
@@ -204,120 +204,63 @@ Results are provided for you to decide what to do with them."""
 
 ---
 
-## 5. Memory Extraction Prompts
+## 5. Memory Extraction Prompt
 
-### Phase 1: Topic Identification
+### Unified Extraction (Single API Call)
 
-**Location**: `memory/extractor.py:52-67`
+**Location**: `memory/extractor.py` — `UNIFIED_EXTRACTION_PROMPT`
+
+This prompt extracts both episodic and factual memories in a single Claude API call, replacing the previous multi-pass local LLM approach.
 
 ```python
-TOPIC_IDENTIFICATION_PROMPT = """You are analyzing a conversation. List the distinct topics discussed.
+UNIFIED_EXTRACTION_PROMPT = """<task>
+Analyze this conversation and extract TWO types of memories:
+1. EPISODIC: Narrative memories about what happened (written as the AI "I")
+2. FACTUAL: Concrete facts about {user_name} that would be useful to remember
+</task>
 
-Instructions:
-1. Read the conversation below
-2. Identify the main topics or subjects discussed
-3. List each topic on its own line with a number
-4. Keep descriptions brief (under 15 words each)
-5. Combine closely related subjects into one topic
-6. List 1-5 topics maximum
+<episodic_instructions>
+- Identify distinct topics/themes discussed
+- Write 1-2 sentence memories in FIRST PERSON as the AI
+- Focus on insights, shifts, moments of connection, or friction
+- Create ONE memory per significant topic (3+ turns of discussion)
+- Skip trivial small talk unless it reveals something meaningful
+</episodic_instructions>
 
-Example output format:
-1. Debugging a Python circular import error
-2. Brief joke about AI not being able to eat lunch
+<factual_instructions>
+- ONLY extract facts the user explicitly stated or confirmed
+- AI suggestions are NOT facts unless user agreed
+- Write as third-person assertions
+</factual_instructions>
 
-Conversation:
+<source_credibility>
+- User's own statements: Take at face value
+- Claims from external sources: Attribute and note plausibility if dubious
+- Discussions and ideas: Attribute but don't over-hedge
+</source_credibility>
+
+<importance_guide>
+Rate importance on a 1-10 scale (only extract 3+)
+</importance_guide>
+
+<output_format>
+===EPISODIC===
+MEMORY: [content]
+IMPORTANCE: [3-10]
+TYPE: [fact/preference/event/reflection/observation]
+TOPIC: [description]
+
+===FACTUAL===
+FACT: [content]
+IMPORTANCE: [3-10]
+TYPE: [fact/preference]
+</output_format>
 """
 ```
 
-### Phase 1: Turn Assignment
-
-**Location**: `memory/extractor.py:70-86`
-
-```python
-TURN_ASSIGNMENT_PROMPT = """Classify each turn into one of the topics below.
-
-Topics:
-{topics}
-
-Instructions:
-1. For each turn, decide which single topic it belongs to
-2. Output a JSON object where the key is the Turn Number (string) and the value is the Topic Number (integer)
-3. Topic numbers must be between 1 and {num_topics}
-
-Example output:
-{{"1": 1, "2": 1, "3": 2, "4": 3}}
-
-Conversation:
-{conversation}
-
-Output only the JSON object:"""
-```
-
-**Dynamic elements**: `{topics}`, `{num_topics}`, `{conversation}`
-
-### Phase 2: Memory Content
-
-**Location**: `memory/extractor.py:103-117`
-
-```python
-MEMORY_CONTENT_PROMPT = """Write a 1-2 sentence memory from this conversation.
-
-Instructions:
-1. Write in first person as the AI ("I"), referring to the human as "they" or by name if known
-2. Focus on what mattered—the insight, the shift, or the moment of connection
-3. Be specific: use real names, details, and context
-4. If there was friction, surprise, or uncertainty, include it
-
-Topic: {topic}
-
-Conversation:
-{turns}
-
-Write your memory:"""
-```
-
-**Dynamic elements**: `{topic}`, `{turns}`
-
-### Phase 2: Memory Importance
-
-**Location**: `memory/extractor.py:120-130`
-
-```python
-MEMORY_IMPORTANCE_PROMPT = """Rate the importance of this memory from 0 to 10.
-
-Scoring guide:
-- 8-10: Major decisions, strong preferences, significant events, personal revelations
-- 5-7: Useful information, moderate preferences, notable interactions
-- 2-4: Minor details, casual observations, brief exchanges
-- 0-1: Trivial or forgettable
-
-Memory: {content}
-
-Respond with only a number from 0 to 10:"""
-```
-
-**Dynamic element**: `{content}`
-
-### Phase 2: Memory Type
-
-**Location**: `memory/extractor.py:133-144`
-
-```python
-MEMORY_TYPE_PROMPT = """Classify this memory into one category.
-
-Categories:
-- fact: Factual information learned about user or world
-- preference: User likes, dislikes, or preferences
-- event: Something that happened or was accomplished
-- reflection: Insight or realization from the conversation
-- observation: General observation about behavior or patterns
-
-Memory: {content}
-
-Respond with only one word (fact, preference, event, reflection, or observation):"""
-```
-
-**Dynamic element**: `{content}`
+**Dynamic elements**: `{user_name}`, `{conversation}`
+**LLM target**: Anthropic Claude (single API call)
+**Trigger**: Context window overflow (40 unprocessed turns)
 
 ---
 
@@ -325,7 +268,7 @@ Respond with only one word (fact, preference, event, reflection, or observation)
 
 ### Continuation Prompt
 
-**Location**: `agency/commands/processor.py:143-174`
+**Location**: `agency/commands/processor.py` — `_build_continuation_prompt()`
 
 ```python
 def _build_continuation_prompt(self, results: List[CommandResult]) -> str:
@@ -352,7 +295,7 @@ def _build_continuation_prompt(self, results: List[CommandResult]) -> str:
 
 ### Semantic Memory Header
 
-**Location**: `prompt_builder/sources/semantic_memory.py:71-74`
+**Location**: `prompt_builder/sources/semantic_memory.py` — `get_context()`
 
 ```python
 lines = [
@@ -364,7 +307,7 @@ lines = [
 
 ### Conversation Header
 
-**Location**: `prompt_builder/sources/conversation.py:62`
+**Location**: `prompt_builder/sources/conversation.py` — `get_context()`
 
 ```python
 lines = ["<recent_conversation>"]
@@ -372,7 +315,7 @@ lines = ["<recent_conversation>"]
 
 ### Temporal Context
 
-**Location**: `prompt_builder/sources/temporal.py:48-50`
+**Location**: `prompt_builder/sources/temporal.py` — `get_context()`
 
 ```python
 lines = ["<temporal_context>"]
@@ -384,7 +327,7 @@ lines.append("</temporal_context>")
 
 ## 8. Proactive Agency Prompt (Legacy)
 
-**Location**: `agency/proactive.py:172-182` (if still present)
+**Location**: `agency/proactive.py` — `_generate_proactive_message()`
 
 ```python
 prompt = f"""You are an AI companion. It has been {idle_minutes:.0f} minutes since the last message.
@@ -412,7 +355,7 @@ Respond with just the message, no explanation."""
 | Intentions | `intention_source.py` | 2 | Anthropic |
 | Pulse Control | `system_pulse.py` (source) | 1 | Anthropic |
 | Commands | `handlers/*.py` | 5 | Anthropic |
-| Memory Extraction | `extractor.py` | 4 | KoboldCpp |
+| Memory Extraction | `extractor.py` | 1 (unified) | Anthropic |
 | Command Processor | `processor.py` | 1 | Anthropic |
 
 ---
@@ -429,14 +372,14 @@ The system intentionally avoids a hardcoded persona prompt. Instead:
 
 This allows the AI's "personality" to evolve based on stored memories rather than being rigidly defined.
 
-### Multi-Pass Extraction
+### Unified Extraction
 
-Memory extraction uses multiple simple prompts rather than one complex prompt because:
+Memory extraction uses a single comprehensive prompt to Claude rather than multiple simple prompts:
 
-1. Local LLMs (KoboldCpp) handle simple tasks better
-2. Each prompt has ONE clear task
-3. Failures are easier to diagnose
-4. No complex JSON schema to follow
+1. Claude handles topic identification, memory synthesis, and fact extraction in one pass
+2. Produces both episodic (first-person narrative) and factual (third-person assertions) memories
+3. Includes source credibility assessment for external claims
+4. Importance-gated: only memories rated 3+ (on 1-10 scale) are extracted
 
 ---
 
