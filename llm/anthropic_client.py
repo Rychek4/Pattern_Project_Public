@@ -47,6 +47,9 @@ class AnthropicResponse:
     server_tool_details: List[Dict[str, Any]] = field(default_factory=list)
     # Extended thinking fields
     thinking_text: str = ""  # Claude's internal reasoning (not shown to user by default)
+    # Prompt caching fields
+    cache_creation_input_tokens: int = 0  # Tokens written to cache on this request
+    cache_read_input_tokens: int = 0      # Tokens read from cache on this request
 
     def has_tool_calls(self) -> bool:
         """Check if response contains tool calls (excluding web_search)."""
@@ -77,6 +80,9 @@ class StreamingState:
     _current_thinking_signature: str = ""  # Signature for current thinking block
     # Error classification (set when stop_reason == "error")
     _error_type: Optional[str] = None  # "overloaded", "rate_limited", "server_error", etc.
+    # Prompt caching
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
 
     def to_response(self) -> AnthropicResponse:
         """Convert streaming state to final AnthropicResponse."""
@@ -92,7 +98,9 @@ class StreamingState:
             tool_calls=self.tool_calls,
             raw_content=self.raw_content,
             server_tool_details=self.server_tool_details,
-            thinking_text=self.thinking_text
+            thinking_text=self.thinking_text,
+            cache_creation_input_tokens=self.cache_creation_input_tokens,
+            cache_read_input_tokens=self.cache_read_input_tokens
         )
 
     def has_tool_calls(self) -> bool:
@@ -214,6 +222,47 @@ class AnthropicClient:
                         pass
             return 5.0  # Default wait for rate limits
         return None
+
+    def _apply_prompt_caching(self, system_prompt: str):
+        """
+        Convert a flat system prompt string into structured content blocks
+        with cache_control markers for Anthropic prompt caching.
+
+        If caching is disabled or no breakpoint delimiter is found, returns
+        the original string unchanged (the API accepts both formats).
+
+        Returns:
+            str or list[dict]: Original string, or list of content blocks
+            with cache_control on the stable portion.
+        """
+        import config
+
+        if not getattr(config, 'PROMPT_CACHE_ENABLED', False):
+            return system_prompt
+
+        breakpoint = getattr(config, 'PROMPT_CACHE_BREAKPOINT', '')
+        if not breakpoint or breakpoint not in system_prompt:
+            return system_prompt
+
+        # Split at the breakpoint delimiter
+        stable_part, dynamic_part = system_prompt.split(breakpoint, 1)
+        stable_part = stable_part.strip()
+        dynamic_part = dynamic_part.strip()
+
+        blocks = []
+        if stable_part:
+            blocks.append({
+                "type": "text",
+                "text": stable_part,
+                "cache_control": {"type": "ephemeral"}
+            })
+        if dynamic_part:
+            blocks.append({
+                "type": "text",
+                "text": dynamic_part
+            })
+
+        return blocks if blocks else system_prompt
 
     def _call_with_retry(self, client, create_kwargs: dict):
         """
@@ -342,7 +391,7 @@ class AnthropicClient:
                     )
 
             if system_prompt:
-                request_params["system"] = system_prompt
+                request_params["system"] = self._apply_prompt_caching(system_prompt)
 
             if stop_sequences:
                 request_params["stop_sequences"] = stop_sequences
@@ -523,6 +572,14 @@ class AnthropicClient:
                         "input": getattr(block, "input", {})
                     })
 
+            # Extract prompt caching metrics from usage
+            cache_creation = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+            cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+            if cache_read > 0:
+                log_info(f"Prompt cache HIT: {cache_read} tokens read from cache", prefix="[Cache]")
+            elif cache_creation > 0:
+                log_info(f"Prompt cache WRITE: {cache_creation} tokens written to cache", prefix="[Cache]")
+
             return AnthropicResponse(
                 text=text,
                 input_tokens=response.usage.input_tokens,
@@ -535,7 +592,9 @@ class AnthropicClient:
                 tool_calls=tool_calls,
                 raw_content=raw_content_list,
                 server_tool_details=server_tool_details,
-                thinking_text=thinking_text
+                thinking_text=thinking_text,
+                cache_creation_input_tokens=cache_creation,
+                cache_read_input_tokens=cache_read
             )
 
         except Exception as e:
@@ -617,7 +676,7 @@ class AnthropicClient:
                     )
 
             if system_prompt:
-                request_params["system"] = system_prompt
+                request_params["system"] = self._apply_prompt_caching(system_prompt)
 
             if stop_sequences:
                 request_params["stop_sequences"] = stop_sequences
@@ -698,12 +757,14 @@ class AnthropicClient:
                         log_info(f"SSE message_stop: text_chunks_yielded={text_chunks_yielded}, tool_calls={len(state.tool_calls)}", prefix="📡")
 
                     if event_type == "message_start":
-                        # Extract input token count from message start
+                        # Extract input token count and cache metrics from message start
                         message = getattr(event, "message", None)
                         if message:
                             usage = getattr(message, "usage", None)
                             if usage:
                                 state.input_tokens = getattr(usage, "input_tokens", 0)
+                                state.cache_creation_input_tokens = getattr(usage, "cache_creation_input_tokens", 0) or 0
+                                state.cache_read_input_tokens = getattr(usage, "cache_read_input_tokens", 0) or 0
 
                     elif event_type == "content_block_start":
                         # New content block starting
@@ -920,6 +981,12 @@ class AnthropicClient:
                 log_info(f"STREAMING FIX: No text chunks yielded, but stream completed. "
                          f"Tool calls: {len(state.tool_calls)}, text_len: {len(state.text)}, "
                          f"stop_reason: {state.stop_reason}", prefix="📡")
+
+            # Log prompt cache metrics
+            if state.cache_read_input_tokens > 0:
+                log_info(f"Prompt cache HIT: {state.cache_read_input_tokens} tokens read from cache", prefix="[Cache]")
+            elif state.cache_creation_input_tokens > 0:
+                log_info(f"Prompt cache WRITE: {state.cache_creation_input_tokens} tokens written to cache", prefix="[Cache]")
 
             log_info(f"STREAMING FIX: Yielding final state (text_chunks_yielded={text_chunks_yielded}, "
                      f"tool_calls={len(state.tool_calls)}, stop_reason={state.stop_reason})", prefix="📡")

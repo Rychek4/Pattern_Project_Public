@@ -90,6 +90,17 @@ ANTHROPIC_MODEL_FAILOVER = {
 # Layer 3: Deferred retry when all models unavailable
 API_DEFERRED_RETRY_DELAY = 1200               # 20 minutes in seconds
 
+# Prompt Caching
+# Caches stable portions of the system prompt to reduce input token cost (~90%
+# on cache hits) and time-to-first-token latency (~85% reduction).
+# The system prompt is split at a delimiter into stable (cached) and dynamic
+# portions. Only content before the delimiter is marked with cache_control.
+# Minimum cacheable tokens: 1024 (Sonnet 4.5), 4096 (Opus 4.6).
+# Prompts below the minimum are processed normally without caching.
+PROMPT_CACHE_ENABLED = os.getenv("PROMPT_CACHE_ENABLED", "true").lower() == "true"
+PROMPT_CACHE_BREAKPOINT = "<!-- cache-breakpoint -->"  # Delimiter between stable/dynamic content
+PROMPT_CACHE_STABLE_PRIORITY = 10  # Cache blocks with priority <= this (base prompt + core memory)
+
 # =============================================================================
 # DATABASE CONFIGURATION
 # =============================================================================
