@@ -187,15 +187,13 @@ class ChatCLI:
                 start_time = time.time()
                 with self.console.status("[bold blue]Thinking...[/bold blue]", spinner="dots"):
                     # Get response from LLM with full context and native tools
-                    from core.user_settings import get_user_settings
-                    _thinking_on = get_user_settings().thinking_enabled
                     response = router.chat(
                         messages=history,
                         system_prompt=assembled.full_system_prompt,
                         task_type=TaskType.CONVERSATION,
                         temperature=0.7,
                         tools=tools,
-                        thinking_enabled=_thinking_on
+                        thinking_enabled=True
                     )
                 pass1_duration = (time.time() - start_time) * 1000
 
@@ -221,7 +219,7 @@ class ChatCLI:
                         pulse_callback=on_pulse_change,
                         tools=tools,
                         dev_mode_callbacks=dev_callbacks,
-                        thinking_enabled=_thinking_on
+                        thinking_enabled=True
                     )
 
                     final_text = result.final_text
@@ -475,7 +473,7 @@ class ChatCLI:
                     task_type=TaskType.CONVERSATION,
                     temperature=0.7,
                     tools=tools,
-                    thinking_enabled=get_user_settings().thinking_enabled
+                    thinking_enabled=True
                 )
             current_duration = (time.time() - cont_start) * 1000
 
@@ -564,7 +562,7 @@ class ChatCLI:
                     system_prompt=system_prompt,
                     task_type=TaskType.CONVERSATION,
                     temperature=0.7,
-                    thinking_enabled=get_user_settings().thinking_enabled
+                    thinking_enabled=True
                 )
             current_duration = (time.time() - cont_start) * 1000
 
@@ -662,7 +660,7 @@ class ChatCLI:
                     task_type=TaskType.CONVERSATION,
                     temperature=0.7,
                     tools=tools,  # Enable native tools for pulse responses (includes pulse-only tools)
-                    thinking_enabled=get_user_settings().thinking_enabled
+                    thinking_enabled=True
                 )
 
             if response.success:
@@ -685,7 +683,7 @@ class ChatCLI:
                     pulse_callback=on_pulse_change,
                     tools=tools,
                     dev_mode_callbacks=dev_callbacks,
-                    thinking_enabled=get_user_settings().thinking_enabled
+                    thinking_enabled=True
                 )
 
                 final_text = result.final_text
@@ -801,7 +799,7 @@ class ChatCLI:
                     task_type=TaskType.CONVERSATION,
                     temperature=0.7,
                     tools=tools,  # Enable native tools for reminder responses
-                    thinking_enabled=get_user_settings().thinking_enabled
+                    thinking_enabled=True
                 )
 
             if response.success:
@@ -824,7 +822,7 @@ class ChatCLI:
                     pulse_callback=on_pulse_change,
                     tools=tools,
                     dev_mode_callbacks=dev_callbacks,
-                    thinking_enabled=get_user_settings().thinking_enabled
+                    thinking_enabled=True
                 )
 
                 final_text = result.final_text
@@ -943,7 +941,7 @@ class ChatCLI:
                     task_type=TaskType.CONVERSATION,
                     temperature=0.7,
                     tools=tools,  # Enable native tools for telegram responses
-                    thinking_enabled=get_user_settings().thinking_enabled
+                    thinking_enabled=True
                 )
 
             if response.success:
@@ -966,7 +964,7 @@ class ChatCLI:
                     pulse_callback=on_pulse_change,
                     tools=tools,
                     dev_mode_callbacks=dev_callbacks,
-                    thinking_enabled=get_user_settings().thinking_enabled
+                    thinking_enabled=True
                 )
 
                 final_text = result.final_text

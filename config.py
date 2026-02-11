@@ -45,12 +45,22 @@ ANTHROPIC_MODEL_EXTRACTION = os.getenv("ANTHROPIC_MODEL_EXTRACTION", "claude-son
 ANTHROPIC_MAX_TOKENS = int(os.getenv("ANTHROPIC_MAX_TOKENS", "4096"))
 
 # Extended Thinking
-# When enabled, Claude uses a private scratchpad to reason before responding.
+# Claude uses a private scratchpad to reason before responding.
 # Improves quality for complex reasoning tasks but uses more output tokens.
+#
+# Opus 4.6 uses ADAPTIVE thinking (model decides how much to think).
+# Effort level guides how aggressively the model thinks:
+#   "low"    - Skips thinking for simple tasks
+#   "medium" - Moderate thinking, may skip for trivial queries
+#   "high"   - Always thinks with deep reasoning (recommended)
+#   "max"    - No constraints on thinking depth (Opus 4.6 only)
+ANTHROPIC_THINKING_EFFORT = "high"                 # Effort level for Opus 4.6 adaptive thinking
+
+# Sonnet-specific thinking settings (Sonnet uses manual extended thinking)
 # temperature is forced to 1.0 by the API when thinking is enabled.
 ANTHROPIC_THINKING_ENABLED = True                  # Default state for new users (on by default)
-ANTHROPIC_THINKING_BUDGET_TOKENS = 10000           # Max tokens Claude can use for thinking
-ANTHROPIC_THINKING_MAX_TOKENS = 16000              # Total max_tokens when thinking is on (must be > budget)
+ANTHROPIC_SONNET_THINKING_BUDGET_TOKENS = 10000    # Max tokens Sonnet can use for thinking
+ANTHROPIC_SONNET_THINKING_MAX_TOKENS = 16000       # Total max_tokens when Sonnet thinking is on (must be > budget)
 
 # KoboldCpp (Local)
 KOBOLD_API_URL = os.getenv("KOBOLD_API_URL", "http://127.0.0.1:5001")

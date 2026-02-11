@@ -66,7 +66,7 @@ def create_app() -> Flask:
                 system_prompt=system_prompt,
                 task_type=TaskType.CONVERSATION,
                 temperature=temperature,
-                thinking_enabled=get_user_settings().thinking_enabled
+                thinking_enabled=True
             )
 
             if response.success:

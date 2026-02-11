@@ -196,9 +196,17 @@ class RoundRecorder:
         _section_open(lines, "MODEL CONFIGURATION")
         lines.append(f"        Model:            {call.model}")
         lines.append(f"        Temperature:      {call.temperature}")
-        lines.append(f"        Thinking:         {'enabled' if call.thinking_enabled else 'disabled'}")
-        if call.thinking_enabled and call.thinking_budget_tokens:
-            lines.append(f"        Thinking budget:  {call.thinking_budget_tokens} tokens")
+        if call.thinking_enabled:
+            if call.model.startswith("claude-opus-4-6"):
+                import config as _cfg
+                effort = getattr(_cfg, 'ANTHROPIC_THINKING_EFFORT', 'high')
+                lines.append(f"        Thinking:         adaptive (effort={effort})")
+            elif call.thinking_budget_tokens:
+                lines.append(f"        Thinking:         enabled (budget={call.thinking_budget_tokens} tokens)")
+            else:
+                lines.append(f"        Thinking:         enabled")
+        else:
+            lines.append(f"        Thinking:         disabled")
         _section_close(lines)
         lines.append("")
 
