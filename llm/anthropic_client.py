@@ -316,21 +316,30 @@ class AnthropicClient:
                 "messages": messages
             }
 
-            # Extended thinking: override max_tokens and temperature when enabled
+            # Extended thinking configuration
+            # Opus 4.6 uses adaptive thinking; Sonnet uses manual budget-based thinking
             if thinking_enabled:
                 import config as cfg
-                budget = thinking_budget_tokens or cfg.ANTHROPIC_THINKING_BUDGET_TOKENS
-                request_params["thinking"] = {
-                    "type": "enabled",
-                    "budget_tokens": budget
-                }
-                # API requires temperature=1 when thinking is enabled
-                request_params["temperature"] = 1.0
-                # max_tokens must exceed budget_tokens
-                request_params["max_tokens"] = max(
-                    request_params["max_tokens"],
-                    cfg.ANTHROPIC_THINKING_MAX_TOKENS
-                )
+                active_model = request_params["model"]
+                if active_model.startswith("claude-opus-4-6"):
+                    # Opus 4.6: adaptive thinking with effort level
+                    request_params["thinking"] = {"type": "adaptive"}
+                    effort = getattr(cfg, 'ANTHROPIC_THINKING_EFFORT', 'high')
+                    request_params["output_config"] = {"effort": effort}
+                    # API requires temperature=1 when thinking is enabled
+                    request_params["temperature"] = 1.0
+                else:
+                    # Sonnet / other models: manual thinking with budget_tokens
+                    budget = thinking_budget_tokens or cfg.ANTHROPIC_SONNET_THINKING_BUDGET_TOKENS
+                    request_params["thinking"] = {
+                        "type": "enabled",
+                        "budget_tokens": budget
+                    }
+                    request_params["temperature"] = 1.0
+                    request_params["max_tokens"] = max(
+                        request_params["max_tokens"],
+                        cfg.ANTHROPIC_SONNET_THINKING_MAX_TOKENS
+                    )
 
             if system_prompt:
                 request_params["system"] = system_prompt
@@ -583,19 +592,29 @@ class AnthropicClient:
                 "messages": messages
             }
 
-            # Extended thinking: override max_tokens and temperature when enabled
+            # Extended thinking configuration
+            # Opus 4.6 uses adaptive thinking; Sonnet uses manual budget-based thinking
             if thinking_enabled:
                 import config as cfg
-                budget = thinking_budget_tokens or cfg.ANTHROPIC_THINKING_BUDGET_TOKENS
-                request_params["thinking"] = {
-                    "type": "enabled",
-                    "budget_tokens": budget
-                }
-                request_params["temperature"] = 1.0
-                request_params["max_tokens"] = max(
-                    request_params["max_tokens"],
-                    cfg.ANTHROPIC_THINKING_MAX_TOKENS
-                )
+                active_model = request_params["model"]
+                if active_model.startswith("claude-opus-4-6"):
+                    # Opus 4.6: adaptive thinking with effort level
+                    request_params["thinking"] = {"type": "adaptive"}
+                    effort = getattr(cfg, 'ANTHROPIC_THINKING_EFFORT', 'high')
+                    request_params["output_config"] = {"effort": effort}
+                    request_params["temperature"] = 1.0
+                else:
+                    # Sonnet / other models: manual thinking with budget_tokens
+                    budget = thinking_budget_tokens or cfg.ANTHROPIC_SONNET_THINKING_BUDGET_TOKENS
+                    request_params["thinking"] = {
+                        "type": "enabled",
+                        "budget_tokens": budget
+                    }
+                    request_params["temperature"] = 1.0
+                    request_params["max_tokens"] = max(
+                        request_params["max_tokens"],
+                        cfg.ANTHROPIC_SONNET_THINKING_MAX_TOKENS
+                    )
 
             if system_prompt:
                 request_params["system"] = system_prompt

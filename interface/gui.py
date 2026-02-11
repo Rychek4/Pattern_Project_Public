@@ -259,7 +259,6 @@ class ChatWindow(QMainWindow):
         self._setup_draft_manager()
         self._apply_style()
         self._init_model_dropdown()
-        self._init_thinking_toggle()
 
     def _setup_signals(self):
         """Connect signals to slots."""
@@ -416,13 +415,6 @@ class ChatWindow(QMainWindow):
         self.model_dropdown.setToolTip("Conversation model (affects new messages)")
         self.model_dropdown.currentIndexChanged.connect(self._on_model_changed)
         layout.addWidget(self.model_dropdown)
-
-        # Extended thinking toggle
-        self.thinking_checkbox = QCheckBox("Thinking")
-        self.thinking_checkbox.setFont(QFont(UI_FONT_FAMILY, 10))
-        self.thinking_checkbox.setToolTip("Enable extended thinking for deeper reasoning (uses more tokens)")
-        self.thinking_checkbox.stateChanged.connect(self._on_thinking_changed)
-        layout.addWidget(self.thinking_checkbox)
 
         # Font size controls
         self.font_decrease_btn = QPushButton("A-")
@@ -945,24 +937,6 @@ class ChatWindow(QMainWindow):
             self._user_settings.conversation_model = model_id
             self._notification_manager.info(f"Switched to {name}")
             log_info(f"Conversation model changed to {name}", prefix="🤖")
-
-    def _init_thinking_toggle(self):
-        """Initialize thinking toggle based on saved user preference."""
-        enabled = self._user_settings.thinking_enabled
-
-        # Block signals to avoid triggering _on_thinking_changed during initialization
-        self.thinking_checkbox.blockSignals(True)
-        self.thinking_checkbox.setChecked(enabled)
-        self.thinking_checkbox.blockSignals(False)
-
-    def _on_thinking_changed(self, state: int):
-        """Handle thinking checkbox state change."""
-        enabled = state == Qt.Checked
-        if self._user_settings:
-            self._user_settings.thinking_enabled = enabled
-            status = "enabled" if enabled else "disabled"
-            self._notification_manager.info(f"Thinking {status}")
-            log_info(f"Extended thinking {status}", prefix="🧠")
 
     def _decrease_font_size(self):
         """Decrease font size by 1pt (minimum 10pt)."""
@@ -1799,9 +1773,6 @@ class ChatWindow(QMainWindow):
             tts_enabled = is_tts_enabled()
             voice_id = get_tts_voice_id() if tts_enabled else None
 
-            # Read thinking setting for conversation
-            thinking_on = self._user_settings.thinking_enabled
-
             # Start recording this round for prompt export
             self._round_recorder.start_round()
             self._round_recorder.record_request(
@@ -1810,12 +1781,11 @@ class ChatWindow(QMainWindow):
                 tools=tools,
                 model=self._user_settings.conversation_model,
                 temperature=0.7,
-                thinking_enabled=thinking_on,
-                thinking_budget_tokens=getattr(config, 'ANTHROPIC_THINKING_BUDGET_TOKENS', None) if thinking_on else None,
+                thinking_enabled=True,
                 is_streaming=True,
             )
 
-            # Stream the response
+            # Stream the response (thinking always enabled)
             final_state = None
             for chunk, state in self._llm_router.chat_stream(
                 messages=history,
@@ -1823,7 +1793,7 @@ class ChatWindow(QMainWindow):
                 task_type=TaskType.CONVERSATION,
                 temperature=0.7,
                 tools=tools,
-                thinking_enabled=thinking_on
+                thinking_enabled=True
             ):
                 # Check for cancellation
                 if self._cancel_requested:
@@ -1960,7 +1930,7 @@ class ChatWindow(QMainWindow):
                     pulse_callback=lambda interval: self._emit_pulse_interval_change(interval),
                     tools=tools,
                     dev_mode_callbacks=dev_callbacks,
-                    thinking_enabled=thinking_on,
+                    thinking_enabled=True,
                     round_recorder=self._round_recorder
                 )
 
@@ -2116,7 +2086,7 @@ class ChatWindow(QMainWindow):
                 task_type=TaskType.CONVERSATION,
                 temperature=0.7,
                 tools=tools,
-                thinking_enabled=self._user_settings.thinking_enabled
+                thinking_enabled=True
             )
             current_duration = (time.time() - cont_start) * 1000
 
@@ -2229,7 +2199,7 @@ class ChatWindow(QMainWindow):
                 system_prompt=system_prompt,
                 task_type=TaskType.CONVERSATION,
                 temperature=0.7,
-                thinking_enabled=self._user_settings.thinking_enabled
+                thinking_enabled=True
             )
             current_duration = (time.time() - cont_start) * 1000
 
@@ -2394,7 +2364,7 @@ class ChatWindow(QMainWindow):
                 task_type=TaskType.CONVERSATION,
                 temperature=0.7,
                 tools=tools,  # Enable native tools for Telegram responses
-                thinking_enabled=self._user_settings.thinking_enabled
+                thinking_enabled=True
             )
 
             if response.success:
@@ -2418,7 +2388,7 @@ class ChatWindow(QMainWindow):
                     pulse_callback=lambda interval: self._emit_pulse_interval_change(interval),
                     tools=tools,
                     dev_mode_callbacks=dev_callbacks,
-                    thinking_enabled=self._user_settings.thinking_enabled
+                    thinking_enabled=True
                 )
 
                 final_text = result.final_text
@@ -2570,7 +2540,7 @@ class ChatWindow(QMainWindow):
                 task_type=TaskType.CONVERSATION,
                 temperature=0.7,
                 tools=tools,
-                thinking_enabled=self._user_settings.thinking_enabled
+                thinking_enabled=True
             )
 
             if response.success:
@@ -2583,7 +2553,7 @@ class ChatWindow(QMainWindow):
                     max_passes=5,
                     pulse_callback=lambda interval: self._emit_pulse_interval_change(interval),
                     tools=tools,
-                    thinking_enabled=self._user_settings.thinking_enabled
+                    thinking_enabled=True
                 )
 
                 final_text = result.final_text
@@ -2661,7 +2631,7 @@ class ChatWindow(QMainWindow):
                 task_type=TaskType.CONVERSATION,
                 temperature=0.7,
                 tools=tools,
-                thinking_enabled=self._user_settings.thinking_enabled
+                thinking_enabled=True
             )
 
             if response.success:
@@ -2673,7 +2643,7 @@ class ChatWindow(QMainWindow):
                     max_passes=5,
                     pulse_callback=lambda interval: self._emit_pulse_interval_change(interval),
                     tools=tools,
-                    thinking_enabled=self._user_settings.thinking_enabled
+                    thinking_enabled=True
                 )
 
                 final_text = result.final_text
@@ -2831,7 +2801,7 @@ class ChatWindow(QMainWindow):
                 task_type=TaskType.CONVERSATION,
                 temperature=0.7,
                 tools=tools,  # Enable native tools for pulse responses
-                thinking_enabled=self._user_settings.thinking_enabled
+                thinking_enabled=True
             )
 
             log_info(f"PULSE: Router returned, success={response.success}", prefix="⏱️")
@@ -2868,7 +2838,7 @@ class ChatWindow(QMainWindow):
                     pulse_callback=lambda interval: self._emit_pulse_interval_change(interval),
                     tools=tools,
                     dev_mode_callbacks=dev_callbacks,
-                    thinking_enabled=self._user_settings.thinking_enabled
+                    thinking_enabled=True
                 )
 
                 final_text = result.final_text
@@ -3013,7 +2983,7 @@ class ChatWindow(QMainWindow):
                 task_type=TaskType.CONVERSATION,
                 temperature=0.7,
                 tools=tools,  # Enable native tools for reminder responses
-                thinking_enabled=self._user_settings.thinking_enabled
+                thinking_enabled=True
             )
 
             if response.success:
@@ -3036,7 +3006,7 @@ class ChatWindow(QMainWindow):
                     pulse_callback=lambda interval: self._emit_pulse_interval_change(interval),
                     tools=tools,
                     dev_mode_callbacks=dev_callbacks,
-                    thinking_enabled=self._user_settings.thinking_enabled
+                    thinking_enabled=True
                 )
 
                 final_text = result.final_text
