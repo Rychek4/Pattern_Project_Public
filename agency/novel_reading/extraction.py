@@ -354,6 +354,9 @@ def extract_chapter(
     )
 
     router = get_llm_router()
+    # NOTE: use_model is computed but not yet passed to router.generate().
+    # Currently routing relies on TaskType (EXTRACTION → Sonnet). We may wire
+    # up explicit model override here in a future iteration.
     use_model = model or NOVEL_EXTRACTION_MODEL
 
     try:
@@ -425,6 +428,9 @@ def reflect_on_arc(
     )
 
     router = get_llm_router()
+    # NOTE: use_model is computed but not yet passed to router.generate().
+    # Currently routing relies on TaskType (ANALYSIS → Opus). We may wire
+    # up explicit model override here in a future iteration.
     use_model = model or NOVEL_REFLECTION_MODEL
 
     try:
@@ -494,6 +500,9 @@ def synthesize_completion(
     )
 
     router = get_llm_router()
+    # NOTE: use_model is computed but not yet passed to router.generate().
+    # Currently routing relies on TaskType (ANALYSIS → Opus). We may wire
+    # up explicit model override here in a future iteration.
     use_model = model or NOVEL_REFLECTION_MODEL
 
     try:

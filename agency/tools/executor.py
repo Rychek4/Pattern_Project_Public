@@ -1654,6 +1654,7 @@ class ToolExecutor:
         import json
         from pathlib import Path
         from agency.novel_reading.orchestrator import open_book
+        from agency.commands.handlers.file_handler import _sanitize_filename, FileSecurityError
 
         filename = input.get("filename", "")
         if not filename:
@@ -1661,6 +1662,16 @@ class ToolExecutor:
                 tool_use_id=id,
                 tool_name="open_book",
                 content="No filename provided",
+                is_error=True
+            )
+
+        try:
+            filename = _sanitize_filename(filename)
+        except FileSecurityError as e:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="open_book",
+                content=f"Invalid filename: {e}",
                 is_error=True
             )
 
