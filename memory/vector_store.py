@@ -86,9 +86,9 @@ class VectorStore:
     def __init__(
         self,
         embedding_dimensions: int = 384,
-        semantic_weight: float = 0.65,
+        semantic_weight: float = 0.60,
         importance_weight: float = 0.25,
-        freshness_weight: float = 0.10
+        freshness_weight: float = 0.15
     ):
         """
         Initialize the vector store.
@@ -97,7 +97,7 @@ class VectorStore:
             embedding_dimensions: Dimension of embedding vectors
             semantic_weight: Weight for semantic similarity (primary signal)
             importance_weight: Weight for memory importance score
-            freshness_weight: Weight for freshness score (tie-breaker)
+            freshness_weight: Weight for freshness score (age penalty)
         """
         self.embedding_dimensions = embedding_dimensions
         self.semantic_weight = semantic_weight

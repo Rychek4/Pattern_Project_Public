@@ -194,9 +194,9 @@ MEMORY_IMPORTANCE_FLOOR = 0.3  # Don't store memories below this (rating < 3/10)
 # Scoring weights for memory retrieval (must sum to 1.0)
 # Prioritizes semantic relevance and importance over recency.
 # Session-scoped recency is handled by the Warmth Cache (see semantic_memory.py).
-MEMORY_SEMANTIC_WEIGHT = 0.65  # Semantic similarity to query (primary signal)
+MEMORY_SEMANTIC_WEIGHT = 0.60  # Semantic similarity to query (primary signal)
 MEMORY_IMPORTANCE_WEIGHT = 0.25  # Memory importance score (value-aware retrieval)
-MEMORY_FRESHNESS_WEIGHT = 0.10  # Recency of memory source (tie-breaker)
+MEMORY_FRESHNESS_WEIGHT = 0.15  # Recency of memory source (age penalty)
 
 # -----------------------------------------------------------------------------
 # Memory Warmth Cache System
