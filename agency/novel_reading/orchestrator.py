@@ -208,7 +208,7 @@ class ReadingSession:
             (self.session_id,),
             fetch=True
         )
-        if not result or not result[0].get("observations_json"):
+        if not result or not result[0]["observations_json"]:
             return []
         obs_data = json.loads(result[0]["observations_json"])
         return [
