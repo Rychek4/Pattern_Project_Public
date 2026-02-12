@@ -651,3 +651,42 @@ CLIPBOARD_MAX_READ_SIZE = 10000                 # Truncate clipboard reads beyon
 # When used, the question is displayed prominently in the UI, and in GUI mode,
 # options can be rendered as clickable buttons for easy response.
 CLARIFICATION_ENABLED = os.getenv("CLARIFICATION_ENABLED", "true").lower() == "true"
+
+# =============================================================================
+# NOVEL READING CONFIGURATION
+# =============================================================================
+# The novel reading system allows the AI to "read" a novel chapter by chapter,
+# extracting literary understanding into memory the way a human reader would.
+#
+# Architecture:
+#   1. Book parser detects chapters/arcs from plain text files
+#   2. Reading loop feeds chapters sequentially to the AI
+#   3. Per-chapter literary extraction stores characters, themes, predictions, etc.
+#   4. Opus reflective passes at arc boundaries synthesize emergent patterns
+#   5. All memories go into the standard memory store with natural aging decay
+#   6. Post-completion, the AI discusses the book using its accumulated understanding
+#
+# The book file must be placed in FILE_STORAGE_DIR (data/files/) as a .txt file.
+NOVEL_READING_ENABLED = os.getenv("NOVEL_READING_ENABLED", "true").lower() == "true"
+
+# Token budget: approximate max tokens per chapter delivery to the AI.
+# Chapters exceeding this are split into segments at paragraph boundaries.
+NOVEL_CHAPTER_MAX_TOKENS = 4000
+
+# Model routing for reading tasks:
+#   - Chapter extraction (per-chapter): Uses Sonnet (cost-effective, strong comprehension)
+#   - Reflective passes (arc boundaries + completion): Uses Opus (deeper synthesis)
+NOVEL_EXTRACTION_MODEL = os.getenv("NOVEL_EXTRACTION_MODEL", "claude-sonnet-4-5-20250929")
+NOVEL_REFLECTION_MODEL = os.getenv("NOVEL_REFLECTION_MODEL", "claude-opus-4-6")
+
+# Reflective pass triggers: Opus runs at arc boundaries and at book completion.
+# This controls the "step back and see the whole" synthesis passes.
+NOVEL_REFLECT_AT_ARC_BOUNDARIES = True
+
+# Max tokens for extraction and reflection API calls
+NOVEL_EXTRACTION_MAX_TOKENS = 3000
+NOVEL_REFLECTION_MAX_TOKENS = 4000
+
+# Reading progress is stored in the database (reading_sessions table).
+# Only one book can be read at a time.
+NOVEL_BOOKS_DIR = DATA_DIR / "files"  # Books stored alongside other files
