@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from core.logger import log_info, log_success, log_error, log_config, log_section
 
 # Schema version for migrations
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 
 # SQL schema definition
 SCHEMA_SQL = """
@@ -193,6 +193,24 @@ CREATE TABLE IF NOT EXISTS growth_threads (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Reading sessions: tracks progress through a novel being read chapter-by-chapter
+CREATE TABLE IF NOT EXISTS reading_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    filename TEXT NOT NULL,
+    title TEXT,
+    status TEXT NOT NULL DEFAULT 'reading' CHECK (status IN ('reading', 'completed', 'abandoned')),
+    total_chapters INTEGER NOT NULL DEFAULT 0,
+    total_arcs INTEGER DEFAULT 0,
+    has_prologue BOOLEAN DEFAULT FALSE,
+    structure_json JSON,
+    current_chapter INTEGER DEFAULT 0,
+    current_arc INTEGER DEFAULT 0,
+    chapters_read JSON DEFAULT '[]',
+    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_read_at TIMESTAMP,
+    completed_at TIMESTAMP
+);
+
 -- Indexes for efficient queries
 CREATE INDEX IF NOT EXISTS idx_conversations_session ON conversations(session_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_unprocessed ON conversations(processed_for_memory) WHERE processed_for_memory = FALSE;
@@ -216,6 +234,7 @@ CREATE INDEX IF NOT EXISTS idx_curiosity_source ON curiosity_goals(source_memory
 CREATE INDEX IF NOT EXISTS idx_thoughts_history_archived ON active_thoughts_history(archived_at DESC);
 CREATE INDEX IF NOT EXISTS idx_growth_threads_stage ON growth_threads(stage);
 CREATE INDEX IF NOT EXISTS idx_growth_threads_slug ON growth_threads(slug);
+CREATE INDEX IF NOT EXISTS idx_reading_sessions_status ON reading_sessions(status);
 """
 
 # Migration SQL for v1 -> v2
@@ -747,6 +766,36 @@ CREATE INDEX IF NOT EXISTS idx_growth_threads_stage ON growth_threads(stage);
 CREATE INDEX IF NOT EXISTS idx_growth_threads_slug ON growth_threads(slug);
 """
 
+# Migration SQL for v18 -> v19 (add reading_sessions table for novel reading)
+MIGRATION_V19_SQL = """
+-- Reading sessions: tracks progress through a novel being read chapter-by-chapter
+-- Only one active reading session at a time (status = 'reading')
+CREATE TABLE IF NOT EXISTS reading_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    filename TEXT NOT NULL,
+    title TEXT,
+    status TEXT NOT NULL DEFAULT 'reading' CHECK (status IN ('reading', 'completed', 'abandoned')),
+
+    -- Structure metadata (populated by parser on open_book)
+    total_chapters INTEGER NOT NULL DEFAULT 0,
+    total_arcs INTEGER DEFAULT 0,
+    has_prologue BOOLEAN DEFAULT FALSE,
+    structure_json JSON,
+
+    -- Progress tracking
+    current_chapter INTEGER DEFAULT 0,
+    current_arc INTEGER DEFAULT 0,
+    chapters_read JSON DEFAULT '[]',
+
+    -- Timestamps
+    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_read_at TIMESTAMP,
+    completed_at TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_reading_sessions_status ON reading_sessions(status);
+"""
+
 
 class Database:
     """SQLite database manager with WAL mode and thread-safe connections."""
@@ -932,6 +981,10 @@ class Database:
             if from_version < 18:
                 log_config("Applying migration", "v17 → v18 (add growth_threads table)", indent=1)
                 conn.executescript(MIGRATION_V18_SQL)
+
+            if from_version < 19:
+                log_config("Applying migration", "v18 → v19 (add reading_sessions table for novel reading)", indent=1)
+                conn.executescript(MIGRATION_V19_SQL)
 
             # Record new version
             conn.execute(
