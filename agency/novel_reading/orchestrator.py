@@ -377,11 +377,28 @@ def open_book(filepath: Path) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
     existing = ReadingSession.get_active()
     if existing:
         info = existing.get_info()
+        # If in-memory state is already set, truly active — block
+        if _active_session is not None:
+            return (
+                False,
+                f"Already reading '{info['title']}' "
+                f"(chapter {info['current_chapter']}/{info['total_chapters']}). "
+                f"Complete or abandon the current book first.",
+                None
+            )
+        # In-memory state lost (restart) — auto-resume if same file
+        if info.get("filename") == filepath.name:
+            log_info(
+                f"Detected interrupted session for '{info['title']}', auto-resuming",
+                prefix="📖"
+            )
+            return resume_reading(filepath)
+        # Different file — tell user to abandon the stale session first
         return (
             False,
-            f"Already reading '{info['title']}' "
+            f"A previous session for '{info['title']}' is still active "
             f"(chapter {info['current_chapter']}/{info['total_chapters']}). "
-            f"Complete or abandon the current book first.",
+            f"Use abandon_reading to clear it, or resume_reading to continue it.",
             None
         )
 
@@ -709,14 +726,20 @@ def get_reading_progress() -> Tuple[bool, str, Optional[Dict[str, Any]]]:
     """
     global _active_book, _active_session, _observation_tracker
 
-    if _active_session is not None:
-        info = _active_session.get_info()
+    # Use in-memory session, or fall back to DB (post-restart)
+    session = _active_session or ReadingSession.get_active()
+
+    if session is not None:
+        info = session.get_info()
         if info:
             chapters_read = info["chapters_read"]
             progress_pct = (
                 (len(chapters_read) / info["total_chapters"] * 100)
                 if info["total_chapters"] > 0 else 0
             )
+
+            needs_resume = _active_session is None
+            status_note = " (session needs resume — use resume_reading or re-open the book)" if needs_resume else ""
 
             result = {
                 "status": "reading",
@@ -733,8 +756,9 @@ def get_reading_progress() -> Tuple[bool, str, Optional[Dict[str, Any]]]:
                     _observation_tracker.count() if _observation_tracker else 0
                 ),
                 "started_at": info["started_at"],
+                "needs_resume": needs_resume,
             }
-            return True, f"Currently reading '{info['title']}'", result
+            return True, f"Currently reading '{info['title']}'{status_note}", result
 
     # Check for most recent completed session
     db = get_database()
@@ -765,11 +789,17 @@ def abandon_reading() -> Tuple[bool, str]:
     """Abandon the current reading session."""
     global _active_book, _active_session, _observation_tracker
 
-    if _active_session is None:
+    session = _active_session
+
+    # Fall back to DB if in-memory state was lost (e.g. after restart)
+    if session is None:
+        session = ReadingSession.get_active()
+
+    if session is None:
         return False, "No book is currently being read."
 
-    info = _active_session.get_info()
-    _active_session.mark_abandoned()
+    info = session.get_info()
+    session.mark_abandoned()
 
     # Clear state
     _active_book = None

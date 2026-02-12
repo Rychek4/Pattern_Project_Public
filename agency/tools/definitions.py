@@ -100,6 +100,7 @@ def get_tool_definitions(is_pulse: bool = False) -> List[Dict[str, Any]]:
         tools.append(COMPLETE_READING_TOOL)
         tools.append(READING_PROGRESS_TOOL)
         tools.append(ABANDON_READING_TOOL)
+        tools.append(RESUME_READING_TOOL)
 
     # Reddit tools (if enabled)
     if getattr(config, 'REDDIT_ENABLED', False):
@@ -1548,5 +1549,30 @@ This frees you to open a new book.""",
         "type": "object",
         "properties": {},
         "required": []
+    }
+}
+
+RESUME_READING_TOOL: Dict[str, Any] = {
+    "name": "resume_reading",
+    "description": """Resume a reading session that was interrupted by a system restart.
+
+Use this when:
+- The system was restarted while reading a book
+- open_book says a session exists but read_next_chapter can't find it
+- You're in a liminal state where the session is in the database but not in memory
+
+This re-parses the book file, restores the observation tracker from the database,
+and picks up where you left off. After resuming, use read_next_chapter to continue.
+
+The book file must still be available at its original location.""",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "filename": {
+                "type": "string",
+                "description": "Filename of the .txt file to resume (e.g., 'my_novel.txt')"
+            }
+        },
+        "required": ["filename"]
     }
 }

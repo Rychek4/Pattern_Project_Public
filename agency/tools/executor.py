@@ -96,6 +96,7 @@ class ToolExecutor:
             "complete_reading": self._exec_complete_reading,
             "reading_progress": self._exec_reading_progress,
             "abandon_reading": self._exec_abandon_reading,
+            "resume_reading": self._exec_resume_reading,
         }
 
     def execute(
@@ -1849,6 +1850,59 @@ class ToolExecutor:
             tool_name="abandon_reading",
             content=message,
             is_error=not success
+        )
+
+    def _exec_resume_reading(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Resume an interrupted reading session."""
+        from pathlib import Path
+        from agency.novel_reading.orchestrator import resume_reading
+        from agency.commands.handlers.file_handler import _sanitize_filename, FileSecurityError
+
+        filename = input.get("filename", "")
+        if not filename:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="resume_reading",
+                content="No filename provided",
+                is_error=True
+            )
+
+        try:
+            filename = _sanitize_filename(filename)
+        except FileSecurityError as e:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="resume_reading",
+                content=f"Invalid filename: {e}",
+                is_error=True
+            )
+
+        filepath = Path(config.NOVEL_BOOKS_DIR) / filename
+
+        success, message, result_data = resume_reading(filepath)
+
+        if not success:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="resume_reading",
+                content=message,
+                is_error=True
+            )
+
+        parts = [message, ""]
+        if result_data:
+            parts.append(f"Title: {result_data.get('title', 'Unknown')}")
+            chapters_read = result_data.get('chapters_read', [])
+            parts.append(f"Chapters already read: {len(chapters_read)}")
+            parts.append(f"Chapters remaining: {result_data.get('chapters_remaining', 0)}")
+            parts.append("\nUse read_next_chapter to continue reading.")
+
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="resume_reading",
+            content="\n".join(parts)
         )
 
 
