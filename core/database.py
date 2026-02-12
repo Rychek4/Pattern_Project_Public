@@ -787,7 +787,6 @@ CREATE TABLE IF NOT EXISTS reading_sessions (
     current_chapter INTEGER DEFAULT 0,
     current_arc INTEGER DEFAULT 0,
     chapters_read JSON DEFAULT '[]',
-    observations_json TEXT DEFAULT '[]',
 
     -- Timestamps
     started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -799,6 +798,8 @@ CREATE INDEX IF NOT EXISTS idx_reading_sessions_status ON reading_sessions(statu
 """
 
 # Migration SQL for v19 -> v20 (add observations persistence for novel reading resume)
+# v19 creates the table without observations_json; v20 adds the column.
+# The full CREATE TABLE schema (for fresh installs) already includes observations_json.
 MIGRATION_V20_SQL = """
 ALTER TABLE reading_sessions ADD COLUMN observations_json TEXT DEFAULT '[]';
 """

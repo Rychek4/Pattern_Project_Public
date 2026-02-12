@@ -261,9 +261,9 @@ def _detect_arc_markers(text: str) -> List[Tuple[int, str, str]]:
 
             # Determine marker type
             lower = raw_title.lower()
-            if lower == 'prologue':
+            if lower.startswith('prologue'):
                 marker_type = 'prologue'
-            elif lower == 'epilogue':
+            elif lower.startswith('epilogue'):
                 marker_type = 'epilogue'
             elif lower.startswith('arc'):
                 marker_type = 'arc'
