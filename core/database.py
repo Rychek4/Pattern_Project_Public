@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from core.logger import log_info, log_success, log_error, log_config, log_section
 
 # Schema version for migrations
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 
 # SQL schema definition
 SCHEMA_SQL = """
@@ -206,6 +206,7 @@ CREATE TABLE IF NOT EXISTS reading_sessions (
     current_chapter INTEGER DEFAULT 0,
     current_arc INTEGER DEFAULT 0,
     chapters_read JSON DEFAULT '[]',
+    observations_json TEXT DEFAULT '[]',
     started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_read_at TIMESTAMP,
     completed_at TIMESTAMP
@@ -786,6 +787,7 @@ CREATE TABLE IF NOT EXISTS reading_sessions (
     current_chapter INTEGER DEFAULT 0,
     current_arc INTEGER DEFAULT 0,
     chapters_read JSON DEFAULT '[]',
+    observations_json TEXT DEFAULT '[]',
 
     -- Timestamps
     started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -794,6 +796,11 @@ CREATE TABLE IF NOT EXISTS reading_sessions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_reading_sessions_status ON reading_sessions(status);
+"""
+
+# Migration SQL for v19 -> v20 (add observations persistence for novel reading resume)
+MIGRATION_V20_SQL = """
+ALTER TABLE reading_sessions ADD COLUMN observations_json TEXT DEFAULT '[]';
 """
 
 
@@ -985,6 +992,10 @@ class Database:
             if from_version < 19:
                 log_config("Applying migration", "v18 → v19 (add reading_sessions table for novel reading)", indent=1)
                 conn.executescript(MIGRATION_V19_SQL)
+
+            if from_version < 20:
+                log_config("Applying migration", "v19 → v20 (add observations persistence for novel reading)", indent=1)
+                conn.executescript(MIGRATION_V20_SQL)
 
             # Record new version
             conn.execute(

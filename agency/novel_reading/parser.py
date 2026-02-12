@@ -131,10 +131,10 @@ class BookStructure:
 
 # Arc-level patterns (containers): Prologue, Arc N, Part N, Book N
 ARC_PATTERNS = [
-    # "Prologue" on its own line
-    re.compile(r'^(Prologue)\s*$', re.IGNORECASE | re.MULTILINE),
-    # "Epilogue" on its own line
-    re.compile(r'^(Epilogue)\s*$', re.IGNORECASE | re.MULTILINE),
+    # "Prologue" or "Prologue: Title"
+    re.compile(r'^(Prologue(?:\s*[:\-–—]\s*.+)?)\s*$', re.IGNORECASE | re.MULTILINE),
+    # "Epilogue" or "Epilogue: Title"
+    re.compile(r'^(Epilogue(?:\s*[:\-–—]\s*.+)?)\s*$', re.IGNORECASE | re.MULTILINE),
     # "Arc 1", "Arc 1: Title", "ARC ONE"
     re.compile(r'^(Arc\s+\w+(?:\s*[:\-–—]\s*.+)?)\s*$', re.IGNORECASE | re.MULTILINE),
     # "Part 1", "Part One", "PART I: Title"
@@ -147,8 +147,19 @@ ARC_PATTERNS = [
 CHAPTER_PATTERNS = [
     # "Chapter 1", "Chapter One", "CHAPTER 1: Title"
     re.compile(r'^(Chapter\s+\w+(?:\s*[:\-–—]\s*.+)?)\s*$', re.IGNORECASE | re.MULTILINE),
-    # Just a number on its own line (with blank lines around it)
-    re.compile(r'(?:^|\n\n)\s*(\d{1,3})\s*(?:\n\n)', re.MULTILINE),
+    # "Interlude", "Interlude: Character Name - Title"
+    re.compile(r'^(Interlude(?:\s*[:\-–—]\s*.+)?)\s*$', re.IGNORECASE | re.MULTILINE),
+]
+
+# Bare number fallback — only used when primary patterns find nothing
+_BARE_NUMBER_PATTERN = re.compile(r'(?:^|\n\n)\s*(\d{1,3})\s*(?:\n\n)', re.MULTILINE)
+
+# Back-matter patterns — mark end of readable content
+BACKMATTER_PATTERNS = [
+    re.compile(r'^(Glossary(?:\s*[:\-–—]\s*.+)?)\s*$', re.IGNORECASE | re.MULTILINE),
+    re.compile(r'^(Appendix(?:\s*[:\-–—]\s*.+)?)\s*$', re.IGNORECASE | re.MULTILINE),
+    re.compile(r'^(Acknowledge?ments?(?:\s*[:\-–—]\s*.+)?)\s*$', re.IGNORECASE | re.MULTILINE),
+    re.compile(r'^(About the Author)\s*$', re.IGNORECASE | re.MULTILINE),
 ]
 
 
@@ -195,15 +206,32 @@ def parse_book(filepath: Path) -> BookStructure:
     # Second: detect chapters
     chapter_markers = _detect_chapter_markers(text)
 
+    # Inject Prologue/Epilogue as reading units if not already captured
+    for pos, arc_title, marker_type in arc_markers:
+        if marker_type in ('prologue', 'epilogue'):
+            is_duplicate = any(abs(pos - cp) < 50 for cp, _ in chapter_markers)
+            if not is_duplicate:
+                chapter_markers.append((pos, arc_title))
+    chapter_markers.sort(key=lambda x: x[0])
+
+    # Detect back-matter to cap the last chapter's range
+    backmatter_markers = _detect_backmatter_markers(text)
+    last_chapter_pos = chapter_markers[-1][0] if chapter_markers else 0
+    content_end = len(text)
+    for bm_pos, _ in backmatter_markers:
+        if bm_pos > last_chapter_pos:
+            content_end = bm_pos
+            break
+
     if chapter_markers:
         # Build chapters from detected markers
-        _build_chapters_from_markers(structure, chapter_markers, arc_markers)
+        _build_chapters_from_markers(structure, chapter_markers, arc_markers, content_end)
         structure.detection_method = "pattern: chapter markers"
         if arc_markers:
             structure.detection_method += f" + {len(arc_markers)} arc(s)"
     else:
         # Fallback: fixed-size chunking
-        _build_chapters_from_chunking(structure)
+        _build_chapters_from_chunking(structure, content_end=content_end)
         structure.detection_method = "fixed-size fallback (~4000 tokens per segment)"
 
     log_info(
@@ -268,6 +296,13 @@ def _detect_chapter_markers(text: str) -> List[Tuple[int, str]]:
             pos = match.start()
             markers.append((pos, raw_title))
 
+    # Only use bare-number fallback if primary patterns found nothing
+    if not markers:
+        for match in _BARE_NUMBER_PATTERN.finditer(text):
+            raw_title = match.group(1).strip()
+            pos = match.start()
+            markers.append((pos, raw_title))
+
     # Sort by position and deduplicate (overlapping patterns)
     markers.sort(key=lambda x: x[0])
 
@@ -280,10 +315,26 @@ def _detect_chapter_markers(text: str) -> List[Tuple[int, str]]:
     return deduped
 
 
+def _detect_backmatter_markers(text: str) -> List[Tuple[int, str]]:
+    """
+    Detect back-matter markers (Glossary, Appendix, etc.).
+
+    Returns:
+        List of (position, raw_title) tuples, sorted by position.
+    """
+    markers = []
+    for pattern in BACKMATTER_PATTERNS:
+        for match in pattern.finditer(text):
+            markers.append((match.start(), match.group(1).strip()))
+    markers.sort(key=lambda x: x[0])
+    return markers
+
+
 def _build_chapters_from_markers(
     structure: BookStructure,
     chapter_markers: List[Tuple[int, str]],
-    arc_markers: List[Tuple[int, str, str]]
+    arc_markers: List[Tuple[int, str, str]],
+    content_end: Optional[int] = None,
 ) -> None:
     """
     Build Chapter and Arc objects from detected markers.
@@ -292,6 +343,7 @@ def _build_chapters_from_markers(
     """
     text = structure.full_text
     text_len = len(text)
+    readable_end = content_end if content_end is not None else text_len
 
     # Build arc objects first
     arcs = []
@@ -319,7 +371,7 @@ def _build_chapters_from_markers(
             # the marker line to exclude the header
             end_pos = chapter_markers[i + 1][0]
         else:
-            end_pos = text_len
+            end_pos = readable_end
 
         # Find the actual content start (skip past the chapter title line)
         content_start = text.find('\n', pos)
@@ -381,7 +433,8 @@ def _build_chapters_from_markers(
 
 def _build_chapters_from_chunking(
     structure: BookStructure,
-    target_tokens: int = 4000
+    target_tokens: int = 4000,
+    content_end: Optional[int] = None,
 ) -> None:
     """
     Fall back to fixed-size chunking when no chapter markers are detected.
@@ -390,6 +443,8 @@ def _build_chapters_from_chunking(
     mid-sentence.
     """
     text = structure.full_text
+    if content_end is not None:
+        text = text[:content_end]
     target_chars = target_tokens * 4  # Rough char estimate
 
     # Split into paragraphs

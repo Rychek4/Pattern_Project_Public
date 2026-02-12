@@ -13,6 +13,7 @@ The orchestrator manages:
 """
 
 import json
+import re
 from datetime import datetime
 from typing import List, Optional, Tuple, Dict, Any
 from pathlib import Path
@@ -179,6 +180,48 @@ class ReadingSession:
         )
         log_info(f"Reading session #{self.session_id} abandoned", prefix="📖")
 
+    @db_retry()
+    def save_observations(self, observations: List[LiteraryObservation]) -> None:
+        """Persist observation tracker state for resume capability."""
+        db = get_database()
+        obs_data = [
+            {
+                "category": o.category,
+                "importance": o.importance,
+                "observation": o.observation,
+                "source_chapter": o.source_chapter,
+                "source_arc": o.source_arc,
+            }
+            for o in observations
+        ]
+        db.execute(
+            "UPDATE reading_sessions SET observations_json = ? WHERE id = ?",
+            (json.dumps(obs_data), self.session_id)
+        )
+
+    @db_retry()
+    def load_observations(self) -> List[LiteraryObservation]:
+        """Load persisted observations for resume."""
+        db = get_database()
+        result = db.execute(
+            "SELECT observations_json FROM reading_sessions WHERE id = ?",
+            (self.session_id,),
+            fetch=True
+        )
+        if not result or not result[0].get("observations_json"):
+            return []
+        obs_data = json.loads(result[0]["observations_json"])
+        return [
+            LiteraryObservation(
+                category=o["category"],
+                importance=o["importance"],
+                observation=o["observation"],
+                source_chapter=o.get("source_chapter"),
+                source_arc=o.get("source_arc"),
+            )
+            for o in obs_data
+        ]
+
 
 # =============================================================================
 # IN-MEMORY OBSERVATION TRACKER
@@ -285,6 +328,37 @@ def _store_observations_as_memories(
         prefix="📖"
     )
     return stored
+
+
+def _split_chapter_text(text: str, max_tokens: int) -> List[str]:
+    """
+    Split chapter text into segments at paragraph boundaries if it exceeds
+    the token budget. Returns a list of text segments.
+    """
+    estimated_tokens = len(text) // 4
+    if estimated_tokens <= max_tokens:
+        return [text]
+
+    target_chars = max_tokens * 4
+    paragraphs = re.split(r'\n\s*\n', text)
+
+    segments = []
+    current_paragraphs = []
+    current_chars = 0
+
+    for para in paragraphs:
+        para_len = len(para) + 2  # +2 for the split delimiter
+        if current_chars + para_len > target_chars and current_paragraphs:
+            segments.append('\n\n'.join(current_paragraphs))
+            current_paragraphs = []
+            current_chars = 0
+        current_paragraphs.append(para)
+        current_chars += para_len
+
+    if current_paragraphs:
+        segments.append('\n\n'.join(current_paragraphs))
+
+    return segments
 
 
 def open_book(filepath: Path) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
@@ -397,16 +471,43 @@ def read_next_chapter() -> Tuple[bool, str, Optional[Dict[str, Any]]]:
         prefix="📖"
     )
 
-    # Run chapter extraction
-    extraction_result = extract_chapter(
-        book_title=_active_book.title,
-        chapter_number=next_chapter_num,
-        chapter_title=chapter.title,
-        chapter_text=chapter_text,
-        arc_info=arc_info,
-        chapters_read_so_far=chapters_read_str,
-        previous_observations=_observation_tracker.get_all(),
-    )
+    # Split chapter if it exceeds token budget
+    from config import NOVEL_CHAPTER_MAX_TOKENS
+    segments = _split_chapter_text(chapter_text, NOVEL_CHAPTER_MAX_TOKENS)
+
+    if len(segments) > 1:
+        log_info(
+            f"Chapter {next_chapter_num} exceeds token budget — "
+            f"splitting into {len(segments)} segments",
+            prefix="📖"
+        )
+
+    # Run extraction across all segments
+    all_observations = []
+    any_extraction_failed = False
+
+    for seg_idx, segment in enumerate(segments):
+        seg_label = (
+            f" (segment {seg_idx + 1}/{len(segments)})"
+            if len(segments) > 1 else ""
+        )
+        extraction_result = extract_chapter(
+            book_title=_active_book.title,
+            chapter_number=next_chapter_num,
+            chapter_title=chapter.title + seg_label,
+            chapter_text=segment,
+            arc_info=arc_info,
+            chapters_read_so_far=chapters_read_str,
+            previous_observations=_observation_tracker.get_all() + all_observations,
+        )
+        if extraction_result.success:
+            all_observations.extend(extraction_result.observations)
+        else:
+            any_extraction_failed = True
+            log_warning(
+                f"Extraction failed for chapter {next_chapter_num}{seg_label}: "
+                f"{extraction_result.error}"
+            )
 
     result_data = {
         "chapter_number": next_chapter_num,
@@ -414,28 +515,31 @@ def read_next_chapter() -> Tuple[bool, str, Optional[Dict[str, Any]]]:
         "word_count": chapter.word_count,
         "token_estimate": chapter.token_estimate,
         "arc": arc_info,
-        "extraction_success": extraction_result.success,
-        "observations_extracted": len(extraction_result.observations),
+        "extraction_success": not any_extraction_failed,
+        "observations_extracted": len(all_observations),
     }
 
-    if extraction_result.success:
+    if len(segments) > 1:
+        result_data["segments"] = len(segments)
+
+    if all_observations:
         # Track observations
-        _observation_tracker.add(extraction_result.observations)
+        _observation_tracker.add(all_observations)
 
         # Store as memories
         stored = _store_observations_as_memories(
-            extraction_result.observations,
+            all_observations,
             _active_book.title,
         )
         result_data["memories_stored"] = stored
 
         # Categorize what was found
-        categories_found = set(o.category for o in extraction_result.observations)
+        categories_found = set(o.category for o in all_observations)
         result_data["categories"] = sorted(categories_found)
-    else:
+
+    if any_extraction_failed and not all_observations:
         log_warning(
-            f"Extraction failed for chapter {next_chapter_num}: "
-            f"{extraction_result.error}"
+            f"All extraction segments failed for chapter {next_chapter_num}"
         )
 
     # Update progress
@@ -478,6 +582,9 @@ def read_next_chapter() -> Tuple[bool, str, Optional[Dict[str, Any]]]:
                     "observations": len(reflection.observations),
                     "memories_stored": stored,
                 }
+
+    # Persist observation tracker for resume capability
+    _active_session.save_observations(_observation_tracker.get_all())
 
     # Check if all chapters are now read
     is_last_chapter = next_chapter_num >= _active_book.total_chapters
@@ -701,11 +808,15 @@ def resume_reading(filepath: Path) -> Tuple[bool, str, Optional[Dict[str, Any]]]
     _active_book = structure
     _active_session = session
     _observation_tracker = ObservationTracker()
-    # Note: we lose the in-memory observations from the previous session.
-    # The memories are already stored in the vector store, but the observation
-    # tracker starts fresh. This means the extraction context for remaining
-    # chapters won't have the full history. This is acceptable — it's similar
-    # to a human picking up a book after a break.
+
+    # Reload persisted observations from the database
+    saved_observations = session.load_observations()
+    if saved_observations:
+        _observation_tracker.add(saved_observations)
+        log_info(
+            f"Restored {len(saved_observations)} observations from previous session",
+            prefix="📖"
+        )
 
     chapters_read = info["chapters_read"]
     return (
