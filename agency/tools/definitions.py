@@ -93,6 +93,15 @@ def get_tool_definitions(is_pulse: bool = False) -> List[Dict[str, Any]]:
     if config.DELEGATION_ENABLED:
         tools.append(DELEGATE_TASK_TOOL)
 
+    # Prepaid card / spending tools (if enabled)
+    if getattr(config, 'PREPAID_CARD_ENABLED', False):
+        tools.append(CHECK_CARD_BALANCE_TOOL)
+        tools.append(INITIATE_PURCHASE_TOOL)
+        tools.append(COMPLETE_PURCHASE_TOOL)
+        tools.append(DISCARD_PURCHASE_TOOL)
+        tools.append(QUERY_SPENDING_TOOL)
+        tools.append(STORE_MANAGED_ACCOUNT_TOOL)
+
     # Novel reading tools (if enabled)
     if getattr(config, 'NOVEL_READING_ENABLED', False):
         tools.append(OPEN_BOOK_TOOL)
@@ -1308,6 +1317,217 @@ every time for the same service.""",
             }
         },
         "required": ["task"]
+    }
+}
+
+
+# =============================================================================
+# PREPAID CARD / SPENDING TOOLS
+# =============================================================================
+# These tools give the AI the ability to check a prepaid Visa gift card balance,
+# initiate two-phase purchases via browser delegation, track spending, and
+# manage dynamically-created account credentials.
+
+CHECK_CARD_BALANCE_TOOL: Dict[str, Any] = {
+    "name": "check_card_balance",
+    "description": """Check the current balance on the prepaid Visa gift card.
+
+Delegates to the browser agent to visit vanillagift.com, enter the card
+details, and read back the available balance.
+
+Use when:
+- Before initiating a purchase to confirm sufficient funds
+- After a completed purchase to verify the charge went through
+- When the user asks about remaining card balance
+
+The browser agent handles the entire interaction automatically.""",
+    "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+    }
+}
+
+INITIATE_PURCHASE_TOOL: Dict[str, Any] = {
+    "name": "initiate_purchase",
+    "description": """Begin a purchase using the prepaid Visa gift card. TWO-PHASE FLOW.
+
+PHASE 1 (this call): Delegates to the browser agent to:
+1. Navigate to the merchant
+2. Add items to cart
+3. Proceed to checkout
+4. Enter shipping/billing info if needed
+5. Report back the order summary WITHOUT submitting payment
+
+You will receive the checkout details (items, total, fees, taxes) and a
+spending_log_id. Review the details and decide whether to approve or discard.
+
+PHASE 2 (separate call): If approved, call complete_purchase with the
+spending_log_id to delegate payment submission. If not, call discard_purchase.
+
+Be specific in your instructions — include exact URLs, item names,
+quantities, and any options to select.""",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "merchant_url": {
+                "type": "string",
+                "description": "URL of the merchant or product page"
+            },
+            "instructions": {
+                "type": "string",
+                "description": "Detailed step-by-step instructions for the browser agent: what to add to cart, quantities, options, etc."
+            },
+            "category": {
+                "type": "string",
+                "enum": ["physical", "digital", "subscription", "account"],
+                "description": "Type of purchase for tracking (default: physical)"
+            }
+        },
+        "required": ["merchant_url", "instructions"]
+    }
+}
+
+COMPLETE_PURCHASE_TOOL: Dict[str, Any] = {
+    "name": "complete_purchase",
+    "description": """Complete a previously initiated purchase (Phase 2).
+
+Call this ONLY after reviewing the checkout details from initiate_purchase
+and deciding to proceed. The browser agent will:
+1. Return to the checkout page (session cookies persist from Phase 1)
+2. Enter the payment card details
+3. Submit the order
+4. Report confirmation details (order number, confirmation, etc.)
+
+After completion, remember to store any activation keys (via query_spending
+with the spending_log_id) or new account credentials (via store_managed_account)
+that the delegate reports back.""",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "spending_log_id": {
+                "type": "integer",
+                "description": "The spending log entry ID from initiate_purchase"
+            },
+            "payment_instructions": {
+                "type": "string",
+                "description": "Optional additional instructions for the payment step (e.g., 'select PayPal', 'use guest checkout')"
+            }
+        },
+        "required": ["spending_log_id"]
+    }
+}
+
+DISCARD_PURCHASE_TOOL: Dict[str, Any] = {
+    "name": "discard_purchase",
+    "description": """Discard a previously initiated purchase without completing it.
+
+Use when the checkout details from initiate_purchase are unsatisfactory:
+wrong price, unexpected fees, wrong item, out of stock, etc.
+
+Marks the spending log entry as 'discarded'. No payment is submitted.""",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "spending_log_id": {
+                "type": "integer",
+                "description": "The spending log entry ID to discard"
+            },
+            "reason": {
+                "type": "string",
+                "description": "Why the purchase was discarded (logged for reference)"
+            }
+        },
+        "required": ["spending_log_id"]
+    }
+}
+
+QUERY_SPENDING_TOOL: Dict[str, Any] = {
+    "name": "query_spending",
+    "description": """Query the spending log for purchase history and digital product details.
+
+Dual purpose — financial ledger and digital asset registry:
+1. Financial tracking: View all purchases, filter by status or merchant, see totals
+2. Digital asset lookup: Retrieve activation keys, product URLs, license info
+
+Use when:
+- Checking purchase history ("What have I bought?")
+- Looking up an activation key or login for a previous purchase
+- Reviewing spending totals or remaining budget
+- Checking status of a pending purchase""",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "spending_log_id": {
+                "type": "integer",
+                "description": "Get a specific entry by ID (overrides other filters)"
+            },
+            "status": {
+                "type": "string",
+                "enum": ["pending", "approved", "completed", "discarded", "failed"],
+                "description": "Filter by status"
+            },
+            "merchant": {
+                "type": "string",
+                "description": "Filter by merchant name (partial match)"
+            },
+            "include_keys": {
+                "type": "boolean",
+                "description": "Include activation keys and product URLs in results (default: true)"
+            }
+        },
+        "required": []
+    }
+}
+
+STORE_MANAGED_ACCOUNT_TOOL: Dict[str, Any] = {
+    "name": "store_managed_account",
+    "description": """Store credentials for an account created during a delegated purchase.
+
+When a purchase involves creating a new account (signing up for a service),
+the delegate reports the credentials back. Use this tool to store them so the
+delegate can retrieve them later via get_credentials — seamlessly, just like
+static credentials.
+
+After storing, the delegate can call get_credentials('service_name') in
+future tasks and automatically receive these credentials.
+
+Use when:
+- A delegate reports back newly created account credentials
+- You need to record login details for a service purchased with the card""",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "service": {
+                "type": "string",
+                "description": "Service name identifier (e.g., 'spotify', 'netflix'). Used by delegate in get_credentials()."
+            },
+            "login": {
+                "type": "string",
+                "description": "Username or email for the account"
+            },
+            "password": {
+                "type": "string",
+                "description": "Password for the account"
+            },
+            "pin": {
+                "type": "string",
+                "description": "Optional PIN if the service uses one"
+            },
+            "login_url": {
+                "type": "string",
+                "description": "Login page URL for the service"
+            },
+            "email_used": {
+                "type": "string",
+                "description": "Email address used during registration"
+            },
+            "spending_log_id": {
+                "type": "integer",
+                "description": "Link to the spending log entry that created this account"
+            }
+        },
+        "required": ["service", "login", "password"]
     }
 }
 
