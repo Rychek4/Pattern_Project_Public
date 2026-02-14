@@ -1302,9 +1302,9 @@ every time for the same service.""",
             },
             "max_rounds": {
                 "type": "integer",
-                "description": "Optional max continuation rounds (1-15, default 15). Browser tasks typically need 5-10 rounds.",
+                "description": "Optional max continuation rounds (1-20, default 20). Browser tasks typically need 5-10 rounds.",
                 "minimum": 1,
-                "maximum": 15
+                "maximum": 20
             }
         },
         "required": ["task"]
