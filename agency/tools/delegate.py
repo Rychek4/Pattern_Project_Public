@@ -214,12 +214,12 @@ def run_delegated_task(
     """
     from llm.router import TaskType, get_llm_router
 
-    # Resolve max rounds — hard cap at 15 for browser workflows
+    # Resolve max rounds — hard cap at 20 for browser workflows
     config_max = config.DELEGATION_MAX_ROUNDS
     if max_rounds is not None:
-        max_rounds = min(max_rounds, 15)  # Hard cap at 15
+        max_rounds = min(max_rounds, 20)  # Hard cap at 20
     else:
-        max_rounds = min(config_max, 15)  # Also cap the config default
+        max_rounds = min(config_max, 20)  # Also cap the config default
 
     # Build the user message
     user_content = task

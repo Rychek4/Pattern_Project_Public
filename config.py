@@ -424,7 +424,7 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 # =============================================================================
 # AI COMMAND SYSTEM CONFIGURATION
 # =============================================================================
-COMMAND_MAX_PASSES = 15         # Maximum LLM calls per user message (safety cap; typical queries use 1-3)
+COMMAND_MAX_PASSES = 40         # Maximum LLM calls per user message (safety cap; typical queries use 1-3)
 COMMAND_SEARCH_LIMIT = 10       # Default memory search result count
 COMMAND_SEARCH_MIN_SCORE = 0.3  # Minimum relevance score for search results
 
@@ -437,7 +437,7 @@ COMMAND_SEARCH_MIN_SCORE = 0.3  # Minimum relevance score for search results
 # multi-step work to a cheaper, faster model.
 DELEGATION_ENABLED = True
 DELEGATION_MODEL = os.getenv("DELEGATION_MODEL", "claude-haiku-4-5-20251001")
-DELEGATION_MAX_ROUNDS = 15          # Max continuation passes per delegated task (browser workflows need headroom)
+DELEGATION_MAX_ROUNDS = 20          # Max continuation passes per delegated task (browser workflows need headroom)
 DELEGATION_MAX_TOKENS = 4096        # Max output tokens per sub-agent response
 DELEGATION_TEMPERATURE = 0.2        # Low temp for deterministic tool execution; 0.2 preserves error-recovery variance
 
