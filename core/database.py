@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from core.logger import log_info, log_success, log_error, log_config, log_section
 
 # Schema version for migrations
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 
 # SQL schema definition
 SCHEMA_SQL = """
@@ -212,6 +212,55 @@ CREATE TABLE IF NOT EXISTS reading_sessions (
     completed_at TIMESTAMP
 );
 
+-- Managed accounts: dynamically created credentials accessible by delegates
+-- Created by Isaac when the delegate signs up for a service during a purchase.
+-- The delegate reads these via get_credentials() alongside static credentials.toml.
+CREATE TABLE IF NOT EXISTS managed_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    service TEXT NOT NULL UNIQUE,
+    login TEXT,
+    password TEXT,
+    pin TEXT,
+    email_used TEXT,
+    login_url TEXT,
+    recovery_info TEXT,
+    notes TEXT,
+    spending_log_id INTEGER REFERENCES spending_log(id)
+);
+
+-- Spending log: tracks purchase attempts and completed transactions
+-- Doubles as a digital asset registry for activation keys, product URLs, etc.
+CREATE TABLE IF NOT EXISTS spending_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    merchant TEXT NOT NULL,
+    description TEXT NOT NULL,
+    amount_cents INTEGER,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'approved', 'completed', 'discarded', 'failed')),
+    category TEXT DEFAULT 'physical'
+        CHECK (category IN ('physical', 'digital', 'subscription', 'account')),
+
+    -- Phase 1 delegate report (JSON blob: checkout summary)
+    delegate_report TEXT,
+
+    -- Digital product fields (populated after completion)
+    activation_key TEXT,
+    product_url TEXT,
+    license_info TEXT,
+
+    -- Financial snapshot
+    card_last_four TEXT,
+    balance_before_cents INTEGER,
+    balance_after_cents INTEGER,
+
+    -- Link to account created by this purchase
+    managed_account_id INTEGER REFERENCES managed_accounts(id),
+
+    notes TEXT
+);
+
 -- Indexes for efficient queries
 CREATE INDEX IF NOT EXISTS idx_conversations_session ON conversations(session_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_unprocessed ON conversations(processed_for_memory) WHERE processed_for_memory = FALSE;
@@ -236,6 +285,10 @@ CREATE INDEX IF NOT EXISTS idx_thoughts_history_archived ON active_thoughts_hist
 CREATE INDEX IF NOT EXISTS idx_growth_threads_stage ON growth_threads(stage);
 CREATE INDEX IF NOT EXISTS idx_growth_threads_slug ON growth_threads(slug);
 CREATE INDEX IF NOT EXISTS idx_reading_sessions_status ON reading_sessions(status);
+CREATE INDEX IF NOT EXISTS idx_spending_log_status ON spending_log(status);
+CREATE INDEX IF NOT EXISTS idx_spending_log_created ON spending_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_spending_log_merchant ON spending_log(merchant);
+CREATE INDEX IF NOT EXISTS idx_managed_accounts_service ON managed_accounts(service);
 """
 
 # Migration SQL for v1 -> v2
@@ -804,6 +857,50 @@ MIGRATION_V20_SQL = """
 ALTER TABLE reading_sessions ADD COLUMN observations_json TEXT DEFAULT '[]';
 """
 
+MIGRATION_V21_SQL = """
+-- Managed accounts: dynamically created credentials accessible by delegates
+CREATE TABLE IF NOT EXISTS managed_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    service TEXT NOT NULL UNIQUE,
+    login TEXT,
+    password TEXT,
+    pin TEXT,
+    email_used TEXT,
+    login_url TEXT,
+    recovery_info TEXT,
+    notes TEXT,
+    spending_log_id INTEGER REFERENCES spending_log(id)
+);
+
+-- Spending log: tracks purchase attempts and completed transactions
+CREATE TABLE IF NOT EXISTS spending_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    merchant TEXT NOT NULL,
+    description TEXT NOT NULL,
+    amount_cents INTEGER,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'approved', 'completed', 'discarded', 'failed')),
+    category TEXT DEFAULT 'physical'
+        CHECK (category IN ('physical', 'digital', 'subscription', 'account')),
+    delegate_report TEXT,
+    activation_key TEXT,
+    product_url TEXT,
+    license_info TEXT,
+    card_last_four TEXT,
+    balance_before_cents INTEGER,
+    balance_after_cents INTEGER,
+    managed_account_id INTEGER REFERENCES managed_accounts(id),
+    notes TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_spending_log_status ON spending_log(status);
+CREATE INDEX IF NOT EXISTS idx_spending_log_created ON spending_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_spending_log_merchant ON spending_log(merchant);
+CREATE INDEX IF NOT EXISTS idx_managed_accounts_service ON managed_accounts(service);
+"""
+
 
 class Database:
     """SQLite database manager with WAL mode and thread-safe connections."""
@@ -997,6 +1094,10 @@ class Database:
             if from_version < 20:
                 log_config("Applying migration", "v19 → v20 (add observations persistence for novel reading)", indent=1)
                 conn.executescript(MIGRATION_V20_SQL)
+
+            if from_version < 21:
+                log_config("Applying migration", "v20 → v21 (add spending_log and managed_accounts tables)", indent=1)
+                conn.executescript(MIGRATION_V21_SQL)
 
             # Record new version
             conn.execute(
