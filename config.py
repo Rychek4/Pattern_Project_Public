@@ -332,7 +332,7 @@ HTTP_PORT = int(os.getenv("HTTP_PORT", "5000"))
 # =============================================================================
 # SUBPROCESS CONFIGURATION
 # =============================================================================
-SUBPROCESS_AUDIO_ENABLED = False  # Placeholder
+SUBPROCESS_AUDIO_ENABLED = False  # Legacy - superseded by voice pipeline
 SUBPROCESS_OVERLAY_ENABLED = False  # Placeholder
 SUBPROCESS_HEALTH_CHECK_INTERVAL = 30
 SUBPROCESS_MAX_RESTART_ATTEMPTS = 3
@@ -340,7 +340,7 @@ SUBPROCESS_MAX_RESTART_ATTEMPTS = 3
 # =============================================================================
 # ELEVENLABS TTS CONFIGURATION
 # =============================================================================
-# ElevenLabs Text-to-Speech integration for GUI voice output.
+# ElevenLabs Text-to-Speech integration for voice output.
 # Get your API key from: https://elevenlabs.io/
 #
 # Voice IDs can be found at: https://elevenlabs.io/voice-library
@@ -348,9 +348,21 @@ SUBPROCESS_MAX_RESTART_ATTEMPTS = 3
 ELEVENLABS_API_KEY = os.getenv("Eleven_Labs_API", "")
 ELEVENLABS_DEFAULT_VOICE_ID = "MKHH3pSZhHPPzypDhMoU"  # Default voice
 ELEVENLABS_MODEL = "eleven_turbo_v2_5"  # TTS model (faster, 2x tokens)
-ELEVENLABS_AUDIO_PORT = 5003  # Port for audio player subprocess
+ELEVENLABS_AUDIO_PORT = 5003  # Legacy - kept for backward compat
 
-# User settings file for TTS preferences (enabled, voice_id)
+# =============================================================================
+# VOICE PIPELINE CONFIGURATION (ESP32 + STT + TTS)
+# =============================================================================
+# faster-whisper STT model sizes: tiny (~75MB), base (~150MB), small (~500MB)
+WHISPER_MODEL_DEFAULT = os.getenv("WHISPER_MODEL", "small")
+
+# Audio format contract for ESP32 <-> Server
+VOICE_STT_SAMPLE_RATE = 16000   # ESP32 mic records at 16kHz (Whisper native)
+VOICE_TTS_SAMPLE_RATE = 24000   # ElevenLabs pcm_24000 (avoids MP3 decode on ESP32)
+VOICE_SAMPLE_WIDTH = 2          # 16-bit samples
+VOICE_CHANNELS = 1              # Mono
+
+# User settings file for voice preferences
 USER_SETTINGS_PATH = DATA_DIR / "user_settings.json"
 
 # =============================================================================

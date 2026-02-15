@@ -177,6 +177,14 @@ def initialize_system() -> bool:
         if not webcam_ok and config.VISUAL_WEBCAM_ENABLED:
             log_warning("Webcam capture unavailable (OpenCV not installed)")
 
+    # Load STT model if voice pipeline is enabled
+    from core.user_settings import get_user_settings
+    voice_settings = get_user_settings()
+    if voice_settings.voice_pipeline_enabled:
+        from stt.transcriber import load_stt_model
+        if not load_stt_model(voice_settings.stt_model_size):
+            log_warning("STT model failed to load — voice STT will be unavailable")
+
     # Initialize subprocess manager and register subprocesses
     init_subprocess_manager()
     register_chat_overlay(enabled=config.SUBPROCESS_OVERLAY_ENABLED)
@@ -375,6 +383,14 @@ def stop_background_services() -> None:
         log_subsection("Reminder scheduler stopped")
     except Exception as e:
         log_error(f"Error stopping reminder scheduler: {e}")
+
+    # Unload STT model to free memory
+    try:
+        from stt.transcriber import unload_stt_model
+        unload_stt_model()
+        log_subsection("STT model unloaded")
+    except Exception as e:
+        log_error(f"Error unloading STT model: {e}")
 
     # Release webcam device if it was opened
     try:

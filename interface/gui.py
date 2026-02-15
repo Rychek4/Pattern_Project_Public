@@ -3098,23 +3098,33 @@ class SettingsDialog(QDialog):
         font_layout.addWidget(self.font_spin)
         layout.addLayout(font_layout)
 
-        # ===== TTS Settings =====
-        tts_label = QLabel("Text-to-Speech (ElevenLabs)")
-        tts_label.setStyleSheet("font-weight: bold; font-size: 14px; margin-top: 20px;")
-        layout.addWidget(tts_label)
+        # ===== Voice Pipeline Settings =====
+        voice_label = QLabel("Voice Pipeline")
+        voice_label.setStyleSheet("font-weight: bold; font-size: 14px; margin-top: 20px;")
+        layout.addWidget(voice_label)
 
-        # TTS enabled toggle
-        self.tts_enabled_check = QCheckBox("Enable TTS for assistant responses")
-        self.tts_enabled_check.setChecked(self._user_settings.tts_enabled)
+        # Master toggle
+        self.pipeline_enabled_check = QCheckBox("Enable voice pipeline")
+        self.pipeline_enabled_check.setChecked(self._user_settings.voice_pipeline_enabled)
+        self.pipeline_enabled_check.toggled.connect(self._on_pipeline_toggled)
+        layout.addWidget(self.pipeline_enabled_check)
+
+        # TTS sub-toggle
+        self.tts_enabled_check = QCheckBox("Enable TTS (Isaac speaks)")
+        self.tts_enabled_check.setChecked(self._user_settings._settings.voice.tts_enabled)
         layout.addWidget(self.tts_enabled_check)
+
+        # STT sub-toggle
+        self.stt_enabled_check = QCheckBox("Enable STT (Push-to-Talk)")
+        self.stt_enabled_check.setChecked(self._user_settings._settings.voice.stt_enabled)
+        layout.addWidget(self.stt_enabled_check)
 
         # Voice ID input
         voice_layout = QHBoxLayout()
         voice_layout.addWidget(QLabel("Voice ID:"))
         self.voice_id_input = QLineEdit()
         self.voice_id_input.setPlaceholderText("Leave blank for default voice")
-        # Show current voice ID if custom, otherwise leave blank
-        current_voice = self._user_settings._settings.tts.voice_id
+        current_voice = self._user_settings._settings.voice.voice_id
         if current_voice:
             self.voice_id_input.setText(current_voice)
         voice_layout.addWidget(self.voice_id_input)
@@ -3124,6 +3134,25 @@ class SettingsDialog(QDialog):
         help_label = QLabel("Find voice IDs at elevenlabs.io/voice-library")
         help_label.setStyleSheet("color: gray; font-size: 11px;")
         layout.addWidget(help_label)
+
+        # STT Model size
+        stt_layout = QHBoxLayout()
+        stt_layout.addWidget(QLabel("STT Model:"))
+        self.stt_model_combo = QComboBox()
+        self.stt_model_combo.addItems(["tiny", "base", "small"])
+        current_model = self._user_settings.stt_model_size
+        idx = self.stt_model_combo.findText(current_model)
+        if idx >= 0:
+            self.stt_model_combo.setCurrentIndex(idx)
+        stt_layout.addWidget(self.stt_model_combo)
+        layout.addLayout(stt_layout)
+
+        stt_help = QLabel("tiny ~75MB, base ~150MB, small ~500MB RAM")
+        stt_help.setStyleSheet("color: gray; font-size: 11px;")
+        layout.addWidget(stt_help)
+
+        # Set initial enabled state of sub-controls
+        self._on_pipeline_toggled(self.pipeline_enabled_check.isChecked())
 
         # Spacer
         layout.addSpacing(20)
@@ -3141,6 +3170,13 @@ class SettingsDialog(QDialog):
 
         layout.addLayout(button_layout)
 
+    def _on_pipeline_toggled(self, checked: bool):
+        """Enable/disable sub-controls when master toggle changes."""
+        self.tts_enabled_check.setEnabled(checked)
+        self.stt_enabled_check.setEnabled(checked)
+        self.voice_id_input.setEnabled(checked)
+        self.stt_model_combo.setEnabled(checked)
+
     def _apply_settings(self):
         """Apply settings."""
         # Font size
@@ -3151,11 +3187,18 @@ class SettingsDialog(QDialog):
             self.parent().input_field.setFont(QFont(UI_FONT_FAMILY, font_size))
             self.parent()._update_font_tooltips()
 
-        # TTS settings
+        # Voice pipeline settings
+        self._user_settings.voice_pipeline_enabled = self.pipeline_enabled_check.isChecked()
         self._user_settings.tts_enabled = self.tts_enabled_check.isChecked()
+        self._user_settings.stt_enabled = self.stt_enabled_check.isChecked()
         self._user_settings.tts_voice_id = self.voice_id_input.text().strip()
+        self._user_settings.stt_model_size = self.stt_model_combo.currentText()
 
-        log_info(f"Settings applied - TTS: {self._user_settings.tts_enabled}, Voice: {self._user_settings.tts_voice_id}", prefix="⚙️")
+        log_info(
+            f"Settings applied - Pipeline: {self._user_settings.voice_pipeline_enabled}, "
+            f"TTS: {self._user_settings.tts_enabled}, STT: {self._user_settings.stt_enabled}",
+            prefix="⚙️"
+        )
 
 
 # Global GUI instance
@@ -3250,6 +3293,14 @@ def run_gui():
     init_prompt_builder()
     init_system_pulse_timer()
 
+    # Load STT model if voice pipeline is enabled
+    from core.user_settings import get_user_settings as _get_voice_settings
+    _voice_cfg = _get_voice_settings()
+    if _voice_cfg.voice_pipeline_enabled:
+        from stt.transcriber import load_stt_model
+        if not load_stt_model(_voice_cfg.stt_model_size):
+            print("WARNING: STT model failed to load — voice STT will be unavailable")
+
     # Initialize Telegram gateway and listener if enabled
     if config.TELEGRAM_ENABLED:
         gateway = init_telegram_gateway()
@@ -3329,6 +3380,13 @@ def run_gui():
         shutdown_tts()
     except Exception:
         pass  # Ignore errors during shutdown
+
+    # Unload STT model to free memory
+    try:
+        from stt.transcriber import unload_stt_model
+        unload_stt_model()
+    except Exception:
+        pass
 
     return exit_code
 
