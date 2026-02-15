@@ -448,16 +448,6 @@ BROWSER_SESSIONS_DIR = DATA_DIR / "browser_sessions"   # Per-service cookie/sess
 BROWSER_CREDENTIALS_PATH = DATA_DIR / "credentials.toml"  # Read-only service credentials
 
 # =============================================================================
-# PREPAID CARD CONFIGURATION
-# =============================================================================
-# Prepaid Visa gift card spending system. Isaac can check balance, initiate
-# purchases (two-phase delegation), track spending, and manage accounts.
-# Card details are stored in credentials.toml under [visa_prepaid].
-# Balance checks use vanillagift.com via browser delegation.
-PREPAID_CARD_ENABLED = os.getenv("PREPAID_CARD_ENABLED", "false").lower() == "true"
-PREPAID_CARD_SERVICE = "visa_prepaid"  # Credential service name in credentials.toml
-
-# =============================================================================
 # NATIVE TOOL USE CONFIGURATION (DEPRECATED)
 # =============================================================================
 # Native tool use is now the ONLY supported mode. The legacy [[COMMAND]] pattern
