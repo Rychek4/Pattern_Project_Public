@@ -1,5 +1,15 @@
-"""TTS (Text-to-Speech) module."""
+"""TTS (Text-to-Speech) module — OpenAI TTS synthesis."""
 
-from tts.player import play_tts, stop_tts, is_tts_available, get_tts_player, shutdown_tts
+from tts.synthesizer import (
+    synthesize_pcm,
+    synthesize_mp3,
+    sanitize_for_tts,
+    is_synthesizer_available,
+)
 
-__all__ = ["play_tts", "stop_tts", "is_tts_available", "get_tts_player", "shutdown_tts"]
+__all__ = [
+    "synthesize_pcm",
+    "synthesize_mp3",
+    "sanitize_for_tts",
+    "is_synthesizer_available",
+]
