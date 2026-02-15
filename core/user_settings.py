@@ -16,27 +16,44 @@ from core.logger import log_info, log_warning, log_error
 
 
 @dataclass
-class TTSSettings:
-    """Text-to-speech settings."""
-    enabled: bool = False
-    voice_id: str = ""  # Empty means use default from config
+class VoiceSettings:
+    """Consolidated voice pipeline settings (TTS + STT + ESP32)."""
+    pipeline_enabled: bool = False   # Master on/off for entire voice system
+    tts_enabled: bool = True         # TTS output (sub-toggle under master)
+    stt_enabled: bool = True         # STT input  (sub-toggle under master)
+    voice_id: str = ""               # ElevenLabs voice ID (empty = default)
+    stt_model_size: str = "small"    # faster-whisper model: tiny, base, small
 
     def get_voice_id(self) -> str:
         """Get voice ID, falling back to config default if not set."""
         return self.voice_id if self.voice_id else config.ELEVENLABS_DEFAULT_VOICE_ID
 
 
+# Keep old name as alias for any external code that references it directly
+TTSSettings = VoiceSettings
+
+
 @dataclass
 class UserSettings:
     """All user-configurable settings."""
-    tts: TTSSettings = None
+    voice: VoiceSettings = None
     font_size: int = 12
     conversation_model: str = "claude-sonnet-4-5-20250929"  # Default to Sonnet for first-time users
     thinking_enabled: bool = True  # Extended thinking on by default
 
     def __post_init__(self):
-        if self.tts is None:
-            self.tts = TTSSettings()
+        if self.voice is None:
+            self.voice = VoiceSettings()
+
+    # Backward-compat alias so old code referencing settings.tts still works
+    @property
+    def tts(self) -> VoiceSettings:
+        return self.voice
+
+    @tts.setter
+    def tts(self, value):
+        if isinstance(value, VoiceSettings):
+            self.voice = value
 
 
 class UserSettingsManager:
@@ -73,17 +90,39 @@ class UserSettingsManager:
         self._initialized = True
 
     def _load(self) -> None:
-        """Load settings from disk."""
+        """Load settings from disk, migrating old format if needed."""
         try:
             if self._settings_path.exists():
                 with open(self._settings_path, 'r') as f:
                     data = json.load(f)
 
-                # Parse TTS settings
-                tts_data = data.get('tts', {})
-                self._settings.tts = TTSSettings(
-                    enabled=tts_data.get('enabled', False),
-                    voice_id=tts_data.get('voice_id', '')
+                migrated = False
+
+                # ----------------------------------------------------------
+                # Migration: old "tts" key → new "voice" key
+                # Old format:  {"tts": {"enabled": true, "voice_id": "..."}}
+                # New format:  {"voice": {"pipeline_enabled": true, ...}}
+                # ----------------------------------------------------------
+                if 'tts' in data and 'voice' not in data:
+                    old_tts = data.pop('tts', {})
+                    data['voice'] = {
+                        'pipeline_enabled': old_tts.get('enabled', False),
+                        'tts_enabled': old_tts.get('enabled', False),
+                        'stt_enabled': True,
+                        'voice_id': old_tts.get('voice_id', ''),
+                        'stt_model_size': config.WHISPER_MODEL_DEFAULT,
+                    }
+                    migrated = True
+                    log_info("Migrated legacy TTS settings → voice pipeline settings", prefix="⚙️")
+
+                # Parse voice settings
+                voice_data = data.get('voice', {})
+                self._settings.voice = VoiceSettings(
+                    pipeline_enabled=voice_data.get('pipeline_enabled', False),
+                    tts_enabled=voice_data.get('tts_enabled', True),
+                    stt_enabled=voice_data.get('stt_enabled', True),
+                    voice_id=voice_data.get('voice_id', ''),
+                    stt_model_size=voice_data.get('stt_model_size', config.WHISPER_MODEL_DEFAULT),
                 )
 
                 # Parse other settings
@@ -92,6 +131,11 @@ class UserSettingsManager:
                 self._settings.thinking_enabled = data.get('thinking_enabled', config.ANTHROPIC_THINKING_ENABLED)
 
                 log_info("User settings loaded", prefix="⚙️")
+
+                # Persist migration immediately
+                if migrated:
+                    self._save()
+
         except json.JSONDecodeError as e:
             log_warning(f"Invalid settings file, using defaults: {e}")
         except Exception as e:
@@ -102,9 +146,12 @@ class UserSettingsManager:
         with self._file_lock:
             try:
                 data = {
-                    'tts': {
-                        'enabled': self._settings.tts.enabled,
-                        'voice_id': self._settings.tts.voice_id
+                    'voice': {
+                        'pipeline_enabled': self._settings.voice.pipeline_enabled,
+                        'tts_enabled': self._settings.voice.tts_enabled,
+                        'stt_enabled': self._settings.voice.stt_enabled,
+                        'voice_id': self._settings.voice.voice_id,
+                        'stt_model_size': self._settings.voice.stt_model_size,
                     },
                     'font_size': self._settings.font_size,
                     'conversation_model': self._settings.conversation_model,
@@ -117,28 +164,67 @@ class UserSettingsManager:
             except Exception as e:
                 log_error(f"Failed to save settings: {e}")
 
+    # -----------------------------------------------------------------
+    # Voice pipeline properties
+    # -----------------------------------------------------------------
+    @property
+    def voice_pipeline_enabled(self) -> bool:
+        """Master toggle for the entire voice pipeline."""
+        return self._settings.voice.pipeline_enabled
+
+    @voice_pipeline_enabled.setter
+    def voice_pipeline_enabled(self, value: bool) -> None:
+        self._settings.voice.pipeline_enabled = value
+        self._save()
+
     @property
     def tts_enabled(self) -> bool:
-        """Check if TTS is enabled."""
-        return self._settings.tts.enabled
+        """Check if TTS is enabled (requires pipeline_enabled)."""
+        return self._settings.voice.pipeline_enabled and self._settings.voice.tts_enabled
 
     @tts_enabled.setter
     def tts_enabled(self, value: bool) -> None:
-        """Set TTS enabled state."""
-        self._settings.tts.enabled = value
+        """Set TTS sub-toggle (independent of master)."""
+        self._settings.voice.tts_enabled = value
+        self._save()
+
+    @property
+    def stt_enabled(self) -> bool:
+        """Check if STT is enabled (requires pipeline_enabled)."""
+        return self._settings.voice.pipeline_enabled and self._settings.voice.stt_enabled
+
+    @stt_enabled.setter
+    def stt_enabled(self, value: bool) -> None:
+        """Set STT sub-toggle."""
+        self._settings.voice.stt_enabled = value
         self._save()
 
     @property
     def tts_voice_id(self) -> str:
         """Get the TTS voice ID."""
-        return self._settings.tts.get_voice_id()
+        return self._settings.voice.get_voice_id()
 
     @tts_voice_id.setter
     def tts_voice_id(self, value: str) -> None:
         """Set the TTS voice ID."""
-        self._settings.tts.voice_id = value
+        self._settings.voice.voice_id = value
         self._save()
 
+    @property
+    def stt_model_size(self) -> str:
+        """Get the STT model size."""
+        return self._settings.voice.stt_model_size
+
+    @stt_model_size.setter
+    def stt_model_size(self, value: str) -> None:
+        """Set the STT model size."""
+        if value in ('tiny', 'base', 'small'):
+            self._settings.voice.stt_model_size = value
+            self._save()
+
+    # -----------------------------------------------------------------
+    # Other settings properties (unchanged)
+    # -----------------------------------------------------------------
     @property
     def font_size(self) -> int:
         """Get font size."""
@@ -175,9 +261,12 @@ class UserSettingsManager:
     def get_all(self) -> UserSettings:
         """Get a copy of all settings."""
         return UserSettings(
-            tts=TTSSettings(
-                enabled=self._settings.tts.enabled,
-                voice_id=self._settings.tts.voice_id
+            voice=VoiceSettings(
+                pipeline_enabled=self._settings.voice.pipeline_enabled,
+                tts_enabled=self._settings.voice.tts_enabled,
+                stt_enabled=self._settings.voice.stt_enabled,
+                voice_id=self._settings.voice.voice_id,
+                stt_model_size=self._settings.voice.stt_model_size,
             ),
             font_size=self._settings.font_size,
             conversation_model=self._settings.conversation_model,
@@ -198,7 +287,7 @@ def get_user_settings() -> UserSettingsManager:
 
 
 def is_tts_enabled() -> bool:
-    """Check if TTS is enabled."""
+    """Check if TTS is enabled (pipeline master + TTS sub-toggle)."""
     return get_user_settings().tts_enabled
 
 

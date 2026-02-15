@@ -20,6 +20,10 @@ def create_app() -> Flask:
     """Create and configure the Flask application."""
     app = Flask(__name__)
 
+    # Register the voice pipeline blueprint (ESP32 PTT endpoints)
+    from voice.api import voice_blueprint
+    app.register_blueprint(voice_blueprint, url_prefix="/voice")
+
     @app.route("/health", methods=["GET"])
     def health():
         """Health check endpoint."""
