@@ -40,7 +40,7 @@ Format by category:
 ```
 <narrative content as plain prose>
 
-- [identity] User's name is Brian
+- [identity] User's name is {USER_NAME}
 - [relationship] AI maintains a supportive, engaged presence
 - [preference] User prefers detailed technical explanations
 - [fact] User works as a software engineer
@@ -424,10 +424,10 @@ Format with names and fuzzy timestamps
 
 ```xml
 <recent_conversation>
-  Brian: Hey, can you help me debug this Flask app? (23 minutes ago)
-  Isaac: Of course! What kind of error are you seeing? (22 minutes ago)
-  Brian: I'm getting a circular import error (21 minutes ago)
-  Isaac: That's a common issue. Let me explain... (20 minutes ago)
+  User: Hey, can you help me debug this Flask app? (23 minutes ago)
+  AI: Of course! What kind of error are you seeing? (22 minutes ago)
+  User: I'm getting a circular import error (21 minutes ago)
+  AI: That's a common issue. Let me explain... (20 minutes ago)
   ...
 </recent_conversation>
 ```

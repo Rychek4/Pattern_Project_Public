@@ -1,0 +1,58 @@
+# =============================================================================
+# Pattern Project - .gitignore
+# =============================================================================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+*.whl
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Data & Database
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Logs
+logs/
+*.log
+
+# Credentials & Secrets
+credentials.toml
+.env
+*.pem
+*.key
+
+# Sentence-transformers model cache
+.cache/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Captures & media
+captures/
+*.wav
+*.mp3
+
+# Playwright browser data
+browser_data/

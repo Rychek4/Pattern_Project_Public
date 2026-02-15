@@ -24,7 +24,7 @@ A comprehensive reference of all features, their configuration, and current stat
 
 - **Dual-Track Retrieval**:
   - **Episodic**: Narrative memories ("We discussed machine learning")
-  - **Factual**: Concrete facts ("Brian is 45 years old")
+  - **Factual**: Concrete facts ("User prefers dark mode")
   - Queries both categories separately for balanced results
 
 - **Relevance Floor**: 0.35 minimum combined score to include

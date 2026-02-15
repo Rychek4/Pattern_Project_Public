@@ -30,9 +30,9 @@ PROJECT_NAME = "Pattern Project"
 # =============================================================================
 # The name used when formatting conversations and extracting memories.
 # This ensures consistent entity naming for better semantic memory retrieval.
-# TODO: Eventually prompt for this at first boot instead of hardcoding.
-USER_NAME = os.getenv("USER_NAME", "Brian")
-AI_NAME = os.getenv("AI_NAME", "Isaac")
+# Set these in your .env file or environment variables.
+USER_NAME = os.getenv("USER_NAME", "User")
+AI_NAME = os.getenv("AI_NAME", "Pattern")
 
 # =============================================================================
 # LLM CONFIGURATION
@@ -145,7 +145,7 @@ CONTEXT_EXTRACTION_BATCH = 10      # Turns to extract per overflow (40 - 30 = 10
 # -----------------------------------------------------------------------------
 # Memories are now extracted in two categories:
 #   - Episodic: Narrative memories about what happened ("We discussed X")
-#   - Factual: Concrete facts extracted from conversation ("Brian is 45")
+#   - Factual: Concrete facts extracted from conversation ("User is 45")
 #
 # Retrieval queries both categories separately to ensure balanced results.
 MEMORY_MAX_EPISODIC_PER_QUERY = 5   # Max episodic memories to retrieve
@@ -161,7 +161,7 @@ MEMORY_MAX_PER_QUERY = 10  # Updated from 3 to accommodate both categories
 # When retrieving memories, near-identical results are collapsed to prevent
 # the same fact from consuming multiple retrieval slots.
 #
-# Example: If "Brian is 45" appears 3 times due to being mentioned in
+# Example: If "User is 45" appears 3 times due to being mentioned in
 # different conversations, only the highest-scored one is returned.
 MEMORY_DEDUP_ENABLED = True
 MEMORY_DEDUP_THRESHOLD = 0.85      # Embedding similarity threshold for "duplicate"
@@ -511,7 +511,7 @@ DEV_MODE_ENABLED = False  # Set programmatically via --dev flag, not env var
 EMAIL_GATEWAY_ENABLED = os.getenv("EMAIL_GATEWAY_ENABLED", "false").lower() == "true"
 EMAIL_ADDRESS = os.getenv("APP_EMAIL_ADDRESS", "")
 EMAIL_PASSWORD = os.getenv("APP_EMAIL_PASS", "")
-EMAIL_DISPLAY_NAME = "Pattern Isaac"
+EMAIL_DISPLAY_NAME = f"Pattern {AI_NAME}"
 EMAIL_SMTP_HOST = "smtp.gmail.com"
 EMAIL_SMTP_PORT = 587
 

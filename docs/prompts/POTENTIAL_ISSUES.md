@@ -68,17 +68,16 @@ history.append({"role": "user", "content": PULSE_PROMPT})
 
 ```python
 for turn in turns:
-    name = "Isaac" if turn.role == "assistant" else "Brian"
+    name = config.AI_NAME if turn.role == "assistant" else config.USER_NAME
     timestamp = format_fuzzy_relative_time(turn.created_at)
     lines.append(f"  {name}: {turn.content} ({timestamp})")
 ```
 
 **Impact**:
-- "Brian" is hardcoded as the user's name
-- "Isaac" may not match the intended persona
-- No configuration for different users
+- Names were previously hardcoded but now use `config.USER_NAME` and `config.AI_NAME`
+- These default to "User" and "Pattern" but can be set via environment variables
 
-**Recommendation**: Make names configurable or derive from core memories.
+**Recommendation**: Consider deriving names from core memories as an alternative.
 
 ---
 
@@ -382,7 +381,7 @@ Currently, extracted memories go directly to vector store. Consider:
 
 ### E. How Should Multi-User Be Handled?
 
-Currently "Brian" is hardcoded. Consider:
+Currently names are set via config. Consider:
 - User profiles in database
 - Per-session user identification
 - Multi-user conversation support
@@ -402,7 +401,7 @@ Currently "Brian" is hardcoded. Consider:
 
 1. **No Base Prompt**: Ensure empty system_prompt is intentional
 2. **Tag Closure**: Verify all XML tags are properly closed
-3. **Name Consistency**: Check "Brian"/"Isaac" usage
+3. **Name Consistency**: Check USER_NAME/AI_NAME usage
 4. **Privacy Claims**: Audit what's actually visible
 
 ### Integration Tests

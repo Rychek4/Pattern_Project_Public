@@ -12,7 +12,7 @@ Pattern is an advanced AI companion system built around Claude that doesn't just
 
 ### 🧠 Persistent Memory System
 - **Semantic Memory Search** — Vector embeddings (all-MiniLM-L6-v2) with combined scoring: 65% semantic similarity, 25% importance, 10% freshness
-- **Dual-Track Extraction** — Episodic memories (narratives: "We discussed X") and Factual memories (concrete facts: "Brian is 45")
+- **Dual-Track Extraction** — Episodic memories (narratives: "We discussed X") and Factual memories (concrete facts: "User prefers dark mode")
 - **Warmth Cache** — Session-scoped memory boosting for conversational continuity
 - **Core Memories** — Permanent foundational knowledge that never decays
 - **Decay Categories** — Permanent, standard (30-day), and ephemeral (7-day) half-lives
@@ -187,7 +187,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 # Optional
 ANTHROPIC_MODEL=claude-sonnet-4-5-20250929
 USER_NAME=YourName
-AI_NAME=Isaac
+AI_NAME=YourAIName
 
 # Telegram (optional)
 telegram_bot=your_bot_token
@@ -302,7 +302,7 @@ Pattern is built around these principles:
 
 ## License
 
-This project is for personal use.
+This project is licensed under the [GNU General Public License v3.0](LICENSE).
 
 ---
 

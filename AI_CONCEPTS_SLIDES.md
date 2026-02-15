@@ -205,11 +205,11 @@ Traditional:                    Modern:
   - "We debugged a deployment issue and discovered the root cause was a misconfigured environment variable"
 
 - **Factual** — *What's true* (concrete, third-person)
-  - "Brian's production stack runs on AWS ECS with Fargate"
+  - "The user's production stack runs on AWS ECS with Fargate"
 
 A single extraction call can produce 1-3 episodic + 0-6 factual memories from 10 conversation turns.
 
-> **Speaker notes:** "Sophisticated memory systems extract two distinct types of information. Episodic memories capture what happened — they're narratives. Factual memories capture what's true — they're concrete facts. Different questions trigger different types. 'What did we work on last week?' surfaces episodic memories. 'What database does Brian use?' surfaces factual ones. You can extract both types from the same conversation in a single LLM call."
+> **Speaker notes:** "Sophisticated memory systems extract two distinct types of information. Episodic memories capture what happened — they're narratives. Factual memories capture what's true — they're concrete facts. Different questions trigger different types. 'What did we work on last week?' surfaces episodic memories. 'What database does the user use?' surfaces factual ones. You can extract both types from the same conversation in a single LLM call."
 
 ---
 
