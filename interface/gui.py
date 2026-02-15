@@ -507,6 +507,11 @@ class ChatWindow(QMainWindow):
         self.timer_update.timeout.connect(self._update_timer)
         self.timer_update.start(1000)
 
+        # Voice transcript poll (every 500ms) — picks up turns from ESP32 /voice/talk
+        self._voice_poll_timer = QTimer(self)
+        self._voice_poll_timer.timeout.connect(self._poll_voice_events)
+        self._voice_poll_timer.start(500)
+
     def _apply_style(self):
         """Apply theme styling using theme manager."""
         self.setStyleSheet(self._theme_manager.get_stylesheet())
@@ -1302,28 +1307,41 @@ class ChatWindow(QMainWindow):
                 pass
 
     def _trigger_tts(self, text: str):
-        """Trigger text-to-speech for the given text if TTS is enabled."""
+        """TTS trigger — no-op since local playback has been removed.
+
+        Audio output is now handled exclusively by the ESP32 voice terminal.
+        The ESP32 receives TTS audio via the /voice/talk endpoint.
+        """
+        pass
+
+    def _poll_voice_events(self):
+        """Poll for voice transcripts from ESP32 /voice/talk endpoint.
+
+        Voice turns are written to a thread-safe queue by voice/api.py.
+        We drain the queue and display them in the chat as messages.
+        """
         try:
-            from core.user_settings import is_tts_enabled, get_tts_voice_id
+            from voice.api import voice_event_queue
+        except ImportError:
+            return
 
-            if not is_tts_enabled():
-                log_info("TTS skipped - not enabled", prefix="🔊")
-                return
-
-            # Truncate text for logging
-            preview = text[:50] + "..." if len(text) > 50 else text
-            log_info(f"TTS triggered for: {preview}", prefix="🔊")
-
-            # Play TTS (runs in background thread internally)
+        while not voice_event_queue.empty():
             try:
-                from tts.player import play_tts
-                voice_id = get_tts_voice_id()
-                play_tts(text, voice_id)
-            except Exception as e:
-                log_warning(f"TTS playback error: {e}")
+                event = voice_event_queue.get_nowait()
+            except Exception:
+                break
 
-        except Exception as e:
-            log_warning(f"TTS trigger error: {e}")
+            user_text = event.get("user_text", "")
+            isaac_text = event.get("isaac_text", "")
+            timestamp = self._get_timestamp()
+
+            # Show the voice user message with a mic indicator
+            if user_text:
+                self._append_message("user", f"\U0001f399 {user_text}", timestamp)
+
+            # Show Isaac's response
+            if isaac_text:
+                self._append_message("assistant", isaac_text, timestamp)
 
     def _on_stream_start(self, timestamp: str):
         """Handle start of streaming response - create message container and track position."""
@@ -1659,9 +1677,6 @@ class ChatWindow(QMainWindow):
     def _process_message(self, user_input: str, pasted_image: Optional[QImage] = None):
         """Process a message in background thread with streaming response."""
         import time
-        from core.sentence_splitter import SentenceBuffer
-        from tts.player import queue_tts_sentence
-        from core.user_settings import is_tts_enabled, get_tts_voice_id
 
         # DIAGNOSTIC: Log entry point
         log_info("=== _process_message START ===", prefix="📨")
@@ -1768,11 +1783,6 @@ class ChatWindow(QMainWindow):
                 ProcessEventType.STREAM_START, is_active=True
             )
 
-            # Initialize sentence buffer for TTS
-            sentence_buffer = SentenceBuffer()
-            tts_enabled = is_tts_enabled()
-            voice_id = get_tts_voice_id() if tts_enabled else None
-
             # Start recording this round for prompt export
             self._round_recorder.start_round()
             self._round_recorder.record_request(
@@ -1805,13 +1815,6 @@ class ChatWindow(QMainWindow):
                 # Emit chunk to GUI
                 if chunk:
                     self.signals.stream_chunk.emit(chunk)
-
-                    # Process for TTS - detect sentences
-                    if tts_enabled:
-                        sentences = sentence_buffer.add_chunk(chunk)
-                        for sentence_text, is_speakable in sentences:
-                            if is_speakable and sentence_text.strip():
-                                queue_tts_sentence(sentence_text, voice_id)
 
             # Check if streaming completed successfully
             log_info("Streaming loop exited, checking result...", prefix="📨")
@@ -1875,13 +1878,6 @@ class ChatWindow(QMainWindow):
             if final_state.thinking_text and config.DEV_MODE_ENABLED:
                 log_info(f"Thinking ({len(final_state.thinking_text)} chars): {final_state.thinking_text[:500]}...", prefix="🧠")
 
-            # Flush any remaining TTS content
-            if tts_enabled:
-                remaining = sentence_buffer.flush()
-                for sentence_text, is_speakable in remaining:
-                    if is_speakable and sentence_text.strip():
-                        queue_tts_sentence(sentence_text, voice_id)
-
             # Get the full streamed text
             streamed_text = final_state.text
             final_text = streamed_text
@@ -1935,18 +1931,6 @@ class ChatWindow(QMainWindow):
                 )
 
                 final_text = result.final_text
-
-                # If tool processing added more text, queue it for TTS
-                if tts_enabled and final_text != streamed_text:
-                    additional_text = final_text[len(streamed_text):]
-                    if additional_text.strip():
-                        # Process additional text through sentence buffer
-                        add_buffer = SentenceBuffer()
-                        sentences = add_buffer.add_chunk(additional_text)
-                        sentences.extend(add_buffer.flush())
-                        for sentence_text, is_speakable in sentences:
-                            if is_speakable and sentence_text.strip():
-                                queue_tts_sentence(sentence_text, voice_id)
 
                 # Check for clarification request
                 if result.clarification_requested and result.clarification_data:
@@ -3119,19 +3103,20 @@ class SettingsDialog(QDialog):
         self.stt_enabled_check.setChecked(self._user_settings._settings.voice.stt_enabled)
         layout.addWidget(self.stt_enabled_check)
 
-        # Voice ID input
+        # Voice selection dropdown
         voice_layout = QHBoxLayout()
-        voice_layout.addWidget(QLabel("Voice ID:"))
-        self.voice_id_input = QLineEdit()
-        self.voice_id_input.setPlaceholderText("Leave blank for default voice")
-        current_voice = self._user_settings._settings.voice.voice_id
-        if current_voice:
-            self.voice_id_input.setText(current_voice)
-        voice_layout.addWidget(self.voice_id_input)
+        voice_layout.addWidget(QLabel("Voice:"))
+        self.voice_combo = QComboBox()
+        self.voice_combo.addItems(config.OPENAI_TTS_VOICES)
+        current_voice = self._user_settings._settings.voice.get_voice_id()
+        voice_idx = self.voice_combo.findText(current_voice)
+        if voice_idx >= 0:
+            self.voice_combo.setCurrentIndex(voice_idx)
+        voice_layout.addWidget(self.voice_combo)
         layout.addLayout(voice_layout)
 
-        # Voice ID help text
-        help_label = QLabel("Find voice IDs at elevenlabs.io/voice-library")
+        # Voice help text
+        help_label = QLabel(f"OpenAI TTS voice (default: {config.OPENAI_TTS_DEFAULT_VOICE})")
         help_label.setStyleSheet("color: gray; font-size: 11px;")
         layout.addWidget(help_label)
 
@@ -3174,7 +3159,7 @@ class SettingsDialog(QDialog):
         """Enable/disable sub-controls when master toggle changes."""
         self.tts_enabled_check.setEnabled(checked)
         self.stt_enabled_check.setEnabled(checked)
-        self.voice_id_input.setEnabled(checked)
+        self.voice_combo.setEnabled(checked)
         self.stt_model_combo.setEnabled(checked)
 
     def _apply_settings(self):
@@ -3191,7 +3176,7 @@ class SettingsDialog(QDialog):
         self._user_settings.voice_pipeline_enabled = self.pipeline_enabled_check.isChecked()
         self._user_settings.tts_enabled = self.tts_enabled_check.isChecked()
         self._user_settings.stt_enabled = self.stt_enabled_check.isChecked()
-        self._user_settings.tts_voice_id = self.voice_id_input.text().strip()
+        self._user_settings.tts_voice_id = self.voice_combo.currentText()
         self._user_settings.stt_model_size = self.stt_model_combo.currentText()
 
         log_info(
@@ -3373,13 +3358,6 @@ def run_gui():
     # Release webcam device if it was opened
     from agency.visual_capture import release_webcam
     release_webcam()
-
-    # Shutdown TTS system (stops playback and terminates worker process)
-    try:
-        from tts.player import shutdown_tts
-        shutdown_tts()
-    except Exception:
-        pass  # Ignore errors during shutdown
 
     # Unload STT model to free memory
     try:

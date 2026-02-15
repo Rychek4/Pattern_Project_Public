@@ -21,12 +21,14 @@ class VoiceSettings:
     pipeline_enabled: bool = False   # Master on/off for entire voice system
     tts_enabled: bool = True         # TTS output (sub-toggle under master)
     stt_enabled: bool = True         # STT input  (sub-toggle under master)
-    voice_id: str = ""               # ElevenLabs voice ID (empty = default)
+    voice_id: str = ""               # OpenAI TTS voice name (empty = default)
     stt_model_size: str = "small"    # faster-whisper model: tiny, base, small
 
     def get_voice_id(self) -> str:
-        """Get voice ID, falling back to config default if not set."""
-        return self.voice_id if self.voice_id else config.ELEVENLABS_DEFAULT_VOICE_ID
+        """Get voice name, falling back to config default if not set."""
+        if self.voice_id and self.voice_id in config.OPENAI_TTS_VOICES:
+            return self.voice_id
+        return config.OPENAI_TTS_DEFAULT_VOICE
 
 
 # Keep old name as alias for any external code that references it directly
@@ -117,11 +119,24 @@ class UserSettingsManager:
 
                 # Parse voice settings
                 voice_data = data.get('voice', {})
+                stored_voice_id = voice_data.get('voice_id', '')
+
+                # Migration: ElevenLabs UUID → OpenAI voice name
+                # Old voice IDs were long alphanumeric UUIDs; OpenAI uses short names.
+                # If the stored value isn't a valid OpenAI voice, reset to default.
+                if stored_voice_id and stored_voice_id not in config.OPENAI_TTS_VOICES:
+                    log_info(
+                        f"Migrated legacy voice ID '{stored_voice_id}' → default OpenAI voice",
+                        prefix="[Settings]"
+                    )
+                    stored_voice_id = ''
+                    migrated = True
+
                 self._settings.voice = VoiceSettings(
                     pipeline_enabled=voice_data.get('pipeline_enabled', False),
                     tts_enabled=voice_data.get('tts_enabled', True),
                     stt_enabled=voice_data.get('stt_enabled', True),
-                    voice_id=voice_data.get('voice_id', ''),
+                    voice_id=stored_voice_id,
                     stt_model_size=voice_data.get('stt_model_size', config.WHISPER_MODEL_DEFAULT),
                 )
 

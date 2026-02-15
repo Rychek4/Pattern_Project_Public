@@ -25,9 +25,11 @@ flask>=3.0.0
 # Utilities
 numpy>=1.24.0
 
-# Text-to-Speech (ElevenLabs + pygame)
-elevenlabs>=1.0.0
-pygame>=2.5.0
+# Text-to-Speech (OpenAI TTS)
+openai>=1.0.0
+
+# Speech-to-Text (faster-whisper, lazy-loaded)
+faster-whisper>=0.9.0
 
 # Telegram Bot API
 python-telegram-bot>=21.0

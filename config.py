@@ -332,23 +332,30 @@ HTTP_PORT = int(os.getenv("HTTP_PORT", "5000"))
 # =============================================================================
 # SUBPROCESS CONFIGURATION
 # =============================================================================
-SUBPROCESS_AUDIO_ENABLED = False  # Legacy - superseded by voice pipeline
+SUBPROCESS_AUDIO_ENABLED = False  # Deprecated - no longer used
 SUBPROCESS_OVERLAY_ENABLED = False  # Placeholder
 SUBPROCESS_HEALTH_CHECK_INTERVAL = 30
 SUBPROCESS_MAX_RESTART_ATTEMPTS = 3
 
 # =============================================================================
-# ELEVENLABS TTS CONFIGURATION
+# OPENAI TTS CONFIGURATION
 # =============================================================================
-# ElevenLabs Text-to-Speech integration for voice output.
-# Get your API key from: https://elevenlabs.io/
+# OpenAI Text-to-Speech integration for voice output.
+# Uses the same OPENAI_API_KEY env var (shared with any other OpenAI usage).
+# Docs: https://platform.openai.com/docs/guides/text-to-speech
 #
-# Voice IDs can be found at: https://elevenlabs.io/voice-library
-# Or via API: https://api.elevenlabs.io/v1/voices
-ELEVENLABS_API_KEY = os.getenv("Eleven_Labs_API", "")
-ELEVENLABS_DEFAULT_VOICE_ID = "MKHH3pSZhHPPzypDhMoU"  # Default voice
-ELEVENLABS_MODEL = "eleven_turbo_v2_5"  # TTS model (faster, 2x tokens)
-ELEVENLABS_AUDIO_PORT = 5003  # Legacy - kept for backward compat
+# Models:
+#   tts-1    — Optimized for speed, lower latency (~$15/1M chars)
+#   tts-1-hd — Higher quality, slightly slower (~$30/1M chars)
+#
+# Voices: alloy, ash, ballad, coral, echo, fable, nova, onyx, sage, shimmer
+OPENAI_TTS_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_TTS_MODEL = "tts-1"  # "tts-1" (fast) or "tts-1-hd" (quality)
+OPENAI_TTS_DEFAULT_VOICE = "nova"  # Default voice
+OPENAI_TTS_VOICES = [
+    "alloy", "ash", "ballad", "coral", "echo",
+    "fable", "nova", "onyx", "sage", "shimmer",
+]
 
 # =============================================================================
 # VOICE PIPELINE CONFIGURATION (ESP32 + STT + TTS)
@@ -358,7 +365,7 @@ WHISPER_MODEL_DEFAULT = os.getenv("WHISPER_MODEL", "small")
 
 # Audio format contract for ESP32 <-> Server
 VOICE_STT_SAMPLE_RATE = 16000   # ESP32 mic records at 16kHz (Whisper native)
-VOICE_TTS_SAMPLE_RATE = 24000   # ElevenLabs pcm_24000 (avoids MP3 decode on ESP32)
+VOICE_TTS_SAMPLE_RATE = 24000   # OpenAI TTS pcm output (24kHz native, avoids MP3 decode on ESP32)
 VOICE_SAMPLE_WIDTH = 2          # 16-bit samples
 VOICE_CHANNELS = 1              # Mono
 

@@ -7,8 +7,8 @@ Endpoints for ESP32-S3 Push-to-Talk integration:
   GET  /voice/health      - Pipeline status check
 """
 
-import io
-import struct
+import queue
+from datetime import datetime
 from flask import Blueprint, request, jsonify, Response
 
 import config
@@ -16,6 +16,10 @@ from core.logger import log_info, log_warning, log_error
 from core.user_settings import get_user_settings
 
 voice_blueprint = Blueprint("voice", __name__)
+
+# Thread-safe queue for GUI to pick up voice transcripts.
+# The GUI polls this queue on a QTimer to display voice turns in the chat.
+voice_event_queue = queue.Queue()
 
 
 @voice_blueprint.route("/health", methods=["GET"])
@@ -160,6 +164,13 @@ def voice_talk():
         log_error(f"Voice chat error: {e}", prefix="[Voice]")
         return jsonify({"error": str(e), "transcription": user_text}), 500
 
+    # Notify GUI of the voice exchange (non-blocking)
+    voice_event_queue.put({
+        "user_text": user_text,
+        "isaac_text": isaac_text,
+        "timestamp": datetime.now().isoformat(),
+    })
+
     # Step 3: TTS (if enabled)
     if settings.tts_enabled:
         try:
@@ -167,8 +178,7 @@ def voice_talk():
 
             tts_bytes = synthesize_pcm(
                 isaac_text,
-                voice_id=settings.tts_voice_id,
-                output_format="pcm_24000",
+                voice=settings.tts_voice_id,
             )
 
             if tts_bytes:

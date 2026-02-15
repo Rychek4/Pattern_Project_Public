@@ -19,8 +19,8 @@ Replace the legacy PC-audio TTS pipeline with a dedicated ESP32-S3R8 voice termi
 │  [Speaker] ◄── I2S    │  GET /voice/tts/stream      │  Isaac (Claude API)          │
 │  Play audio response   │  ◄───────────────────────── │         │                    │
 │                        │                             │         ▼                    │
-│  [Status LED]          │                             │  ElevenLabs TTS              │
-│  WiFi/recording state  │                             │  (reuse existing client)     │
+│  [Status LED]          │                             │  OpenAI TTS                  │
+│  WiFi/recording state  │                             │  (tts-1 / tts-1-hd)         │
 └────────────────────────┘                             └──────────────────────────────┘
 ```
 
