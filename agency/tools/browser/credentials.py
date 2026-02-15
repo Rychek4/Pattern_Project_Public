@@ -82,10 +82,6 @@ def get_credential(
     """
     Look up credentials for a specific service.
 
-    Checks two sources in order:
-    1. Static credentials.toml file (hand-configured)
-    2. managed_accounts database table (dynamically created by Isaac)
-
     Args:
         credentials_path: Path to the credentials.toml file
         service: Service name (e.g., "reddit", "twitter", "gmail")
@@ -95,62 +91,27 @@ def get_credential(
         Passwords are included — this is intentional for browser automation.
         The credential data stays inside the delegate's ephemeral context.
     """
-    # 1. Check credentials.toml (static, hand-configured)
     all_creds = load_credentials(credentials_path)
 
-    if service in all_creds:
-        # Return a copy so the caller can't modify the cached data
-        return dict(all_creds[service])
+    if service not in all_creds:
+        available = list(all_creds.keys())
+        log_warning(f"No credentials found for service: {service}")
+        return None
 
-    # 2. Fallback: check managed_accounts database table
-    try:
-        from agency.spending.manager import AccountManager
-        account = AccountManager().get_account(service)
-        if account:
-            # Map to the same dict format the delegate expects
-            cred = {}
-            if account.get("login"):
-                cred["username"] = account["login"]
-            if account.get("password"):
-                cred["password"] = account["password"]
-            if account.get("pin"):
-                cred["pin"] = account["pin"]
-            if account.get("login_url"):
-                cred["login_url"] = account["login_url"]
-            if account.get("email_used"):
-                cred["email"] = account["email_used"]
-            if account.get("notes"):
-                cred["note"] = account["notes"]
-            log_info(f"Credential loaded from managed_accounts: {service}", prefix="🔑")
-            return cred
-    except Exception as e:
-        # Don't let DB issues break credential lookup entirely
-        log_warning(f"Failed to check managed_accounts for '{service}': {e}")
-
-    log_warning(f"No credentials found for service: {service}")
-    return None
+    cred = all_creds[service]
+    # Return a copy so the caller can't modify the cached data
+    return dict(cred)
 
 
 def list_services(credentials_path: Path) -> list:
     """
     List all available service names (without revealing credentials).
 
-    Includes both static (credentials.toml) and dynamic (managed_accounts) sources.
-
     Args:
         credentials_path: Path to the credentials.toml file
 
     Returns:
-        List of service name strings (deduplicated)
+        List of service name strings
     """
-    services = set(load_credentials(credentials_path).keys())
-
-    # Also include dynamically-managed accounts
-    try:
-        from agency.spending.manager import AccountManager
-        managed = AccountManager().list_accounts()
-        services.update(managed)
-    except Exception:
-        pass  # Don't let DB issues break service listing
-
-    return sorted(services)
+    all_creds = load_credentials(credentials_path)
+    return list(all_creds.keys())
