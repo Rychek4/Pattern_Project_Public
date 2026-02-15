@@ -1,0 +1,52 @@
+# Pattern Project - Dependencies
+
+# Core
+python-dotenv>=1.0.0
+
+# LLM Clients
+anthropic>=0.78.0
+requests>=2.31.0
+
+# Embeddings (lazy loaded - sentence-transformers pulls compatible torch)
+sentence-transformers>=2.2.0
+
+# Database
+# sqlite3 is built-in
+
+# CLI Interface
+rich>=13.0.0
+
+# GUI Interface
+PyQt5>=5.15.0
+
+# HTTP API
+flask>=3.0.0
+
+# Utilities
+numpy>=1.24.0
+
+# Text-to-Speech (ElevenLabs + pygame)
+elevenlabs>=1.0.0
+pygame>=2.5.0
+
+# Telegram Bot API
+python-telegram-bot>=21.0
+
+# Visual Capture (optional)
+# Uncomment if using visual features
+# pillow>=10.0.0
+# opencv-python>=4.8.0
+# google-generativeai>=0.3.0
+
+# Clipboard support
+pyperclip>=1.8.0
+
+# Reddit API
+praw>=7.7.0
+
+# Browser Automation (delegate sub-agent)
+# After installing, run: playwright install chromium
+playwright>=1.40.0
+
+# TOML parsing (Python < 3.11 fallback; 3.11+ has tomllib built-in)
+tomli>=2.0.0
