@@ -156,7 +156,7 @@ COLOR_ROUND_BORDER = "#424240" # Round group border
 COLOR_SEPARATOR = "#3a3a3a"    # Message separator
 
 # Origin-based left border colors (per message group)
-COLOR_BORDER_ISAAC = "#c4a7e7"   # Purple - Isaac-initiated
+COLOR_BORDER_AI = "#c4a7e7"      # Purple - AI-initiated
 COLOR_BORDER_USER = "#6bb5e0"    # Blue - User-initiated
 COLOR_BORDER_SYSTEM = "#5bb98c"  # Green - System-initiated
 
@@ -369,7 +369,7 @@ class MessageGroupWidget(QFrame):
     Container for all nodes within a single message processing group.
 
     Each group has a 3px left border colored by origin:
-    - Purple: Isaac-initiated (pulses, reminders, curiosity)
+    - Purple: AI-initiated (pulses, reminders, curiosity)
     - Blue: User-initiated (messages, telegrams)
     - Green: System-initiated
     """
@@ -381,7 +381,7 @@ class MessageGroupWidget(QFrame):
 
     def _setup_ui(self):
         border_color = {
-            "isaac": COLOR_BORDER_ISAAC,
+            "isaac": COLOR_BORDER_AI,
             "user": COLOR_BORDER_USER,
             "system": COLOR_BORDER_SYSTEM,
         }.get(self._origin, COLOR_BORDER_USER)
@@ -459,7 +459,7 @@ class ProcessPanel(QFrame):
         outer_layout.setSpacing(0)
 
         # Header
-        header = QLabel("Isaac")
+        header = QLabel("AI")
         header.setFont(QFont("Segoe UI", 9, QFont.Bold))
         header.setAlignment(Qt.AlignLeft)
         header.setStyleSheet(f"""

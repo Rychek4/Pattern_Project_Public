@@ -217,7 +217,7 @@ This mirrors how human memory works: you remember your best friend's name foreve
 Advanced memory systems extract two distinct types of information from conversations:
 
 - **Episodic memories** — *What happened.* Narrative, first-person accounts. "We debugged a deployment issue and discovered the root cause was a misconfigured environment variable."
-- **Factual memories** — *What's true.* Concrete, third-person facts. "Brian's production stack runs on AWS ECS with Fargate."
+- **Factual memories** — *What's true.* Concrete, third-person facts. "The user's production stack runs on AWS ECS with Fargate."
 
 These serve different retrieval needs. When you ask "what did we work on last week?" the system retrieves episodic memories. When you mention a technical topic, the system retrieves factual memories about your stack and preferences.
 

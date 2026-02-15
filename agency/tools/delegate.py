@@ -6,15 +6,15 @@ A delegated task spins up a fresh, ephemeral conversation with a smaller model
 (Haiku by default). The sub-agent is a browser automation agent with tools to
 navigate websites, interact with page elements, and access service credentials.
 
-The sub-agent has NO access to Isaac's memories, identity, active thoughts,
+The sub-agent has NO access to the main AI's memories, identity, active thoughts,
 or communication tools. It is a stateless browser worker that completes a
-task and returns the result to Isaac's main conversation.
+task and returns the result to the main conversation.
 
 Usage:
     from agency.tools.delegate import run_delegated_task
 
     result = run_delegated_task(
-        task="Log into Reddit and post 'Hello from Isaac' to r/test",
+        task="Log into Reddit and post 'Hello from Pattern' to r/test",
         context="Use the reddit credentials. Post as a text post.",
         max_rounds=15
     )

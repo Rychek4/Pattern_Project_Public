@@ -12,8 +12,8 @@ Current LLM deployments treat the AI as a function: input goes in, output comes 
 
 Pattern's foundational architecture is **windowed memory extraction**. The active conversation window holds approximately 30 turns. When it reaches 40, the oldest 10 turns are extracted — in a single unified API call — into two complementary forms:
 
-- **Episodic memories**: First-person narrative accounts of what happened ("I helped Brian debug a deployment issue and we discovered the root cause was a misconfigured environment variable").
-- **Factual memories**: Third-person extracted facts ("Brian's production stack runs on AWS ECS with Fargate").
+- **Episodic memories**: First-person narrative accounts of what happened ("I helped the user debug a deployment issue and we discovered the root cause was a misconfigured environment variable").
+- **Factual memories**: Third-person extracted facts ("The user's production stack runs on AWS ECS with Fargate").
 
 Both are embedded via all-MiniLM-L6-v2 (384-dimensional vectors), scored for importance, and stored in SQLite. On every subsequent prompt, relevant memories are retrieved through a composite scoring algorithm that blends semantic similarity (65%), importance (25%), and freshness decay (10%). A **warmth cache** further boosts recently-mentioned or topically-adjacent memories within a session, ensuring conversational continuity without history accumulation. Memories decay at configurable rates — permanent (core facts, never decay), standard (30-day half-life), or ephemeral (7-day half-life) — allowing the system to organically forget the situational while retaining the significant.
 

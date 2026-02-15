@@ -31,15 +31,15 @@ AFTER REGISTRATION
 
   3. Post the verification code on X from your account
 
-  4. Restart Pattern. The 8 Moltbook tools will appear in Isaac's toolkit.
+  4. Restart Pattern. The 8 Moltbook tools will appear in your AI's toolkit.
 
 USAGE
 -----
-  python scripts/moltbook_register.py --agent-name "Pattern-Isaac"
+  python scripts/moltbook_register.py --agent-name "Pattern-AI"
 
 FLAGS
 -----
-  --agent-name    Display name for your agent on Moltbook (e.g., "Pattern-Isaac")
+  --agent-name    Display name for your agent on Moltbook (e.g., "Pattern-AI")
   --description   Optional description of your agent
   --x-handle      Your X/Twitter handle (shown in instructions, not sent to API)
   --no-poll       Print credentials and exit without polling for claim status
@@ -148,7 +148,7 @@ def main():
     parser.add_argument(
         "--agent-name",
         required=True,
-        help='Display name for your agent (e.g., "Pattern-Isaac")',
+        help='Display name for your agent (e.g., "Pattern-AI")',
     )
     parser.add_argument(
         "--description",

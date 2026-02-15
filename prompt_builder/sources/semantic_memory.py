@@ -5,7 +5,7 @@ Retrieved memories via vector search with recency scoring
 Dual-Track Retrieval:
     Memories are now extracted in two categories:
     - Episodic: Narrative memories about what happened ("We discussed X")
-    - Factual: Concrete facts extracted from conversation ("Brian is 45")
+    - Factual: Concrete facts extracted from conversation ("User is 45")
 
     Retrieval queries both categories separately to ensure balanced results.
     The prompt formatting uses Option B: separated sections for clarity.
@@ -509,7 +509,7 @@ class SemanticMemorySource(ContextSource):
         """
         Collapse near-identical memories to prevent redundant context.
 
-        When the same fact is extracted from multiple conversations (e.g., "Brian is 45"
+        When the same fact is extracted from multiple conversations (e.g., "User is 45"
         mentioned in different sessions), this method collapses them to keep only the
         highest-scored version.
 
