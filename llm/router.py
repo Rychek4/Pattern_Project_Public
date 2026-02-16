@@ -703,7 +703,8 @@ class LLMRouter:
                     False,
                     None,
                     "<web_search_notice>Web search is unavailable today (daily limit reached). "
-                    "Rely on your knowledge or ask the user to try again tomorrow.</web_search_notice>"
+                    "Rely on your knowledge, or use delegate_task to browse the web directly "
+                    "if you need current information.</web_search_notice>"
                 )
 
             # Web search is available
