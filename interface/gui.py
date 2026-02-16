@@ -1820,8 +1820,9 @@ class ChatWindow(QMainWindow):
             log_info("Streaming loop exited, checking result...", prefix="📨")
             if final_state is None:
                 log_error("final_state is None - streaming yielded nothing!", prefix="📨")
-                self.signals.update_status.emit("Streaming error", StatusManager.STATUS_ERROR)
-                self.signals.stream_complete.emit("")
+                self.signals.stream_complete.emit(
+                    "\u26a0 Something went wrong \u2014 no response was received. Please try again."
+                )
                 return
             elif final_state.stop_reason == "error":
                 error_msg = getattr(final_state, '_error_message', 'unknown error')
@@ -1835,8 +1836,9 @@ class ChatWindow(QMainWindow):
                         "\u26a0 Both models are currently unavailable. Will retry automatically in 20 minutes."
                     )
                 else:
-                    self.signals.update_status.emit("Streaming error", StatusManager.STATUS_ERROR)
-                    self.signals.stream_complete.emit("")
+                    self.signals.stream_complete.emit(
+                        f"\u26a0 An error occurred: {error_msg}. Please try again."
+                    )
                 return
 
             log_info(f"Streaming completed successfully: {len(final_state.text)} chars, stop_reason={final_state.stop_reason}", prefix="📨")

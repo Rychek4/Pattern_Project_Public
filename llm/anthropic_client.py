@@ -6,7 +6,7 @@ Client for Claude API (frontier reasoning)
 from typing import Optional, List, Dict, Any, Generator, Iterator
 from dataclasses import dataclass, field
 
-from core.logger import log_info, log_error, log_success
+from core.logger import log_info, log_error, log_success, log_warning
 
 
 @dataclass
@@ -108,6 +108,71 @@ class StreamingState:
         return len(self.tool_calls) > 0
 
 
+class _StreamInactivityWatchdog:
+    """
+    Background watchdog that closes a stream if no content arrives within a timeout.
+
+    SSE keepalive pings reset httpx's read timeout but don't produce SDK events
+    with meaningful content. This watchdog tracks time since the last content-bearing
+    event and forcibly closes the stream if the threshold is exceeded, causing the
+    blocked iterator to raise an exception that can be caught and retried.
+    """
+
+    def __init__(self, timeout_seconds: float):
+        import threading
+        import time as _time
+        self.timeout = timeout_seconds
+        self._last_content = _time.monotonic()
+        self._stop_event = threading.Event()
+        self._triggered = False
+        self._stream_ref = None
+        self._thread = None
+
+    def start(self, stream):
+        """Start monitoring the given stream."""
+        import threading
+        if self.timeout <= 0:
+            return
+        self._stream_ref = stream
+        self._thread = threading.Thread(target=self._monitor, daemon=True)
+        self._thread.start()
+
+    def content_received(self):
+        """Reset the inactivity timer (call on each meaningful event)."""
+        import time as _time
+        self._last_content = _time.monotonic()
+
+    def stop(self):
+        """Stop the watchdog."""
+        self._stop_event.set()
+
+    @property
+    def was_triggered(self) -> bool:
+        """Whether the watchdog fired (stream closed due to inactivity)."""
+        return self._triggered
+
+    def _monitor(self):
+        import time as _time
+        while not self._stop_event.is_set():
+            self._stop_event.wait(5.0)
+            if self._stop_event.is_set():
+                return
+            elapsed = _time.monotonic() - self._last_content
+            if elapsed >= self.timeout:
+                self._triggered = True
+                log_warning(
+                    f"Stream inactivity watchdog triggered after {elapsed:.0f}s "
+                    f"with no content. Closing stream.",
+                    prefix="[Stream]"
+                )
+                try:
+                    if self._stream_ref:
+                        self._stream_ref.close()
+                except Exception:
+                    pass
+                return
+
+
 class AnthropicClient:
     """
     Client for Anthropic Claude API.
@@ -199,6 +264,8 @@ class AnthropicClient:
             return ("overloaded", "API overloaded")
         elif "rate" in error_lower:
             return ("rate_limited", "Rate limit exceeded")
+        elif "internal server error" in error_lower:
+            return ("server_error", "Internal server error")
         elif "authentication" in error_lower or "api key" in error_lower:
             return ("auth_error", "Invalid API key")
 
@@ -624,7 +691,8 @@ class AnthropicClient:
         tools: Optional[List[Dict[str, Any]]] = None,
         model: Optional[str] = None,
         thinking_enabled: bool = False,
-        thinking_budget_tokens: Optional[int] = None
+        thinking_budget_tokens: Optional[int] = None,
+        _attempt: int = 0
     ) -> Generator[tuple[str, StreamingState], None, None]:
         """
         Stream a chat completion request, yielding text chunks as they arrive.
@@ -639,6 +707,14 @@ class AnthropicClient:
 
         if max_tokens is None:
             max_tokens = self.max_tokens
+
+        # Track chunks yielded (initialized before try so except block can always access it)
+        text_chunks_yielded = 0
+
+        # Initialize watchdog before try so except block can always reference it
+        import config as _timeout_cfg
+        _inactivity_timeout = getattr(_timeout_cfg, 'STREAM_INACTIVITY_TIMEOUT', 360)
+        watchdog = _StreamInactivityWatchdog(_inactivity_timeout)
 
         try:
             client = self._get_client()
@@ -726,20 +802,27 @@ class AnthropicClient:
 
             # Initialize streaming state
             state = StreamingState()
-
-            # DIAGNOSTIC: Track chunks yielded to detect tool-only responses
             text_chunks_yielded = 0
 
             # Use the streaming API
             stream_kwargs = {**request_params}
             if extra_headers:
                 stream_kwargs["extra_headers"] = extra_headers
+
             with client.messages.stream(**stream_kwargs) as stream:
+                watchdog.start(stream)
                 current_block_type = None
                 current_block_index = -1
 
                 for event in stream:
                     event_type = getattr(event, "type", None)
+
+                    # Reset watchdog on any content-bearing event
+                    if event_type in (
+                        "content_block_start", "content_block_delta",
+                        "content_block_stop", "message_delta", "message_stop"
+                    ):
+                        watchdog.content_received()
 
                     # DIAGNOSTIC: Log every SSE event to trace streaming behavior
                     if event_type == "content_block_start":
@@ -963,6 +1046,9 @@ class AnthropicClient:
                         # Stream complete
                         pass
 
+            # Stream completed normally — stop the watchdog
+            watchdog.stop()
+
             # ============================================================
             # CRITICAL FIX: Always yield final state after stream completes
             # ============================================================
@@ -994,17 +1080,61 @@ class AnthropicClient:
 
         except Exception as e:
             import traceback
+            import time
             full_traceback = traceback.format_exc()
 
-            # Classify the error for upstream retry/failover decisions
-            error_type, error_msg = self._classify_error(e)
+            # Stop the watchdog (may already be stopped if it triggered the error)
+            watchdog.stop()
 
-            # DIAGNOSTIC: Log full exception details
-            log_error(f"Streaming error ({error_type}): {error_msg}", prefix="[Stream]")
-            log_error(f"Exception type: {type(e).__name__}", prefix="[Stream]")
-            log_error(f"Full traceback:\n{full_traceback}", prefix="[Stream]")
+            # If the watchdog triggered, classify as timeout regardless of the
+            # exception type (stream.close() can raise various exceptions)
+            if watchdog.was_triggered:
+                error_type = "timeout"
+                error_msg = f"Stream inactivity timeout ({_inactivity_timeout}s with no content)"
+                log_error(f"Streaming error ({error_type}): {error_msg}", prefix="[Stream]")
+            else:
+                # Classify the error for upstream retry/failover decisions
+                error_type, error_msg = self._classify_error(e)
+                log_error(f"Streaming error ({error_type}): {error_msg}", prefix="[Stream]")
+                log_error(f"Exception type: {type(e).__name__}", prefix="[Stream]")
+                log_error(f"Full traceback:\n{full_traceback}", prefix="[Stream]")
 
-            # Yield error state with classification
+            # Retry transient errors if no content has been yielded to caller yet
+            import config as cfg
+            max_attempts = getattr(cfg, 'API_RETRY_MAX_ATTEMPTS', 3)
+
+            if (text_chunks_yielded == 0
+                    and self._is_transient_error(error_type)
+                    and _attempt < max_attempts - 1):
+                retry_delay = getattr(cfg, 'API_RETRY_INITIAL_DELAY', 1.0) * (
+                    getattr(cfg, 'API_RETRY_BACKOFF_MULTIPLIER', 2.0) ** _attempt
+                )
+                log_warning(
+                    f"Transient streaming error (attempt {_attempt + 1}/{max_attempts}): "
+                    f"{error_type} - {error_msg}. Retrying in {retry_delay:.1f}s...",
+                    prefix="[Stream]"
+                )
+                time.sleep(retry_delay)
+                yield from self.chat_stream(
+                    messages=messages,
+                    system_prompt=system_prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    stop_sequences=stop_sequences,
+                    enable_web_search=enable_web_search,
+                    web_search_max_uses=web_search_max_uses,
+                    enable_web_fetch=enable_web_fetch,
+                    web_fetch_max_uses=web_fetch_max_uses,
+                    web_fetch_config=web_fetch_config,
+                    tools=tools,
+                    model=model,
+                    thinking_enabled=thinking_enabled,
+                    thinking_budget_tokens=thinking_budget_tokens,
+                    _attempt=_attempt + 1
+                )
+                return
+
+            # Non-retryable or retries exhausted — yield error state
             error_state = StreamingState()
             error_state.stop_reason = "error"
             error_state._error_message = error_msg
