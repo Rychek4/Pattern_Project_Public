@@ -1280,11 +1280,13 @@ Use this when:
 - Interacting with any website (posting, reading, form submission, account actions)
 - The task can be fully described in the task prompt without needing your personal context
 - You want to perform web actions without consuming your main conversation context
+- web_search results were insufficient, blocked, or couldn't access the content you need
+  (delegate can browse the page directly as a fallback)
 
 Do NOT use when:
 - The task requires your memories, personality, or knowledge of the user
 - The task needs to send Telegram messages, set reminders, or modify your state
-- You just need information from the web (use web_search or web_fetch instead)
+- web_search already gave you what you need (always try web_search first for information retrieval)
 
 The sub-agent returns its final result as text. Browser sessions are saved automatically,
 so logins persist across delegations — the sub-agent won't need to re-authenticate

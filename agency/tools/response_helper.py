@@ -452,7 +452,7 @@ class ToolResponseHelper:
                 error_note = ""
                 error_type = getattr(continuation, 'error_type', None)
                 if error_type == "web_fetch_domain_blocked":
-                    error_note = "\n\n⚠️ Web fetch was blocked for a domain that restricts automated access. The response may be incomplete."
+                    error_note = "\n\n⚠️ Web access was blocked for a domain that restricts automated access. Consider using delegate_task to browse the page directly."
                 elif continuation.error:
                     error_note = f"\n\n⚠️ An error interrupted processing. The response may be incomplete."
 
