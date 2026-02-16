@@ -713,7 +713,7 @@ class AnthropicClient:
 
         # Initialize watchdog before try so except block can always reference it
         import config as _timeout_cfg
-        _inactivity_timeout = getattr(_timeout_cfg, 'STREAM_INACTIVITY_TIMEOUT', 120)
+        _inactivity_timeout = getattr(_timeout_cfg, 'STREAM_INACTIVITY_TIMEOUT', 360)
         watchdog = _StreamInactivityWatchdog(_inactivity_timeout)
 
         try:

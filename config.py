@@ -82,7 +82,7 @@ API_RETRY_BACKOFF_MULTIPLIER = 2.0            # Exponential backoff multiplier
 # Stream inactivity timeout: abort streaming if no meaningful content
 # (text, thinking, or tool calls) arrives within this many seconds.
 # Protects against hung connections where keepalive pings mask a stalled server.
-STREAM_INACTIVITY_TIMEOUT = 120                # seconds (0 = disabled)
+STREAM_INACTIVITY_TIMEOUT = 360                # seconds (0 = disabled)
 
 # Layer 2: Model failover on overload/rate limit
 # Maps each model to its fallback. When primary model is overloaded or rate-limited,
