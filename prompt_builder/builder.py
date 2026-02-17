@@ -269,6 +269,12 @@ def create_default_builder() -> PromptBuilder:
         sources.append(SelfCorrectionSource())
         log_info("SelfCorrectionSource enabled", prefix="🔍")
 
+    # Response scope source (if enabled) - per-turn nudge to right-size responses
+    if getattr(config, 'RESPONSE_SCOPE_ENABLED', True):
+        from prompt_builder.sources.response_scope import ResponseScopeSource
+        sources.append(ResponseScopeSource())
+        log_info("ResponseScopeSource enabled", prefix="📏")
+
     # Legacy VisualSource is disabled - the new visual capture system sends images
     # directly to Claude via multimodal messages. VisualSource (which used Gemini
     # for text descriptions) is kept in code for potential fallback but not loaded.
