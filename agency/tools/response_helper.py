@@ -161,9 +161,9 @@ def _build_tool_detail(tool_name: str, tool_input: Any) -> str:
     if tool_name == "set_growth_thread" and "slug" in tool_input:
         return f"{tool_name}: {tool_input['slug']}"
 
-    # Core memory
-    if tool_name == "store_core_memory" and "content" in tool_input:
-        return f"{tool_name}: {tool_input['content'][:50]}"
+    # Growth thread promotion
+    if tool_name == "promote_growth_thread" and "thread_slug" in tool_input:
+        return f"{tool_name}: {tool_input['thread_slug']}"
 
     return tool_name
 

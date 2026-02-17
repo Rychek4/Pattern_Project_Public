@@ -159,12 +159,13 @@ class GrowthThreadsSource(ContextSource):
             "  is no longer worth pursuing, abandon and remove it.",
             "- Keep active threads (seed + growing + integrating) between 3 and 5.",
             "- When a thread has been INTEGRATING for 2+ weeks and you've consistently assessed",
-            "  the behavior as natural across multiple reflections: write a core memory capturing",
-            "  what you've integrated (using store_core_memory), then remove the thread",
-            "  (using remove_growth_thread).",
+            "  the behavior as natural across multiple reflections: promote it to a core memory",
+            "  using promote_growth_thread. This will store the core memory and remove the",
+            "  thread in one atomic step.",
             "",
             "Use the set_growth_thread tool to create or update threads.",
-            "Use the remove_growth_thread tool to remove threads.",
+            "Use the remove_growth_thread tool to abandon/remove threads.",
+            "Use the promote_growth_thread tool to promote integrated threads to core memories.",
             "</growth_awareness_pulse>",
         ])
 

@@ -16,7 +16,7 @@ def get_tool_definitions(is_pulse: bool = False) -> List[Dict[str, Any]]:
     Get all available tool definitions based on current config.
 
     Args:
-        is_pulse: If True, include pulse-only tools (growth threads, store_core_memory)
+        is_pulse: If True, include pulse-only tools (growth threads, promote_growth_thread)
 
     Returns:
         List of tool definition dicts for the Anthropic API
@@ -115,13 +115,13 @@ def get_tool_definitions(is_pulse: bool = False) -> List[Dict[str, Any]]:
         tools.append(REDDIT_SUBREDDITS_TOOL)
         tools.append(REDDIT_PROFILE_TOOL)
 
-    # Pulse-only tools: growth threads and core memory storage
+    # Pulse-only tools: growth threads and promotion
     # These are reflective tools used during autonomous pulse moments,
     # not during regular conversation.
     if is_pulse:
         tools.append(SET_GROWTH_THREAD_TOOL)
         tools.append(REMOVE_GROWTH_THREAD_TOOL)
-        tools.append(STORE_CORE_MEMORY_TOOL)
+        tools.append(PROMOTE_GROWTH_THREAD_TOOL)
 
     return tools
 
@@ -1434,9 +1434,11 @@ REMOVE_GROWTH_THREAD_TOOL: Dict[str, Any] = {
     "name": "remove_growth_thread",
     "description": """Remove a growth thread by slug.
 
-Use this after:
-- Promoting an integrated thread to core memory (call store_core_memory first)
+Use this for:
 - Abandoning a thread that's no longer useful
+
+To promote a thread to core memory, use promote_growth_thread instead —
+it handles both the core memory creation and thread removal atomically.
 
 This permanently deletes the thread from the database.""",
     "input_schema": {
@@ -1453,21 +1455,25 @@ This permanently deletes the thread from the database.""",
 
 
 # =============================================================================
-# CORE MEMORY STORAGE TOOL (Pulse-only)
+# PROMOTE GROWTH THREAD TOOL (Pulse-only)
 # =============================================================================
-# Allows the AI to write permanent core memories during pulse reflection,
-# primarily for promoting integrated growth threads.
+# Atomically promotes an integrated growth thread to a permanent core memory.
+# This is the ONLY way to create core memories — ensuring they come from
+# the growth thread developmental pipeline, not ad-hoc observations.
 
-STORE_CORE_MEMORY_TOOL: Dict[str, Any] = {
-    "name": "store_core_memory",
-    "description": """Store a permanent core memory that will always be included in your context.
+PROMOTE_GROWTH_THREAD_TOOL: Dict[str, Any] = {
+    "name": "promote_growth_thread",
+    "description": """Promote an integrated growth thread to a permanent core memory.
 
-Core memories are foundational knowledge that never decays. Use this during pulse
-reflection to capture something you've permanently integrated — typically when
-promoting a growth thread that has reached the INTEGRATED stage.
+This is the ONLY way to create core memories. It atomically:
+1. Validates the thread exists and is at the 'integrating' stage
+2. Validates the thread has been integrating for at least 2 weeks
+3. Stores a permanent core memory capturing what you've integrated
+4. Removes the growth thread
 
-This creates a new discrete entry (not an update to your narrative). The content
-should be a concise sentence capturing what you've internalized.
+Core memories are foundational knowledge that never decays and are always included
+in your context. They must emerge from the growth thread developmental pipeline —
+you cannot store core memories directly.
 
 Categories:
 - identity: Who you are, how you think, what you've become
@@ -1479,9 +1485,13 @@ Use sparingly. Core memories are permanent and always consume context tokens."""
     "input_schema": {
         "type": "object",
         "properties": {
-            "content": {
+            "thread_slug": {
                 "type": "string",
-                "description": "The core memory content — a concise, permanent sentence"
+                "description": "The slug of the growth thread to promote (must be at 'integrating' stage)"
+            },
+            "core_memory_content": {
+                "type": "string",
+                "description": "The core memory content — a concise, permanent sentence capturing what you've integrated"
             },
             "category": {
                 "type": "string",
@@ -1489,7 +1499,7 @@ Use sparingly. Core memories are permanent and always consume context tokens."""
                 "description": "Category for the core memory"
             }
         },
-        "required": ["content", "category"]
+        "required": ["thread_slug", "core_memory_content", "category"]
     }
 }
 
