@@ -53,6 +53,8 @@ class ToolExecutor:
             "write_file": self._exec_write_file,
             "append_file": self._exec_append_file,
             "list_files": self._exec_list_files,
+            "create_directory": self._exec_create_directory,
+            "move_file": self._exec_move_file,
             "send_telegram": self._exec_send_telegram,
             "send_email": self._exec_send_email,
             "capture_screenshot": self._exec_capture_screenshot,
@@ -399,11 +401,12 @@ class ToolExecutor:
     def _exec_list_files(
         self, input: Dict, id: str, ctx: Dict
     ) -> ToolResult:
-        """List available files."""
+        """List available files and directories."""
         from agency.commands.handlers.file_handler import ListFilesHandler
 
         handler = ListFilesHandler()
-        result = handler.execute("", ctx)
+        path = input.get("path", "")
+        result = handler.execute(path, ctx)
 
         if result.error:
             return ToolResult(
@@ -419,6 +422,106 @@ class ToolExecutor:
             tool_name="list_files",
             content=formatted
         )
+
+    def _exec_create_directory(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Create a directory in sandboxed storage."""
+        from agency.commands.handlers.file_handler import (
+            create_directory, FileSecurityError
+        )
+
+        path = input.get("path", "")
+        if not path:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="create_directory",
+                content="No path provided",
+                is_error=True
+            )
+
+        try:
+            result = create_directory(path)
+
+            if result["already_existed"]:
+                return ToolResult(
+                    tool_use_id=id,
+                    tool_name="create_directory",
+                    content=f"Directory already exists: {path}"
+                )
+            else:
+                return ToolResult(
+                    tool_use_id=id,
+                    tool_name="create_directory",
+                    content=f"Created directory: {path}"
+                )
+
+        except FileSecurityError as e:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="create_directory",
+                content=f"Security check failed: {str(e)}",
+                is_error=True
+            )
+        except Exception as e:
+            log_error(f"create_directory error: {e}")
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="create_directory",
+                content=f"Failed to create directory: {str(e)}",
+                is_error=True
+            )
+
+    def _exec_move_file(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Move or rename a file in sandboxed storage."""
+        from agency.commands.handlers.file_handler import (
+            move_file, FileSecurityError
+        )
+
+        source = input.get("source", "")
+        destination = input.get("destination", "")
+
+        if not source:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="move_file",
+                content="No source path provided",
+                is_error=True
+            )
+        if not destination:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="move_file",
+                content="No destination path provided",
+                is_error=True
+            )
+
+        try:
+            result = move_file(source, destination)
+
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="move_file",
+                content=f"Moved '{result['source']}' → '{result['destination']}'"
+            )
+
+        except FileSecurityError as e:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="move_file",
+                content=f"Security check failed: {str(e)}",
+                is_error=True
+            )
+        except Exception as e:
+            log_error(f"move_file error: {e}")
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="move_file",
+                content=f"Failed to move file: {str(e)}",
+                is_error=True
+            )
 
     # =========================================================================
     # COMMUNICATION TOOLS
