@@ -421,6 +421,14 @@ PATTERN_BREAKER_INTERVAL = 5   # Nudge every N user-facing messages
 # when warranted. Skips pulse messages (they have their own reflection).
 SELF_CORRECTION_ENABLED = True
 
+# Response Scope - per-turn nudge for the AI to right-size its responses
+# The AI holds rich internal state (active thoughts, growth threads, curiosity,
+# intentions, memories). Without guidance, it can feel pressure to surface all
+# of this in every response. This lightweight prompt (~50 tokens) reminds it
+# to match the user's rhythm and keep to one or two threads per turn.
+# Uses extended thinking for private assessment. Skips pulse messages.
+RESPONSE_SCOPE_ENABLED = True
+
 # =============================================================================
 # VISUAL CAPTURE CONFIGURATION
 # =============================================================================
