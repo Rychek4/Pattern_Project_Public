@@ -403,7 +403,6 @@ Each prompt is built fresh from registered sources, sorted by priority, producin
 ### 10.4 Logging
 - **Console**: Rich formatting
 - **File**: `logs/diagnostic.log`
-- **API Prompts**: `logs/api_prompts.jsonl`
 
 ---
 

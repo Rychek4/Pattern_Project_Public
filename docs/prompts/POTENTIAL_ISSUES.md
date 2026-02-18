@@ -143,7 +143,6 @@ instructions = processor.get_all_instructions()
 ```
 
 But intentions appear in the system prompt which:
-- Is logged to `logs/api_prompts.jsonl`
 - Could be visible in debugging
 - Stored in API provider logs
 
