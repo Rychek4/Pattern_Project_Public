@@ -8,7 +8,6 @@ from typing import Optional, List, Dict, Any, Generator
 from dataclasses import dataclass
 
 from core.logger import log_info, log_warning, log_error, log_success
-from core.prompt_logger import log_api_request
 from llm.kobold_client import KoboldClient, KoboldResponse, get_kobold_client
 from llm.anthropic_client import (
     AnthropicClient, AnthropicResponse, ToolCall, StreamingState, get_anthropic_client
@@ -853,29 +852,6 @@ class LLMRouter:
                     thinking_text=response.thinking_text
                 )
 
-                # Log the API request/response
-                log_api_request(
-                    provider=provider.value,
-                    model=model,  # Use the selected model, not client.model
-                    system_prompt=system_prompt,
-                    messages=messages,
-                    settings={
-                        "temperature": temperature,
-                        "max_tokens": max_tokens,
-                        "web_search_enabled": enable_web_search,
-                        "web_search_max_uses": web_search_max_uses,
-                        "web_fetch_enabled": enable_web_fetch,
-                        "web_fetch_max_uses": web_fetch_max_uses,
-                        "thinking_enabled": thinking_enabled,
-                        "thinking_budget_tokens": thinking_budget_tokens
-                    },
-                    response_text=response.text,
-                    tokens_in=response.input_tokens,
-                    tokens_out=response.output_tokens,
-                    success=response.success,
-                    error=response.error
-                )
-
                 return llm_response
 
             elif provider == LLMProvider.KOBOLD:
@@ -892,20 +868,6 @@ class LLMRouter:
                     success=response.success,
                     provider=provider,
                     tokens_out=response.tokens_generated,
-                    error=response.error
-                )
-
-                # Log the API request/response
-                log_api_request(
-                    provider=provider.value,
-                    model=client.get_model_name() or "kobold-local",
-                    system_prompt=system_prompt,
-                    messages=messages,
-                    settings={"temperature": temperature, "max_tokens": max_tokens},
-                    response_text=response.text,
-                    tokens_in=0,  # Kobold doesn't report input tokens
-                    tokens_out=response.tokens_generated,
-                    success=response.success,
                     error=response.error
                 )
 
