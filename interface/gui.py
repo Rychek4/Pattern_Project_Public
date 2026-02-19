@@ -389,6 +389,28 @@ class ChatWindow(QMainWindow):
             self.pulse_label.hide()
         layout.addWidget(self.pulse_label)
 
+        # Reflective pulse interval dropdown
+        self.reflective_dropdown = QComboBox()
+        self.reflective_dropdown.setFont(QFont(UI_FONT_FAMILY, 10))
+        self.reflective_dropdown.addItems(["R: 6h", "R: 12h", "R: 24h"])
+        self.reflective_dropdown.setCurrentIndex(1)  # Default: 12h
+        self.reflective_dropdown.setToolTip("Reflective pulse interval (Opus 4.6)")
+        self.reflective_dropdown.currentIndexChanged.connect(self._on_reflective_interval_changed)
+        if not config.SYSTEM_PULSE_ENABLED:
+            self.reflective_dropdown.hide()
+        layout.addWidget(self.reflective_dropdown)
+
+        # Action pulse interval dropdown
+        self.action_dropdown = QComboBox()
+        self.action_dropdown.setFont(QFont(UI_FONT_FAMILY, 10))
+        self.action_dropdown.addItems(["A: 1h", "A: 2h", "A: 3h", "A: 6h"])
+        self.action_dropdown.setCurrentIndex(1)  # Default: 2h
+        self.action_dropdown.setToolTip("Action pulse interval (Sonnet 4.6)")
+        self.action_dropdown.currentIndexChanged.connect(self._on_action_interval_changed)
+        if not config.SYSTEM_PULSE_ENABLED:
+            self.action_dropdown.hide()
+        layout.addWidget(self.action_dropdown)
+
         # Pulse type toggle (Reflective / Action) for manual pulse button
         self.pulse_type_toggle = QComboBox()
         self.pulse_type_toggle.setFont(QFont(UI_FONT_FAMILY, 10))
@@ -874,15 +896,57 @@ class ChatWindow(QMainWindow):
             if pulse_type == "reflective":
                 old_label = get_interval_label(self._pulse_manager.reflective_timer.interval)
                 self._pulse_manager.set_reflective_interval(interval_seconds)
+                self._sync_reflective_dropdown(interval_seconds)
                 log_info(f"AI adjusted reflective pulse: {old_label} -> {new_label}", prefix="⏱️")
             elif pulse_type == "action":
                 old_label = get_interval_label(self._pulse_manager.action_timer.interval)
                 self._pulse_manager.set_action_interval(interval_seconds)
+                self._sync_action_dropdown(interval_seconds)
                 log_info(f"AI adjusted action pulse: {old_label} -> {new_label}", prefix="⏱️")
             else:
                 log_warning(f"PULSE DEBUG: Unknown pulse_type '{pulse_type}'")
         else:
             log_warning("PULSE DEBUG: _pulse_manager is None!")
+
+    def _on_reflective_interval_changed(self, index: int):
+        """Handle reflective pulse interval dropdown change."""
+        interval_map = {0: 21600, 1: 43200, 2: 86400}  # 6h, 12h, 24h
+        new_interval = interval_map.get(index, 43200)
+        if self._pulse_manager:
+            from prompt_builder.sources.system_pulse import get_interval_label
+            old_label = get_interval_label(self._pulse_manager.reflective_timer.interval)
+            self._pulse_manager.set_reflective_interval(new_interval)
+            new_label = get_interval_label(new_interval)
+            log_info(f"User changed reflective pulse: {old_label} -> {new_label}", prefix="⏱️")
+
+    def _on_action_interval_changed(self, index: int):
+        """Handle action pulse interval dropdown change."""
+        interval_map = {0: 3600, 1: 7200, 2: 10800, 3: 21600}  # 1h, 2h, 3h, 6h
+        new_interval = interval_map.get(index, 7200)
+        if self._pulse_manager:
+            from prompt_builder.sources.system_pulse import get_interval_label
+            old_label = get_interval_label(self._pulse_manager.action_timer.interval)
+            self._pulse_manager.set_action_interval(new_interval)
+            new_label = get_interval_label(new_interval)
+            log_info(f"User changed action pulse: {old_label} -> {new_label}", prefix="⏱️")
+
+    def _sync_reflective_dropdown(self, interval_seconds: int):
+        """Sync reflective dropdown to match interval (e.g. after AI changes it)."""
+        seconds_to_index = {21600: 0, 43200: 1, 86400: 2}
+        index = seconds_to_index.get(interval_seconds)
+        if index is not None:
+            self.reflective_dropdown.blockSignals(True)
+            self.reflective_dropdown.setCurrentIndex(index)
+            self.reflective_dropdown.blockSignals(False)
+
+    def _sync_action_dropdown(self, interval_seconds: int):
+        """Sync action dropdown to match interval (e.g. after AI changes it)."""
+        seconds_to_index = {3600: 0, 7200: 1, 10800: 2, 21600: 3}
+        index = seconds_to_index.get(interval_seconds)
+        if index is not None:
+            self.action_dropdown.blockSignals(True)
+            self.action_dropdown.setCurrentIndex(index)
+            self.action_dropdown.blockSignals(False)
 
     def _init_model_dropdown(self):
         """Initialize model dropdown based on saved user preference."""
