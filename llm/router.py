@@ -374,8 +374,12 @@ class LLMRouter:
                     response.error_type = "both_models_unavailable"
                     return response
 
-        # Handle fallback to Kobold - but NOT for conversation tasks
-        if not response.success and self.fallback_enabled and task_type != TaskType.CONVERSATION:
+        # Handle fallback to Kobold - excluded for conversations and pulse tasks.
+        # These task types use model failover (Opus↔Sonnet) + deferred retry instead.
+        _kobold_excluded = (
+            TaskType.CONVERSATION, TaskType.PULSE_ACTION, TaskType.PULSE_REFLECTIVE
+        )
+        if not response.success and self.fallback_enabled and task_type not in _kobold_excluded:
             fallback_provider = (
                 LLMProvider.KOBOLD if provider == LLMProvider.ANTHROPIC
                 else LLMProvider.ANTHROPIC
@@ -395,8 +399,8 @@ class LLMRouter:
                 web_search_max_uses=None,
                 task_type=task_type
             )
-        elif not response.success and task_type == TaskType.CONVERSATION:
-            log_warning(f"{provider.value} failed for CONVERSATION task - error_type={response.error_type}")
+        elif not response.success and task_type in _kobold_excluded:
+            log_warning(f"{provider.value} failed for {task_type.value} task - error_type={response.error_type}")
 
         return response
 

@@ -699,21 +699,24 @@ class ChatCLI:
                 final_text = result.final_text
                 final_provider = result.final_provider
 
-                # Store response
-                conversation_mgr.add_turn(
-                    role="assistant",
-                    content=final_text,
-                    input_type="text"
-                )
+                # Only store non-empty responses in conversation history
+                if final_text and final_text.strip():
+                    conversation_mgr.add_turn(
+                        role="assistant",
+                        content=final_text,
+                        input_type="text"
+                    )
+                else:
+                    log_warning("PULSE: Action pulse produced empty response - skipping conversation storage")
 
                 # Check for clarification request
                 if result.clarification_requested and result.clarification_data:
                     self._display_clarification_panel(result.clarification_data)
-                    if final_text.strip():
+                    if final_text and final_text.strip():
                         self.console.print()
                         self.console.print(Markdown(final_text))
                     self.console.print()
-                else:
+                elif final_text and final_text.strip():
                     # Display with special styling
                     panel = Panel(
                         Markdown(final_text),
@@ -725,7 +728,19 @@ class ChatCLI:
                     self.console.print(panel)
                     self.console.print()
             else:
-                self.console.print(f"[bold red]Pulse error:[/bold red] {response.error}")
+                error_type = getattr(response, 'error_type', None)
+                if error_type == "both_models_unavailable":
+                    from llm.retry_manager import get_retry_manager
+                    get_retry_manager().schedule(
+                        callback=lambda: self._process_pulse(),
+                        source="pulse_action"
+                    )
+                    self.console.print(
+                        "[bold yellow]Both API models unavailable — "
+                        "will retry action pulse in 20 minutes[/bold yellow]"
+                    )
+                else:
+                    self.console.print(f"[bold red]Pulse error:[/bold red] {response.error}")
 
         except Exception as e:
             log_error(f"Pulse processing error: {e}")

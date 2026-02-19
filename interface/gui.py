@@ -2872,24 +2872,55 @@ class ChatWindow(QMainWindow):
                 final_text = result.final_text
                 log_info(f"PULSE: Processed in {result.passes_executed} pass(es)", prefix="⏱️")
 
-                self._conversation_mgr.add_turn(
-                    role="assistant",
-                    content=final_text,
-                    input_type="text"
-                )
+                # Only store non-empty responses in conversation history
+                # Tool-only responses (no visible text) can produce empty final_text
+                if final_text and final_text.strip():
+                    self._conversation_mgr.add_turn(
+                        role="assistant",
+                        content=final_text,
+                        input_type="text"
+                    )
+                else:
+                    log_warning(f"PULSE: {label} pulse produced empty response - skipping conversation storage")
 
                 timestamp = self._get_timestamp()
                 if result.clarification_requested and result.clarification_data:
                     self.signals.show_clarification.emit(result.clarification_data, timestamp)
-                    if final_text.strip():
+                    if final_text and final_text.strip():
                         self.signals.new_message.emit("assistant", final_text, timestamp)
-                else:
+                elif final_text and final_text.strip():
                     self.signals.new_message.emit("assistant", final_text, timestamp)
             else:
                 error_msg = f"{label} pulse API error: {response.error}"
                 log_error(f"PULSE: API call failed - {error_msg}")
                 timestamp = self._get_timestamp()
-                self.signals.new_message.emit("system", f"[{label} Pulse Error: {response.error}]", timestamp)
+
+                error_type = getattr(response, 'error_type', None)
+                if error_type == "both_models_unavailable":
+                    # Both Anthropic models down — schedule deferred retry
+                    import threading as _threading
+                    from llm.retry_manager import get_retry_manager
+
+                    def _retry_pulse():
+                        t = _threading.Thread(
+                            target=self._process_typed_pulse,
+                            args=(pulse_type_str, pulse_prompt, stored_message, task_type),
+                            daemon=True
+                        )
+                        t.start()
+
+                    get_retry_manager().schedule(
+                        callback=_retry_pulse,
+                        source=f"pulse_{pulse_type_str}"
+                    )
+                    self.signals.new_message.emit(
+                        "system",
+                        f"[Both API models unavailable — will retry {label.lower()} pulse in 20 minutes]",
+                        timestamp
+                    )
+                else:
+                    self.signals.new_message.emit("system", f"[{label} Pulse Error: {response.error}]", timestamp)
+
                 self.signals.update_status.emit(error_msg, StatusManager.STATUS_ERROR)
 
         except Exception as e:

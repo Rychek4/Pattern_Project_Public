@@ -66,7 +66,7 @@ KOBOLD_MAX_LENGTH = int(os.getenv("KOBOLD_MAX_LENGTH", "512"))
 LLM_PRIMARY_PROVIDER = os.getenv("LLM_PRIMARY_PROVIDER", "anthropic")  # 'anthropic' or 'kobold'
 # LLM_EXTRACTION_PROVIDER - DEPRECATED: Unified extraction now uses API (single call)
 # Memory extraction was consolidated from 5+ local LLM calls to 1 API call for better quality
-LLM_FALLBACK_ENABLED = True  # Fall back to kobold if anthropic fails (not for extraction)
+LLM_FALLBACK_ENABLED = False  # Kobold fallback disabled — model failover (Opus↔Sonnet) + deferred retry used instead
 
 # API Retry & Failover
 # Layer 1: Automatic retry for transient errors (500, 502, 503, timeouts)
