@@ -39,28 +39,23 @@ AI_NAME = os.getenv("AI_NAME", "Isaac")
 # =============================================================================
 # Anthropic (Claude)
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")  # Default/fallback model
-ANTHROPIC_MODEL_CONVERSATION = os.getenv("ANTHROPIC_MODEL_CONVERSATION", "claude-sonnet-4-5-20250929")  # User-facing chat (Sonnet)
-ANTHROPIC_MODEL_EXTRACTION = os.getenv("ANTHROPIC_MODEL_EXTRACTION", "claude-sonnet-4-5-20250929")  # Memory extraction (Sonnet)
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")  # Default/fallback model
+ANTHROPIC_MODEL_CONVERSATION = os.getenv("ANTHROPIC_MODEL_CONVERSATION", "claude-sonnet-4-6")  # User-facing chat (Sonnet)
+ANTHROPIC_MODEL_EXTRACTION = os.getenv("ANTHROPIC_MODEL_EXTRACTION", "claude-sonnet-4-6")  # Memory extraction (Sonnet)
 ANTHROPIC_MAX_TOKENS = int(os.getenv("ANTHROPIC_MAX_TOKENS", "4096"))
 
 # Extended Thinking
 # Claude uses a private scratchpad to reason before responding.
 # Improves quality for complex reasoning tasks but uses more output tokens.
 #
-# Opus 4.6 uses ADAPTIVE thinking (model decides how much to think).
+# Both Opus 4.6 and Sonnet 4.6 use ADAPTIVE thinking (model decides how much to think).
 # Effort level guides how aggressively the model thinks:
 #   "low"    - Skips thinking for simple tasks
 #   "medium" - Moderate thinking, may skip for trivial queries
 #   "high"   - Always thinks with deep reasoning (recommended)
 #   "max"    - No constraints on thinking depth (Opus 4.6 only)
-ANTHROPIC_THINKING_EFFORT = "high"                 # Effort level for Opus 4.6 adaptive thinking
-
-# Sonnet-specific thinking settings (Sonnet uses manual extended thinking)
-# temperature is forced to 1.0 by the API when thinking is enabled.
-ANTHROPIC_THINKING_ENABLED = True                  # Default state for new users (on by default)
-ANTHROPIC_SONNET_THINKING_BUDGET_TOKENS = 10000    # Max tokens Sonnet can use for thinking
-ANTHROPIC_SONNET_THINKING_MAX_TOKENS = 16000       # Total max_tokens when Sonnet thinking is on (must be > budget)
+ANTHROPIC_THINKING_EFFORT = "high"                 # Effort level for adaptive thinking
+ANTHROPIC_THINKING_ENABLED = True                   # Default state for new users (on by default)
 
 # KoboldCpp (Local)
 KOBOLD_API_URL = os.getenv("KOBOLD_API_URL", "http://127.0.0.1:5001")
@@ -88,8 +83,8 @@ STREAM_INACTIVITY_TIMEOUT = 360                # seconds (0 = disabled)
 # Maps each model to its fallback. When primary model is overloaded or rate-limited,
 # the system automatically retries with the alternate model.
 ANTHROPIC_MODEL_FAILOVER = {
-    "claude-opus-4-6": "claude-sonnet-4-5-20250929",
-    "claude-sonnet-4-5-20250929": "claude-opus-4-6",
+    "claude-opus-4-6": "claude-sonnet-4-6",
+    "claude-sonnet-4-6": "claude-opus-4-6",
 }
 
 # Layer 3: Deferred retry when all models unavailable
@@ -100,7 +95,7 @@ API_DEFERRED_RETRY_DELAY = 1200               # 20 minutes in seconds
 # on cache hits) and time-to-first-token latency (~85% reduction).
 # The system prompt is split at a delimiter into stable (cached) and dynamic
 # portions. Only content before the delimiter is marked with cache_control.
-# Minimum cacheable tokens: 1024 (Sonnet 4.5), 4096 (Opus 4.6).
+# Minimum cacheable tokens: 1024 (Sonnet 4.6), 4096 (Opus 4.6).
 # Prompts below the minimum are processed normally without caching.
 PROMPT_CACHE_ENABLED = os.getenv("PROMPT_CACHE_ENABLED", "true").lower() == "true"
 PROMPT_CACHE_BREAKPOINT = "<!-- cache-breakpoint -->"  # Delimiter between stable/dynamic content
@@ -581,7 +576,7 @@ TELEGRAM_MAX_PER_HOUR = 30   # Maximum Telegram messages per hour
 # Requires enabling in Anthropic Console (organization setting).
 #
 # Pricing: $10 per 1,000 searches + standard token costs (results are input tokens)
-# Supported models: Claude Sonnet 4.5, Haiku 4.5, and newer
+# Supported models: Claude Sonnet 4.6, Haiku 4.5, and newer
 #
 # When enabled, Claude can autonomously search the web for current information.
 # Results include citations (title, URL, cited_text) automatically.
@@ -596,7 +591,7 @@ WEB_SEARCH_TOTAL_ALLOWED_PER_DAY = 30           # Daily budget (resets at midnig
 # Requires beta header: web-fetch-2025-09-10 (toggled via WEB_FETCH_BETA_HEADER)
 #
 # Pricing: Standard token costs (fetched content counted as input tokens)
-# Supported models: Claude Opus 4.6, Sonnet 4.5, Haiku 4.5+
+# Supported models: Claude Opus 4.6, Sonnet 4.6, Haiku 4.5+
 #
 # When enabled alongside web search, Claude can search for sources then fetch
 # full content for deep analysis. Claude can ONLY fetch URLs explicitly provided
@@ -707,7 +702,7 @@ NOVEL_CHAPTER_MAX_TOKENS = 4000
 # Model routing for reading tasks:
 #   - Chapter extraction (per-chapter): Uses Sonnet (cost-effective, strong comprehension)
 #   - Reflective passes (arc boundaries + completion): Uses Opus (deeper synthesis)
-NOVEL_EXTRACTION_MODEL = os.getenv("NOVEL_EXTRACTION_MODEL", "claude-sonnet-4-5-20250929")
+NOVEL_EXTRACTION_MODEL = os.getenv("NOVEL_EXTRACTION_MODEL", "claude-sonnet-4-6")
 NOVEL_REFLECTION_MODEL = os.getenv("NOVEL_REFLECTION_MODEL", "claude-opus-4-6")
 
 # Reflective pass triggers: Opus runs at arc boundaries and at book completion.

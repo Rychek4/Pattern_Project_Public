@@ -185,7 +185,7 @@ Create a `.env` file:
 ANTHROPIC_API_KEY=sk-ant-...
 
 # Optional
-ANTHROPIC_MODEL=claude-sonnet-4-5-20250929
+ANTHROPIC_MODEL=claude-sonnet-4-6
 USER_NAME=YourName
 AI_NAME=Isaac
 

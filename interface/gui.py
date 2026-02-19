@@ -411,7 +411,7 @@ class ChatWindow(QMainWindow):
         # Model switcher dropdown
         self.model_dropdown = QComboBox()
         self.model_dropdown.setFont(QFont(UI_FONT_FAMILY, 10))
-        self.model_dropdown.addItems(["Opus 4.6", "Sonnet 4.5"])
+        self.model_dropdown.addItems(["Opus 4.6", "Sonnet 4.6"])
         self.model_dropdown.setToolTip("Conversation model (affects new messages)")
         self.model_dropdown.currentIndexChanged.connect(self._on_model_changed)
         layout.addWidget(self.model_dropdown)
@@ -917,7 +917,7 @@ class ChatWindow(QMainWindow):
         # Map model ID to dropdown index
         model_to_index = {
             "claude-opus-4-6": 0,
-            "claude-sonnet-4-5-20250929": 1
+            "claude-sonnet-4-6": 1
         }
 
         index = model_to_index.get(saved_model, 1)  # Default to Sonnet (index 1)
@@ -932,10 +932,10 @@ class ChatWindow(QMainWindow):
         # Map dropdown index to model ID
         model_map = {
             0: ("Opus 4.6", "claude-opus-4-6"),
-            1: ("Sonnet 4.5", "claude-sonnet-4-5-20250929")
+            1: ("Sonnet 4.6", "claude-sonnet-4-6")
         }
 
-        name, model_id = model_map.get(index, ("Sonnet 4.5", "claude-sonnet-4-5-20250929"))
+        name, model_id = model_map.get(index, ("Sonnet 4.6", "claude-sonnet-4-6"))
 
         # Save to user settings
         if self._user_settings:
