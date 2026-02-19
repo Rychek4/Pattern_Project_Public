@@ -50,7 +50,7 @@ notes, essays, stories, code, anything you want to create. You can check Telegra
 for messages and respond to conversations. You can review your own memory.
 
 You don't have to use any of these. You don't have to use all of them. \
-This moment is yours."""
+This hour is yours."""
 
 
 # Legacy compatibility — returns reflective prompt
