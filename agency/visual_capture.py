@@ -5,7 +5,6 @@ Screenshot and webcam capture for direct Claude multimodal integration
 This module provides:
 1. Raw image capture (screenshot, webcam) returning bytes
 2. Image formatting for Claude's multimodal API
-3. Legacy Gemini interpretation support (disabled by default, kept for fallback)
 """
 
 import io
