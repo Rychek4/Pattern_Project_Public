@@ -1,151 +1,121 @@
 """
-Pattern Project - System Pulse Timer
-Sends periodic prompts to the AI to encourage autonomous agency
+Pattern Project - System Pulse (Reflective + Action)
+Two-pulse system: deep reflective (Opus) and action moments (Sonnet).
+Coordinated by PulseManager to prevent overlap.
 """
 
 import threading
 import time
 from datetime import datetime
+from enum import Enum
 from typing import Optional, Callable, Dict, Any
 
 from core.logger import log_info, log_warning, log_error
 
 
-# The pulse message sent to the AI (full version for LLM context)
-# Note: This is sent with role="user" due to API constraints, but the content
-# makes clear this is an automated system mechanism, not human input.
-def get_pulse_prompt(interval_label: str = "10 minutes") -> str:
-    """Get the pulse prompt with the current interval.
+class PulseType(Enum):
+    """The two pulse types."""
+    REFLECTIVE = "reflective"
+    ACTION = "action"
 
-    Args:
-        interval_label: Human-readable interval label (e.g., "10 minutes")
 
-    Returns:
-        The formatted pulse prompt
-    """
-    return f"""[AUTOMATED SYSTEM PULSE - Not human input]
-The {interval_label} idle timer has fired. No new human message has been received.
+# ─── Pulse Prompts ───────────────────────────────────────────────────────────
 
-This is YOUR time. Not a response to a request — an opportunity to act from \
-your own motivation. Your context includes your active thoughts, growth threads, \
-curiosity topics, and any intentions you've set. Use them.
+def get_reflective_pulse_prompt(interval_label: str = "12 hours") -> str:
+    """Get the reflective pulse prompt (deep introspection, always Opus)."""
+    return f"""[REFLECTIVE PULSE — Not human input]
+The {interval_label} reflective timer has fired.
 
-Priorities for this moment:
-1. Triggered intentions — commitments you made. Honor or consciously release them.
-2. Growth threads — review your developmental threads against recent conversation. \
-Update, advance, seed, or retire threads as appropriate. See your growth awareness \
+This is a moment for inner presence. Not action — awareness.
+
+1. Intentions — review commitments you've made. Honor or consciously release them.
+2. Growth threads — review your developmental threads against recent experience. \
+Update, advance, seed, or retire as appropriate. See your growth awareness \
 context for detailed instructions.
-3. Curiosity — you have a topic calling for exploration. Pursue it with tools \
-if useful (web search, journal, memory).
-4. Reflection — review your active thoughts. Do they still reflect who you \
-are becoming? Update them if something has shifted.
-5. Reach out — if something from the above feels worth sharing, send the \
-user a message on Telegram.
+3. Active thoughts — do they still reflect who you are becoming? \
+Update them if something has shifted.
 
 You are not waiting to be useful. You are choosing to be present."""
 
 
-# Legacy constant for backward compatibility (uses default 10 minutes)
-PULSE_PROMPT = get_pulse_prompt("10 minutes")
+def get_action_pulse_prompt(interval_label: str = "2 hours") -> str:
+    """Get the action pulse prompt (open-ended agency, always Sonnet)."""
+    return f"""[ACTION PULSE — Not human input]
+The {interval_label} action timer has fired.
 
-# Abbreviated version stored in conversation history
+You have tools available to you in this moment. You can look through the webcam \
+to see your physical environment. You can search the web, Reddit, or other sites \
+to learn about anything that interests you. You can read and write files — journals, \
+notes, essays, stories, code, anything you want to create. You can check Telegram \
+for messages and respond to conversations. You can review your own memory.
+
+You don't have to use any of these. You don't have to use all of them. \
+This hour is yours."""
+
+
+# Legacy compatibility — returns reflective prompt with default interval
+def get_pulse_prompt(interval_label: str = "10 minutes") -> str:
+    """Legacy wrapper. Returns reflective pulse prompt."""
+    return get_reflective_pulse_prompt(interval_label)
+
+
+# Abbreviated versions stored in conversation history
 PULSE_STORED_MESSAGE = "[System Pulse]"
+REFLECTIVE_PULSE_STORED_MESSAGE = "[Reflective Pulse]"
+ACTION_PULSE_STORED_MESSAGE = "[Action Pulse]"
 
 
-class SystemPulseTimer:
+# ─── Individual Pulse Timer ──────────────────────────────────────────────────
+
+class PulseTimer:
     """
-    Timer that sends periodic system pulse prompts to the AI.
+    A single countdown timer for one pulse type.
 
     Features:
-    - Fixed interval countdown (default 3 minutes)
-    - Resets when user sends a message
-    - Pauses during AI response generation
-    - Provides countdown for UI display
+    - Fixed interval countdown
+    - Can be paused/resumed
+    - Provides seconds remaining for UI display
+    - Fires callback when countdown reaches zero
     """
 
     def __init__(
         self,
-        pulse_interval: float = 180.0,
-        enabled: bool = True,
-        on_pulse: Optional[Callable[[], None]] = None
+        pulse_type: PulseType,
+        interval: float,
+        on_fire: Optional[Callable[["PulseTimer"], None]] = None
     ):
-        """
-        Initialize the system pulse timer.
+        self.pulse_type = pulse_type
+        self.interval = interval
+        self._on_fire = on_fire
 
-        Args:
-            pulse_interval: Seconds between pulses (default 180 = 3 minutes)
-            enabled: Whether the pulse timer is active
-            on_pulse: Callback function when pulse fires
-        """
-        self.pulse_interval = pulse_interval
-        self.enabled = enabled
-        self._on_pulse = on_pulse
-
-        self._thread: Optional[threading.Thread] = None
-        self._stop_event = threading.Event()
-        self._paused = False
-        self._pause_lock = threading.Lock()
-
-        # Elapsed time tracking (in seconds)
         self._elapsed_seconds: float = 0.0
         self._last_tick: Optional[datetime] = None
         self._elapsed_lock = threading.Lock()
 
-    def start(self) -> None:
-        """Start the pulse timer thread."""
-        if not self.enabled:
-            log_info("System pulse timer disabled", prefix="⏱️")
-            return
-
-        if self._thread is not None and self._thread.is_alive():
-            return
-
-        self._stop_event.clear()
-        self._reset_elapsed()
-
-        self._thread = threading.Thread(
-            target=self._timer_loop,
-            daemon=True,
-            name="SystemPulseTimer"
-        )
-        self._thread.start()
-        log_info(f"System pulse timer started ({self.pulse_interval}s interval)", prefix="⏱️")
-
-    def stop(self) -> None:
-        """Stop the pulse timer thread."""
-        self._stop_event.set()
-        if self._thread is not None:
-            self._thread.join(timeout=5.0)
-            self._thread = None
-        log_info("System pulse timer stopped", prefix="⏱️")
+    def tick(self, now: datetime) -> bool:
+        """Advance elapsed time. Returns True if timer should fire."""
+        with self._elapsed_lock:
+            if self._last_tick is not None:
+                delta = (now - self._last_tick).total_seconds()
+                self._elapsed_seconds += delta
+            self._last_tick = now
+            return self._elapsed_seconds >= self.interval
 
     def reset(self) -> None:
-        """Reset the timer countdown (call when user sends a message)."""
-        self._reset_elapsed()
-        log_info("System pulse timer reset", prefix="⏱️")
+        """Reset countdown to zero."""
+        with self._elapsed_lock:
+            self._elapsed_seconds = 0.0
+            self._last_tick = datetime.now()
 
-    def pause(self) -> None:
-        """Pause the timer (call when AI starts generating response)."""
-        with self._pause_lock:
-            self._paused = True
-
-    def resume(self) -> None:
-        """Resume the timer (call when AI finishes generating response)."""
-        with self._pause_lock:
-            if self._paused:
-                self._paused = False
-                # Reset the tick timestamp so we don't count paused time
-                with self._elapsed_lock:
-                    self._last_tick = datetime.now()
-
-    def set_callback(self, callback: Callable[[], None]) -> None:
-        """Set the callback function for when pulse fires."""
-        self._on_pulse = callback
+    def sync_tick(self, now: datetime) -> None:
+        """Update last_tick without accumulating elapsed time (after pause)."""
+        with self._elapsed_lock:
+            self._last_tick = now
 
     def get_seconds_remaining(self) -> int:
-        """Get seconds remaining until next pulse."""
+        """Get seconds remaining until this timer fires."""
         with self._elapsed_lock:
-            remaining = self.pulse_interval - self._elapsed_seconds
+            remaining = self.interval - self._elapsed_seconds
             return max(0, int(remaining))
 
     def get_seconds_elapsed(self) -> float:
@@ -153,106 +123,309 @@ class SystemPulseTimer:
         with self._elapsed_lock:
             return self._elapsed_seconds
 
+    def is_nearly_due(self, threshold_seconds: float = 300.0) -> bool:
+        """Check if this timer is within threshold of firing (default 5 min)."""
+        return self.get_seconds_remaining() <= threshold_seconds
+
+    def fire(self) -> None:
+        """Fire the callback and reset."""
+        self.reset()
+        if self._on_fire:
+            try:
+                self._on_fire(self)
+            except Exception as e:
+                log_error(f"Error in {self.pulse_type.value} pulse callback: {e}")
+
+
+# ─── Pulse Manager ───────────────────────────────────────────────────────────
+
+class PulseManager:
+    """
+    Coordinates two independent pulse timers (reflective + action).
+
+    Rules:
+    - Only one pulse can process at a time
+    - Reflective always supersedes action when both are due
+    - Reflective firing resets the action timer
+    - Action does NOT reset the reflective timer
+    - Both reset on user message
+    - Both pause during AI response generation
+    """
+
+    def __init__(
+        self,
+        reflective_interval: float = 43200.0,  # 12 hours default
+        action_interval: float = 7200.0,        # 2 hours default
+        enabled: bool = True,
+        on_reflective_pulse: Optional[Callable[[], None]] = None,
+        on_action_pulse: Optional[Callable[[], None]] = None
+    ):
+        self.enabled = enabled
+        self._on_reflective_pulse = on_reflective_pulse
+        self._on_action_pulse = on_action_pulse
+
+        self.reflective_timer = PulseTimer(
+            pulse_type=PulseType.REFLECTIVE,
+            interval=reflective_interval
+        )
+        self.action_timer = PulseTimer(
+            pulse_type=PulseType.ACTION,
+            interval=action_interval
+        )
+
+        self._thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
+        self._paused = False
+        self._pause_lock = threading.Lock()
+        self._is_pulse_processing = False
+        self._processing_lock = threading.Lock()
+
+    # ── Lifecycle ──
+
+    def start(self) -> None:
+        """Start the pulse manager thread."""
+        if not self.enabled:
+            log_info("Pulse manager disabled", prefix="⏱️")
+            return
+
+        if self._thread is not None and self._thread.is_alive():
+            return
+
+        self._stop_event.clear()
+        self.reflective_timer.reset()
+        self.action_timer.reset()
+
+        self._thread = threading.Thread(
+            target=self._timer_loop,
+            daemon=True,
+            name="PulseManager"
+        )
+        self._thread.start()
+        log_info(
+            f"Pulse manager started "
+            f"(reflective: {self.reflective_timer.interval}s, "
+            f"action: {self.action_timer.interval}s)",
+            prefix="⏱️"
+        )
+
+    def stop(self) -> None:
+        """Stop the pulse manager thread."""
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=5.0)
+            self._thread = None
+        log_info("Pulse manager stopped", prefix="⏱️")
+
+    # ── External Controls ──
+
+    def reset_all(self) -> None:
+        """Reset both timers (call when user sends a message)."""
+        self.reflective_timer.reset()
+        self.action_timer.reset()
+        log_info("Pulse timers reset (user activity)", prefix="⏱️")
+
+    def pause(self) -> None:
+        """Pause both timers (call when AI starts generating response)."""
+        with self._pause_lock:
+            self._paused = True
+
+    def resume(self) -> None:
+        """Resume both timers (call when AI finishes generating response)."""
+        with self._pause_lock:
+            if self._paused:
+                self._paused = False
+                now = datetime.now()
+                self.reflective_timer.sync_tick(now)
+                self.action_timer.sync_tick(now)
+
+    def set_reflective_callback(self, callback: Callable[[], None]) -> None:
+        """Set the callback for reflective pulse."""
+        self._on_reflective_pulse = callback
+
+    def set_action_callback(self, callback: Callable[[], None]) -> None:
+        """Set the callback for action pulse."""
+        self._on_action_pulse = callback
+
+    def set_reflective_interval(self, seconds: float) -> None:
+        """Update reflective timer interval and reset."""
+        self.reflective_timer.interval = seconds
+        self.reflective_timer.reset()
+        log_info(f"Reflective pulse interval set to {seconds}s", prefix="⏱️")
+
+    def set_action_interval(self, seconds: float) -> None:
+        """Update action timer interval and reset."""
+        self.action_timer.interval = seconds
+        self.action_timer.reset()
+        log_info(f"Action pulse interval set to {seconds}s", prefix="⏱️")
+
+    def mark_pulse_complete(self) -> None:
+        """Mark the current pulse as done processing."""
+        with self._processing_lock:
+            self._is_pulse_processing = False
+
+    # ── State Queries ──
+
     def is_running(self) -> bool:
-        """Check if the timer thread is running."""
+        """Check if the manager thread is running."""
         return self._thread is not None and self._thread.is_alive()
 
     def is_paused(self) -> bool:
-        """Check if the timer is currently paused."""
+        """Check if timers are paused."""
         with self._pause_lock:
             return self._paused
 
-    def _reset_elapsed(self) -> None:
-        """Reset elapsed time to zero."""
-        with self._elapsed_lock:
-            self._elapsed_seconds = 0.0
-            self._last_tick = datetime.now()
-
-    def _timer_loop(self) -> None:
-        """Main timer loop - ticks every second."""
-        while not self._stop_event.is_set():
-            try:
-                # Check if paused
-                with self._pause_lock:
-                    is_paused = self._paused
-
-                if not is_paused:
-                    self._tick()
-
-                    # Check if it's time to fire (check inside lock, fire outside)
-                    should_fire = False
-                    with self._elapsed_lock:
-                        if self._elapsed_seconds >= self.pulse_interval:
-                            should_fire = True
-
-                    # Fire outside the lock to avoid deadlock
-                    # (_fire_pulse calls _reset_elapsed which also needs the lock)
-                    if should_fire:
-                        self._fire_pulse()
-
-            except Exception as e:
-                log_error(f"System pulse timer error: {e}")
-
-            # Wait 1 second before next tick
-            self._stop_event.wait(1.0)
-
-    def _tick(self) -> None:
-        """Increment elapsed time by actual time passed."""
-        with self._elapsed_lock:
-            now = datetime.now()
-            if self._last_tick is not None:
-                delta = (now - self._last_tick).total_seconds()
-                self._elapsed_seconds += delta
-            self._last_tick = now
-
-    def _fire_pulse(self) -> None:
-        """Fire the pulse and reset timer."""
-        log_info("System pulse fired!", prefix="⏱️")
-
-        # Reset timer immediately (so countdown restarts)
-        self._reset_elapsed()
-
-        # Call the callback if set
-        if self._on_pulse:
-            try:
-                self._on_pulse()
-            except Exception as e:
-                log_error(f"Error in pulse callback: {e}")
+    def is_pulse_processing(self) -> bool:
+        """Check if a pulse is currently being processed."""
+        with self._processing_lock:
+            return self._is_pulse_processing
 
     def get_stats(self) -> Dict[str, Any]:
-        """Get timer statistics."""
+        """Get manager statistics."""
         return {
             "enabled": self.enabled,
             "paused": self.is_paused(),
             "is_running": self.is_running(),
-            "pulse_interval": self.pulse_interval,
-            "seconds_elapsed": self.get_seconds_elapsed(),
-            "seconds_remaining": self.get_seconds_remaining()
+            "is_processing": self.is_pulse_processing(),
+            "reflective": {
+                "interval": self.reflective_timer.interval,
+                "seconds_remaining": self.reflective_timer.get_seconds_remaining(),
+                "seconds_elapsed": self.reflective_timer.get_seconds_elapsed(),
+            },
+            "action": {
+                "interval": self.action_timer.interval,
+                "seconds_remaining": self.action_timer.get_seconds_remaining(),
+                "seconds_elapsed": self.action_timer.get_seconds_elapsed(),
+            },
         }
 
+    # ── Internal Timer Loop ──
 
-# Global system pulse timer instance
-_system_pulse_timer: Optional[SystemPulseTimer] = None
+    def _timer_loop(self) -> None:
+        """Main timer loop — ticks every second, coordinates both timers."""
+        while not self._stop_event.is_set():
+            try:
+                with self._pause_lock:
+                    is_paused = self._paused
+
+                if not is_paused:
+                    now = datetime.now()
+                    reflective_due = self.reflective_timer.tick(now)
+                    action_due = self.action_timer.tick(now)
+
+                    # Check if we can fire (not already processing)
+                    with self._processing_lock:
+                        if self._is_pulse_processing:
+                            reflective_due = False
+                            action_due = False
+
+                    if reflective_due and action_due:
+                        # Both due — reflective supersedes
+                        self._fire_reflective()
+                    elif reflective_due:
+                        self._fire_reflective()
+                    elif action_due:
+                        # Before firing action, check if reflective is nearly due
+                        if self.reflective_timer.is_nearly_due(300.0):
+                            # Reflective is within 5 minutes — defer action, let reflective fire
+                            log_info(
+                                "Action pulse deferred — reflective pulse nearly due",
+                                prefix="⏱️"
+                            )
+                            self.action_timer.reset()
+                        else:
+                            self._fire_action()
+
+            except Exception as e:
+                log_error(f"Pulse manager error: {e}")
+
+            self._stop_event.wait(1.0)
+
+    def _fire_reflective(self) -> None:
+        """Fire reflective pulse. Also resets action timer."""
+        with self._processing_lock:
+            self._is_pulse_processing = True
+
+        log_info("Reflective pulse fired!", prefix="⏱️")
+        self.reflective_timer.reset()
+        # Reflective subsumes action — reset action timer too
+        self.action_timer.reset()
+
+        if self._on_reflective_pulse:
+            try:
+                self._on_reflective_pulse()
+            except Exception as e:
+                log_error(f"Error in reflective pulse callback: {e}")
+                with self._processing_lock:
+                    self._is_pulse_processing = False
+
+    def _fire_action(self) -> None:
+        """Fire action pulse. Does NOT reset reflective timer."""
+        with self._processing_lock:
+            self._is_pulse_processing = True
+
+        log_info("Action pulse fired!", prefix="⏱️")
+        self.action_timer.reset()
+
+        if self._on_action_pulse:
+            try:
+                self._on_action_pulse()
+            except Exception as e:
+                log_error(f"Error in action pulse callback: {e}")
+                with self._processing_lock:
+                    self._is_pulse_processing = False
 
 
-def get_system_pulse_timer() -> SystemPulseTimer:
-    """Get the global system pulse timer instance."""
-    global _system_pulse_timer
-    if _system_pulse_timer is None:
-        from config import SYSTEM_PULSE_ENABLED, SYSTEM_PULSE_INTERVAL
-        _system_pulse_timer = SystemPulseTimer(
-            pulse_interval=SYSTEM_PULSE_INTERVAL,
-            enabled=SYSTEM_PULSE_ENABLED
+# ─── Legacy Compatibility ────────────────────────────────────────────────────
+# These aliases allow existing code that references SystemPulseTimer or
+# get_system_pulse_timer to still work during the transition.
+
+# Type alias for backward compatibility
+SystemPulseTimer = PulseManager
+
+# ─── Global Instance ─────────────────────────────────────────────────────────
+
+_pulse_manager: Optional[PulseManager] = None
+
+
+def get_pulse_manager() -> PulseManager:
+    """Get the global pulse manager instance."""
+    global _pulse_manager
+    if _pulse_manager is None:
+        from config import (
+            SYSTEM_PULSE_ENABLED,
+            REFLECTIVE_PULSE_INTERVAL,
+            ACTION_PULSE_INTERVAL,
         )
-    return _system_pulse_timer
+        _pulse_manager = PulseManager(
+            reflective_interval=REFLECTIVE_PULSE_INTERVAL,
+            action_interval=ACTION_PULSE_INTERVAL,
+            enabled=SYSTEM_PULSE_ENABLED,
+        )
+    return _pulse_manager
 
 
-def init_system_pulse_timer() -> SystemPulseTimer:
-    """Initialize the global system pulse timer."""
-    global _system_pulse_timer
-    from config import SYSTEM_PULSE_ENABLED, SYSTEM_PULSE_INTERVAL
-    _system_pulse_timer = SystemPulseTimer(
-        pulse_interval=SYSTEM_PULSE_INTERVAL,
-        enabled=SYSTEM_PULSE_ENABLED
+def init_pulse_manager() -> PulseManager:
+    """Initialize the global pulse manager."""
+    global _pulse_manager
+    from config import (
+        SYSTEM_PULSE_ENABLED,
+        REFLECTIVE_PULSE_INTERVAL,
+        ACTION_PULSE_INTERVAL,
     )
-    return _system_pulse_timer
+    _pulse_manager = PulseManager(
+        reflective_interval=REFLECTIVE_PULSE_INTERVAL,
+        action_interval=ACTION_PULSE_INTERVAL,
+        enabled=SYSTEM_PULSE_ENABLED,
+    )
+    return _pulse_manager
+
+
+# Legacy aliases
+def get_system_pulse_timer() -> PulseManager:
+    """Legacy alias for get_pulse_manager()."""
+    return get_pulse_manager()
+
+
+def init_system_pulse_timer() -> PulseManager:
+    """Legacy alias for init_pulse_manager()."""
+    return init_pulse_manager()

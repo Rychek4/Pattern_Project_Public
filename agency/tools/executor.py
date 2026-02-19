@@ -687,53 +687,53 @@ class ToolExecutor:
         self, input: Dict, id: str, ctx: Dict
     ) -> ToolResult:
         """
-        Set the pulse timer interval.
+        Set a pulse timer interval (reflective or action).
 
-        This tool stores the requested interval in the context for the caller
-        to pick up and signal to the UI. The actual timer adjustment happens
-        in the interface layer (GUI/CLI) which has access to the timer.
-
-        The interval is validated here but applied by the caller.
+        Validates pulse_type + interval combination, then stores in context
+        for the caller to pick up and signal to the UI.
         """
-        from prompt_builder.sources.system_pulse import PULSE_COMMAND_TO_SECONDS
+        from prompt_builder.sources.system_pulse import (
+            REFLECTIVE_INTERVALS, ACTION_INTERVALS, get_interval_label
+        )
 
+        pulse_type = input.get("pulse_type", "")
         interval_str = input.get("interval", "")
 
-        # Validate the interval
-        if interval_str not in PULSE_COMMAND_TO_SECONDS:
+        # Validate pulse_type
+        if pulse_type not in ("reflective", "action"):
             return ToolResult(
                 tool_use_id=id,
                 tool_name="set_pulse_interval",
-                content=f"Invalid interval '{interval_str}'. Valid options: 3m, 10m, 30m, 1h, 2h, 3h, 6h, 12h",
+                content=f"Invalid pulse_type '{pulse_type}'. Must be 'reflective' or 'action'.",
                 is_error=True
             )
 
-        # Get interval in seconds
-        interval_seconds = PULSE_COMMAND_TO_SECONDS[interval_str]
+        # Validate interval for the specific pulse type
+        valid_intervals = REFLECTIVE_INTERVALS if pulse_type == "reflective" else ACTION_INTERVALS
+        if interval_str not in valid_intervals:
+            valid_opts = ", ".join(valid_intervals.keys())
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="set_pulse_interval",
+                content=f"Invalid interval '{interval_str}' for {pulse_type} pulse. Valid options: {valid_opts}",
+                is_error=True
+            )
+
+        interval_seconds = valid_intervals[interval_str]
+        label = get_interval_label(interval_seconds)
 
         # Store in context for caller to handle UI signaling
-        # The caller (response processor) will check for this and emit the signal
-        ctx["pulse_interval_change"] = interval_seconds
-
-        # Human-readable label
-        interval_labels = {
-            "3m": "3 minutes",
-            "10m": "10 minutes",
-            "30m": "30 minutes",
-            "1h": "1 hour",
-            "2h": "2 hours",
-            "3h": "3 hours",
-            "6h": "6 hours",
-            "12h": "12 hours",
+        ctx["pulse_interval_change"] = {
+            "pulse_type": pulse_type,
+            "interval_seconds": interval_seconds,
         }
-        label = interval_labels.get(interval_str, interval_str)
 
-        log_info(f"Pulse interval change requested: {label}", prefix="⏱️")
+        log_info(f"{pulse_type.capitalize()} pulse interval change requested: {label}", prefix="⏱️")
 
         return ToolResult(
             tool_use_id=id,
             tool_name="set_pulse_interval",
-            content=f"Pulse timer set to {label}"
+            content=f"{pulse_type.capitalize()} pulse timer set to {label}"
         )
 
     # =========================================================================

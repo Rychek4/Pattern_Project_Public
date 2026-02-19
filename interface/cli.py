@@ -80,11 +80,12 @@ class ChatCLI:
         router = get_llm_router()
         prompt_builder = get_prompt_builder()
 
-        # Set up system pulse timer if enabled
+        # Set up pulse manager if enabled
         if config.SYSTEM_PULSE_ENABLED:
-            from agency.system_pulse import get_system_pulse_timer
-            self._system_pulse_timer = get_system_pulse_timer()
-            self._system_pulse_timer.set_callback(self._on_pulse_fired)
+            from agency.system_pulse import get_pulse_manager
+            self._system_pulse_timer = get_pulse_manager()
+            self._system_pulse_timer.set_reflective_callback(self._on_pulse_fired)
+            self._system_pulse_timer.set_action_callback(self._on_pulse_fired)
 
         # Set up reminder scheduler
         from agency.intentions import get_reminder_scheduler
@@ -139,7 +140,7 @@ class ChatCLI:
 
                 # Reset pulse timer on user input
                 if self._system_pulse_timer:
-                    self._system_pulse_timer.reset()
+                    self._system_pulse_timer.reset_all()
                     self._system_pulse_timer.pause()
 
                 # Store user message
@@ -175,12 +176,16 @@ class ChatCLI:
                 from agency.tools import get_tool_definitions, process_with_tools
                 tools = get_tool_definitions()
 
-                # Callback for pulse interval changes
-                def on_pulse_change(interval: int):
-                    if self._system_pulse_timer:
-                        self._system_pulse_timer.pulse_interval = interval
-                        self._system_pulse_timer.reset()
-                        log_info(f"Pulse interval changed to {interval}s", prefix="⏱️")
+                # Callback for pulse interval changes (dict format)
+                def on_pulse_change(change_info):
+                    if self._system_pulse_timer and isinstance(change_info, dict):
+                        pt = change_info.get("pulse_type", "")
+                        secs = change_info.get("interval_seconds", 0)
+                        if pt == "reflective":
+                            self._system_pulse_timer.set_reflective_interval(secs)
+                        elif pt == "action":
+                            self._system_pulse_timer.set_action_interval(secs)
+                        log_info(f"{pt} pulse interval changed to {secs}s", prefix="⏱️")
 
                 # Show thinking indicator
                 import time
@@ -602,9 +607,12 @@ class ChatCLI:
             pass
 
     def _process_pulse(self) -> None:
-        """Process a system pulse using native tools."""
-        from agency.system_pulse import PULSE_PROMPT, PULSE_STORED_MESSAGE
+        """Process a system pulse using native tools (defaults to action pulse in CLI)."""
+        from agency.system_pulse import (
+            get_action_pulse_prompt, ACTION_PULSE_STORED_MESSAGE
+        )
         from agency.tools import get_tool_definitions, process_with_tools
+        from prompt_builder.sources.system_pulse import get_interval_label
 
         conversation_mgr = get_conversation_manager()
         router = get_llm_router()
@@ -617,54 +625,56 @@ class ChatCLI:
 
             # Show pulse indicator
             self.console.print()
-            self.console.print("[bold magenta]⏱️ System Pulse[/bold magenta]")
+            self.console.print("[bold magenta]⏱️ Action Pulse[/bold magenta]")
+
+            # Get action pulse prompt with current interval
+            interval = self._system_pulse_timer.action_timer.interval if self._system_pulse_timer else 7200
+            interval_label = get_interval_label(interval)
+            pulse_prompt = get_action_pulse_prompt(interval_label)
+            stored_message = ACTION_PULSE_STORED_MESSAGE
 
             # Store abbreviated pulse message
             conversation_mgr.add_turn(
                 role="user",
-                content=PULSE_STORED_MESSAGE,
+                content=stored_message,
                 input_type="system_pulse"
             )
 
-            # Build prompt with full pulse message
-            # Mark as pulse so CuriositySource can provide directive context
+            # Build prompt
             assembled = prompt_builder.build(
-                user_input=PULSE_PROMPT,
+                user_input=pulse_prompt,
                 system_prompt="",
                 additional_context={"is_pulse": True}
             )
 
-            # Get conversation history (uses saved context count from shutdown)
             history = conversation_mgr.get_api_messages()
+            history.append({"role": "user", "content": pulse_prompt})
 
-            # Add the pulse prompt as the message to respond to
-            # (role="user" is an API constraint, but content clarifies it's automated)
-            history.append({"role": "user", "content": PULSE_PROMPT})
-
-            # Get tool definitions for native tool use (pulse-only tools included)
             tools = get_tool_definitions(is_pulse=True)
 
-            # Callback for pulse interval changes
-            def on_pulse_change(interval: int):
-                if self._system_pulse_timer:
-                    self._system_pulse_timer.pulse_interval = interval
-                    self._system_pulse_timer.reset()
-                    log_info(f"Pulse interval changed to {interval}s", prefix="⏱️")
+            # Callback for pulse interval changes (dict format)
+            def on_pulse_change(change_info):
+                if self._system_pulse_timer and isinstance(change_info, dict):
+                    pt = change_info.get("pulse_type", "")
+                    secs = change_info.get("interval_seconds", 0)
+                    if pt == "reflective":
+                        self._system_pulse_timer.set_reflective_interval(secs)
+                    elif pt == "action":
+                        self._system_pulse_timer.set_action_interval(secs)
+                    log_info(f"{pt} pulse interval changed to {secs}s", prefix="⏱️")
 
             # Show thinking indicator
             with self.console.status("[bold magenta]Pulse thinking...[/bold magenta]", spinner="dots"):
-                from core.user_settings import get_user_settings
                 response = router.chat(
                     messages=history,
                     system_prompt=assembled.full_system_prompt,
-                    task_type=TaskType.CONVERSATION,
+                    task_type=TaskType.PULSE_ACTION,
                     temperature=0.7,
-                    tools=tools,  # Enable native tools for pulse responses (includes pulse-only tools)
+                    tools=tools,
                     thinking_enabled=True
                 )
 
             if response.success:
-                # Set up dev window callbacks for tool/response tracking
                 dev_callbacks = None
                 if config.DEV_MODE_ENABLED:
                     from interface.dev_window import emit_response_pass, emit_command_executed
@@ -673,7 +683,6 @@ class ChatCLI:
                         "emit_command_executed": emit_command_executed
                     }
 
-                # Use shared helper to process response with native tools
                 result = process_with_tools(
                     llm_router=router,
                     response=response,
@@ -683,7 +692,8 @@ class ChatCLI:
                     pulse_callback=on_pulse_change,
                     tools=tools,
                     dev_mode_callbacks=dev_callbacks,
-                    thinking_enabled=True
+                    thinking_enabled=True,
+                    task_type=TaskType.PULSE_ACTION
                 )
 
                 final_text = result.final_text
@@ -722,8 +732,9 @@ class ChatCLI:
             self.console.print(f"[bold red]Pulse error:[/bold red] {e}")
 
         finally:
-            # Resume timer
+            # Mark pulse complete and resume timers
             if self._system_pulse_timer:
+                self._system_pulse_timer.mark_pulse_complete()
                 self._system_pulse_timer.resume()
 
     def _on_reminder_fired(self, triggered_intentions) -> None:
@@ -783,12 +794,16 @@ class ChatCLI:
             # Get tool definitions for native tool use
             tools = get_tool_definitions()
 
-            # Callback for pulse interval changes
-            def on_pulse_change(interval: int):
-                if self._system_pulse_timer:
-                    self._system_pulse_timer.pulse_interval = interval
-                    self._system_pulse_timer.reset()
-                    log_info(f"Pulse interval changed to {interval}s", prefix="⏱️")
+            # Callback for pulse interval changes (dict format)
+            def on_pulse_change(change_info):
+                if self._system_pulse_timer and isinstance(change_info, dict):
+                    pt = change_info.get("pulse_type", "")
+                    secs = change_info.get("interval_seconds", 0)
+                    if pt == "reflective":
+                        self._system_pulse_timer.set_reflective_interval(secs)
+                    elif pt == "action":
+                        self._system_pulse_timer.set_action_interval(secs)
+                    log_info(f"{pt} pulse interval changed to {secs}s", prefix="⏱️")
 
             # Show thinking indicator
             with self.console.status("[bold yellow]Reminder thinking...[/bold yellow]", spinner="dots"):
@@ -861,8 +876,9 @@ class ChatCLI:
             self.console.print(f"[bold red]Reminder error:[/bold red] {e}")
 
         finally:
-            # Resume timer
+            # Mark pulse complete and resume timers
             if self._system_pulse_timer:
+                self._system_pulse_timer.mark_pulse_complete()
                 self._system_pulse_timer.resume()
 
     def _on_telegram_message(self, message) -> None:
@@ -925,12 +941,16 @@ class ChatCLI:
             # Get tool definitions for native tool use
             tools = get_tool_definitions()
 
-            # Callback for pulse interval changes
-            def on_pulse_change(interval: int):
-                if self._system_pulse_timer:
-                    self._system_pulse_timer.pulse_interval = interval
-                    self._system_pulse_timer.reset()
-                    log_info(f"Pulse interval changed to {interval}s", prefix="⏱️")
+            # Callback for pulse interval changes (dict format)
+            def on_pulse_change(change_info):
+                if self._system_pulse_timer and isinstance(change_info, dict):
+                    pt = change_info.get("pulse_type", "")
+                    secs = change_info.get("interval_seconds", 0)
+                    if pt == "reflective":
+                        self._system_pulse_timer.set_reflective_interval(secs)
+                    elif pt == "action":
+                        self._system_pulse_timer.set_action_interval(secs)
+                    log_info(f"{pt} pulse interval changed to {secs}s", prefix="⏱️")
 
             # Show thinking indicator
             with self.console.status("[bold cyan]Responding to Telegram...[/bold cyan]", spinner="dots"):
@@ -1290,20 +1310,30 @@ class ChatCLI:
             return
 
         stats = self._system_pulse_timer.get_stats()
+        from prompt_builder.sources.system_pulse import get_interval_label
 
-        table = Table(title="System Pulse Timer", show_header=False)
+        table = Table(title="Pulse Manager", show_header=False)
         table.add_column("Property", style="cyan")
         table.add_column("Value")
 
         table.add_row("Enabled", "Yes" if stats["enabled"] else "No")
         table.add_row("Running", "Yes" if stats["is_running"] else "No")
         table.add_row("Paused", "Yes" if stats["paused"] else "No")
-        table.add_row("Interval", f"{stats['pulse_interval']}s ({stats['pulse_interval'] // 60}m)")
+        table.add_row("Processing", "Yes" if stats["is_processing"] else "No")
 
-        remaining = stats["seconds_remaining"]
-        minutes = remaining // 60
-        seconds = remaining % 60
-        table.add_row("Next Pulse In", f"{minutes}:{seconds:02d}")
+        r = stats["reflective"]
+        r_label = get_interval_label(r["interval"])
+        r_remaining = r["seconds_remaining"]
+        r_min, r_sec = divmod(r_remaining, 60)
+        table.add_row("Reflective Interval", f"{r_label} (Opus)")
+        table.add_row("Reflective Next In", f"{r_min}:{r_sec:02d}")
+
+        a = stats["action"]
+        a_label = get_interval_label(a["interval"])
+        a_remaining = a["seconds_remaining"]
+        a_min, a_sec = divmod(a_remaining, 60)
+        table.add_row("Action Interval", f"{a_label} (Sonnet)")
+        table.add_row("Action Next In", f"{a_min}:{a_sec:02d}")
 
         self.console.print(table)
 
