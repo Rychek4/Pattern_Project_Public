@@ -466,7 +466,15 @@ class ChatCLI:
                 "role": "assistant",
                 "content": current_response.raw_content
             })
-            current_history.append(processed.tool_result_message)
+
+            # Ensure every tool_use block has a matching tool_result
+            # (server-side tools need synthetic results)
+            from agency.tools.response_helper import ensure_tool_results
+            tool_result_msg = ensure_tool_results(
+                current_response.raw_content,
+                processed.tool_result_message
+            )
+            current_history.append(tool_result_msg)
 
             # Get next response
             cont_start = time.time()
