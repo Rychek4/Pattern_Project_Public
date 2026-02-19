@@ -47,21 +47,23 @@ def ensure_tool_results(
     tool_result_message: Optional[Dict[str, Any]]
 ) -> Dict[str, Any]:
     """
-    Ensure every tool_use block in raw_content has a matching tool_result.
+    Ensure every CLIENT tool_use block in raw_content has a matching tool_result.
 
-    Server-side tools (web_search, web_fetch) arrive as tool_use blocks
-    in the API response but are NOT executed client-side, so no tool_result
-    is generated for them by the processor.  Earlier fixes re-type these
-    as server_tool_use in raw_content, but some SDK versions may silently
-    normalize them back to tool_use during serialization.  When that
-    happens the API rejects the request with a 400 because the tool_use
-    IDs have no corresponding tool_result blocks.
+    This is a defensive safety net for the multi-pass tool loop.  It scans
+    the assistant message's raw_content for `tool_use` blocks, compares
+    their IDs against the `tool_result` blocks already present in the user
+    message, and adds synthetic entries for any that are missing.
 
-    This function acts as a defensive guarantee: it scans raw_content for
-    tool_use blocks, compares their IDs against the tool_result blocks
-    already present, and adds synthetic tool_result entries for any that
-    are missing.  This makes the continuation message valid regardless
-    of how the SDK serialises server_tool_use.
+    SERVER-SIDE tools (web_search, web_fetch) are explicitly skipped:
+    - Blocks typed as `server_tool_use` are ignored (correct type).
+    - Blocks with `srvtoolu_` ID prefixes are ignored (server tool IDs).
+    These tools are handled entirely by the Anthropic API and must NEVER
+    receive client-side tool_result blocks.
+
+    raw_content may contain a mix of plain dicts and SDK Pydantic objects
+    (e.g. ToolUseBlock, ServerToolUseBlock).  Both are handled.
+
+    See docs/server_tool_use_bug.md for full history.
 
     Args:
         raw_content: The assistant message's raw content blocks
@@ -71,16 +73,28 @@ def ensure_tool_results(
     Returns:
         The tool_result_message dict, possibly augmented with synthetic entries
     """
-    # Collect all tool_use IDs from the assistant message
-    tool_use_ids = set()
+    # Collect CLIENT tool_use IDs from the assistant message.
+    # Skip server tools entirely — they must never have tool_result blocks.
+    client_tool_use_ids = set()
     for block in raw_content:
-        if isinstance(block, dict) and block.get("type") == "tool_use":
+        # Handle both plain dicts and SDK Pydantic objects
+        if isinstance(block, dict):
+            block_type = block.get("type")
             block_id = block.get("id")
-            if block_id:
-                tool_use_ids.add(block_id)
+        else:
+            block_type = getattr(block, "type", None)
+            block_id = getattr(block, "id", None)
 
-    if not tool_use_ids:
-        # No tool_use blocks — nothing to reconcile
+        # Only collect IDs from client tool_use blocks
+        if block_type == "tool_use" and block_id:
+            # Skip server tool IDs (srvtoolu_ prefix)
+            if isinstance(block_id, str) and block_id.startswith("srvtoolu_"):
+                continue
+            client_tool_use_ids.add(block_id)
+        # Explicitly skip server_tool_use blocks (no elif needed, just don't collect)
+
+    if not client_tool_use_ids:
+        # No client tool_use blocks — nothing to reconcile
         return tool_result_message or {"role": "user", "content": []}
 
     # Collect tool_result IDs already present in the user message
@@ -92,15 +106,15 @@ def ensure_tool_results(
                 if result_id:
                     existing_result_ids.add(result_id)
 
-    # Find orphaned tool_use IDs (present in assistant but no tool_result)
-    orphaned_ids = tool_use_ids - existing_result_ids
+    # Find orphaned client tool_use IDs (present in assistant but no tool_result)
+    orphaned_ids = client_tool_use_ids - existing_result_ids
     if not orphaned_ids:
         return tool_result_message
 
     # Build or augment the tool_result message with synthetic entries
     log_warning(
         f"Adding synthetic tool_result for {len(orphaned_ids)} orphaned "
-        f"tool_use block(s) to prevent API 400 error"
+        f"client tool_use block(s) to prevent API 400 error"
     )
     if tool_result_message is None:
         tool_result_message = {"role": "user", "content": []}
@@ -109,7 +123,7 @@ def ensure_tool_results(
         tool_result_message["content"].append({
             "type": "tool_result",
             "tool_use_id": orphan_id,
-            "content": "Server-side tool execution completed.",
+            "content": "Tool execution completed.",
         })
 
     return tool_result_message

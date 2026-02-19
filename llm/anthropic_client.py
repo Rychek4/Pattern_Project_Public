@@ -78,6 +78,8 @@ class StreamingState:
     thinking_text: str = ""  # Accumulated thinking content
     _current_thinking_text: str = ""  # Thinking text for current block
     _current_thinking_signature: str = ""  # Signature for current thinking block
+    # Per-block text tracking (avoids cumulative text in raw_content)
+    _current_block_text: str = ""
     # Error classification (set when stop_reason == "error")
     _error_type: Optional[str] = None  # "overloaded", "rate_limited", "server_error", etc.
     # Prompt caching
@@ -580,54 +582,48 @@ class AnthropicClient:
                         url=getattr(citation, "url", "")
                     ))
 
-            # Build raw_content for continuation (serialize content blocks)
-            # This preserves the original structure for tool_result messages.
-            # Thinking and redacted_thinking blocks MUST be preserved for
-            # multi-turn continuations (API requirement).
+            # Build raw_content for continuation (preserve SDK content blocks)
+            #
+            # IMPORTANT: We store the original Pydantic objects from the SDK
+            # response wherever possible.  The SDK knows how to serialize its
+            # own objects when they are passed back in messages.create(),
+            # and this preserves critical fields that hand-crafted dicts would
+            # drop — most importantly `encrypted_content` inside
+            # web_search_tool_result / web_fetch_tool_result blocks (required
+            # for citation continuity) and `encrypted_index` in text block
+            # citations.
+            #
+            # The one exception: if the SDK returns web_search / web_fetch
+            # invocations as plain `tool_use` blocks (instead of the expected
+            # `server_tool_use`), we re-type them to `server_tool_use` dicts
+            # so the API doesn't demand client-side tool_result blocks.
+            #
+            # See docs/server_tool_use_bug.md for full history.
             raw_content_list = []
             for block in content_blocks:
                 block_type = getattr(block, "type", None)
 
-                if block_type == "thinking":
-                    raw_content_list.append({
-                        "type": "thinking",
-                        "thinking": getattr(block, "thinking", ""),
-                        "signature": getattr(block, "signature", "")
-                    })
-                elif block_type == "redacted_thinking":
-                    raw_content_list.append({
-                        "type": "redacted_thinking",
-                        "data": getattr(block, "data", "")
-                    })
-                elif block_type == "text" or hasattr(block, "text"):
-                    raw_content_list.append({"type": "text", "text": getattr(block, "text", "")})
-                elif block_type == "tool_use":
+                if block_type == "tool_use":
                     tool_name = getattr(block, "name", "")
-                    # Web search/fetch may arrive as tool_use blocks but must be
-                    # serialized as server_tool_use so the API doesn't demand
-                    # client-side tool_result blocks in the next user message.
-                    content_type = "server_tool_use" if tool_name in ("web_search", "web_fetch") else "tool_use"
-                    raw_content_list.append({
-                        "type": content_type,
-                        "id": getattr(block, "id", ""),
-                        "name": tool_name,
-                        "input": getattr(block, "input", {})
-                    })
-                elif block_type in ("web_search_tool_result", "web_fetch_tool_result"):
-                    # Preserve server tool results for continuation context
-                    raw_content_list.append({
-                        "type": block_type,
-                        "tool_use_id": getattr(block, "tool_use_id", ""),
-                        "content": getattr(block, "content", [])
-                    })
-                elif block_type == "server_tool_use":
-                    # Preserve server tool use blocks (web search/fetch invocations)
-                    raw_content_list.append({
-                        "type": "server_tool_use",
-                        "id": getattr(block, "id", ""),
-                        "name": getattr(block, "name", ""),
-                        "input": getattr(block, "input", {})
-                    })
+                    if tool_name in ("web_search", "web_fetch"):
+                        # Re-type to server_tool_use so the API doesn't
+                        # demand a client-side tool_result for this block.
+                        raw_content_list.append({
+                            "type": "server_tool_use",
+                            "id": getattr(block, "id", ""),
+                            "name": tool_name,
+                            "input": getattr(block, "input", {})
+                        })
+                    else:
+                        # Client tool — store the Pydantic object directly
+                        raw_content_list.append(block)
+                else:
+                    # All other block types (text, thinking, redacted_thinking,
+                    # server_tool_use, web_search_tool_result,
+                    # web_fetch_tool_result) — store the Pydantic object
+                    # directly to preserve all fields including
+                    # encrypted_content / encrypted_index / signatures.
+                    raw_content_list.append(block)
 
             # Extract prompt caching metrics from usage
             cache_creation = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
@@ -833,7 +829,11 @@ class AnthropicClient:
                             block_type = getattr(content_block, "type", None)
                             current_block_type = block_type
 
-                            if block_type == "thinking":
+                            if block_type == "text":
+                                # Starting a new text block - reset per-block text
+                                state._current_block_text = ""
+
+                            elif block_type == "thinking":
                                 # Starting a thinking block - reset current thinking state
                                 state._current_thinking_text = ""
                                 state._current_thinking_signature = ""
@@ -892,6 +892,7 @@ class AnthropicClient:
                                 text_chunk = getattr(delta, "text", "")
                                 if text_chunk:
                                     state.text += text_chunk
+                                    state._current_block_text += text_chunk
                                     text_chunks_yielded += 1
                                     yield (text_chunk, state)
 
@@ -990,22 +991,22 @@ class AnthropicClient:
                             state._current_tool_input_json = ""
 
                         elif current_block_type in ("web_search_tool_result", "web_fetch_tool_result"):
-                            # Finalize server tool result block
+                            # Finalize server tool result block.
+                            # Store the original Pydantic object to preserve
+                            # encrypted_content (required for citation continuity
+                            # in multi-turn conversations).
                             result_block = getattr(state, '_current_server_result', None)
                             if result_block:
-                                block_content = getattr(result_block, "content", None) or []
-                                state.raw_content.append({
-                                    "type": current_block_type,
-                                    "tool_use_id": getattr(result_block, "tool_use_id", ""),
-                                    "content": block_content
-                                })
+                                state.raw_content.append(result_block)
                                 state._current_server_result = None
 
                         elif current_block_type == "text":
-                            # Add text block to raw_content
+                            # Add text block to raw_content using per-block
+                            # text (NOT cumulative state.text, which would
+                            # duplicate earlier text blocks' content).
                             state.raw_content.append({
                                 "type": "text",
-                                "text": state.text
+                                "text": state._current_block_text
                             })
 
                         current_block_type = None

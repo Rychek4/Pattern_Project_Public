@@ -285,50 +285,63 @@ class RoundRecorder:
             _indent_block(lines, content, indent=12)
         elif isinstance(content, list):
             # Multimodal content (text blocks, images, tool results, etc.)
+            # Blocks may be plain dicts or SDK Pydantic objects — use
+            # _block_get() to read attributes from either format.
             for block in content:
-                if isinstance(block, dict):
-                    block_type = block.get("type", "unknown")
-                    if block_type == "text":
-                        _indent_block(lines, block.get("text", ""), indent=12)
-                    elif block_type == "image":
-                        source = block.get("source", {})
-                        media = source.get("media_type", "?")
-                        data_len = len(source.get("data", ""))
-                        lines.append(f"            [IMAGE: {media}, {data_len} chars base64]")
-                    elif block_type == "tool_use":
-                        lines.append(f"            [TOOL_USE: {block.get('name', '?')}  id: {block.get('id', '?')}]")
-                        try:
-                            formatted = json.dumps(block.get("input", {}), indent=4, default=str)
-                        except (TypeError, ValueError):
-                            formatted = str(block.get("input", {}))
-                        for fline in formatted.splitlines():
-                            lines.append(f"                {fline}")
-                    elif block_type == "tool_result":
-                        is_err = block.get("is_error", False)
-                        label = "TOOL_RESULT (ERROR)" if is_err else "TOOL_RESULT"
-                        lines.append(f"            [{label}: id: {block.get('tool_use_id', '?')}]")
-                        result_content = block.get("content", "")
-                        if isinstance(result_content, str):
-                            _indent_block(lines, result_content, indent=16)
-                        elif isinstance(result_content, list):
-                            for rc in result_content:
-                                if isinstance(rc, dict) and rc.get("type") == "text":
-                                    _indent_block(lines, rc.get("text", ""), indent=16)
-                                else:
-                                    lines.append(f"                {rc}")
-                    elif block_type == "thinking":
-                        lines.append(f"            [THINKING]")
-                        _indent_block(lines, block.get("thinking", ""), indent=16)
-                    else:
-                        # Fallback: dump the block as JSON
-                        try:
-                            formatted = json.dumps(block, indent=4, default=str)
-                        except (TypeError, ValueError):
-                            formatted = str(block)
-                        for fline in formatted.splitlines():
-                            lines.append(f"            {fline}")
+                block_type = _block_get(block, "type", "unknown")
+                if block_type == "text":
+                    _indent_block(lines, _block_get(block, "text", ""), indent=12)
+                elif block_type == "image":
+                    source = _block_get(block, "source", {})
+                    if not isinstance(source, dict):
+                        source = {}
+                    media = source.get("media_type", "?")
+                    data_len = len(source.get("data", ""))
+                    lines.append(f"            [IMAGE: {media}, {data_len} chars base64]")
+                elif block_type in ("tool_use", "server_tool_use"):
+                    label = "TOOL_USE" if block_type == "tool_use" else "SERVER_TOOL_USE"
+                    lines.append(f"            [{label}: {_block_get(block, 'name', '?')}  id: {_block_get(block, 'id', '?')}]")
+                    try:
+                        formatted = json.dumps(_block_get(block, "input", {}), indent=4, default=str)
+                    except (TypeError, ValueError):
+                        formatted = str(_block_get(block, "input", {}))
+                    for fline in formatted.splitlines():
+                        lines.append(f"                {fline}")
+                elif block_type == "tool_result":
+                    is_err = _block_get(block, "is_error", False)
+                    label = "TOOL_RESULT (ERROR)" if is_err else "TOOL_RESULT"
+                    lines.append(f"            [{label}: id: {_block_get(block, 'tool_use_id', '?')}]")
+                    result_content = _block_get(block, "content", "")
+                    if isinstance(result_content, str):
+                        _indent_block(lines, result_content, indent=16)
+                    elif isinstance(result_content, list):
+                        for rc in result_content:
+                            if isinstance(rc, dict) and rc.get("type") == "text":
+                                _indent_block(lines, rc.get("text", ""), indent=16)
+                            else:
+                                lines.append(f"                {rc}")
+                elif block_type == "thinking":
+                    lines.append(f"            [THINKING]")
+                    _indent_block(lines, _block_get(block, "thinking", ""), indent=16)
+                elif block_type in ("web_search_tool_result", "web_fetch_tool_result"):
+                    tool_use_id = _block_get(block, "tool_use_id", "?")
+                    lines.append(f"            [{block_type.upper()}: tool_use_id: {tool_use_id}]")
+                elif block_type == "redacted_thinking":
+                    lines.append(f"            [REDACTED_THINKING]")
                 else:
-                    lines.append(f"            {block}")
+                    # Fallback: dump the block as JSON or str
+                    try:
+                        if isinstance(block, dict):
+                            formatted = json.dumps(block, indent=4, default=str)
+                        else:
+                            formatted = json.dumps(
+                                block.model_dump() if hasattr(block, 'model_dump') else str(block),
+                                indent=4, default=str
+                            )
+                    except (TypeError, ValueError):
+                        formatted = str(block)
+                    for fline in formatted.splitlines():
+                        lines.append(f"            {fline}")
         else:
             lines.append(f"            {content}")
 
@@ -356,6 +369,13 @@ class RoundRecorder:
 
 
 # ── Module-level formatting utilities ────────────────────────────────────
+
+
+def _block_get(block, key: str, default=None):
+    """Read a field from a content block that may be a dict or Pydantic object."""
+    if isinstance(block, dict):
+        return block.get(key, default)
+    return getattr(block, key, default)
 
 
 def _header(lines: List[str], title: str):
