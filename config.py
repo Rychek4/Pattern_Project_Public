@@ -319,8 +319,6 @@ HTTP_PORT = int(os.getenv("HTTP_PORT", "5000"))
 # =============================================================================
 # SUBPROCESS CONFIGURATION
 # =============================================================================
-SUBPROCESS_AUDIO_ENABLED = False  # Deprecated - no longer used
-SUBPROCESS_OVERLAY_ENABLED = False  # Placeholder
 SUBPROCESS_HEALTH_CHECK_INTERVAL = 30
 SUBPROCESS_MAX_RESTART_ATTEMPTS = 3
 

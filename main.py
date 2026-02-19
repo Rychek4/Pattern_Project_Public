@@ -50,7 +50,6 @@ from agency.visual_capture import is_visual_capture_available, release_webcam
 from agency.system_pulse import init_system_pulse_timer, get_system_pulse_timer
 from agency.intentions import init_reminder_scheduler, get_reminder_scheduler
 from subprocess_mgmt.manager import init_subprocess_manager, get_subprocess_manager
-from subprocess_mgmt.chat_overlay import register_chat_overlay
 from prompt_builder import init_prompt_builder
 
 
@@ -180,9 +179,8 @@ def initialize_system() -> bool:
         if not load_stt_model(voice_settings.stt_model_size):
             log_warning("STT model failed to load — voice STT will be unavailable")
 
-    # Initialize subprocess manager and register subprocesses
+    # Initialize subprocess manager
     init_subprocess_manager()
-    register_chat_overlay(enabled=config.SUBPROCESS_OVERLAY_ENABLED)
 
     # Initialize HTTP server if enabled
     if config.HTTP_ENABLED:
@@ -302,10 +300,6 @@ def start_background_services() -> None:
     subprocess_mgr = get_subprocess_manager()
     subprocess_mgr.start_monitor()
     log_subsection("Subprocess monitor started")
-
-    # Start registered subprocesses
-    if config.SUBPROCESS_OVERLAY_ENABLED:
-        subprocess_mgr.start("chat_overlay")
 
     # Start HTTP server if enabled
     if config.HTTP_ENABLED:
