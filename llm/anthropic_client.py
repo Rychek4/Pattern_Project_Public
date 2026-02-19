@@ -602,10 +602,15 @@ class AnthropicClient:
                 elif block_type == "text" or hasattr(block, "text"):
                     raw_content_list.append({"type": "text", "text": getattr(block, "text", "")})
                 elif block_type == "tool_use":
+                    tool_name = getattr(block, "name", "")
+                    # Web search/fetch may arrive as tool_use blocks but must be
+                    # serialized as server_tool_use so the API doesn't demand
+                    # client-side tool_result blocks in the next user message.
+                    content_type = "server_tool_use" if tool_name in ("web_search", "web_fetch") else "tool_use"
                     raw_content_list.append({
-                        "type": "tool_use",
+                        "type": content_type,
                         "id": getattr(block, "id", ""),
-                        "name": getattr(block, "name", ""),
+                        "name": tool_name,
                         "input": getattr(block, "input", {})
                     })
                 elif block_type in ("web_search_tool_result", "web_fetch_tool_result"):
@@ -941,9 +946,12 @@ class AnthropicClient:
                                     "input": tool_input
                                 })
 
-                            # Add to raw_content
+                            # Add to raw_content - web_search/web_fetch must be
+                            # serialized as server_tool_use so the API doesn't
+                            # demand client-side tool_result blocks.
+                            raw_type = "server_tool_use" if state._current_tool_name in ("web_search", "web_fetch") else "tool_use"
                             state.raw_content.append({
-                                "type": "tool_use",
+                                "type": raw_type,
                                 "id": state._current_tool_id or "",
                                 "name": state._current_tool_name,
                                 "input": tool_input
