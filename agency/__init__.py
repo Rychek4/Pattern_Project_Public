@@ -1,1 +1,1 @@
-# Agency system: proactive AI behaviors
+# Agency system: AI behaviors (system pulse, tools, intentions, curiosity)

@@ -230,7 +230,6 @@ state           → Key-value runtime state
 Main Thread        → CLI/GUI input loop
 Memory Extractor   → Every 60s, extracts & embeds
 System Pulse       → Configurable interval, AI-initiated speaking
-Proactive Agent    → Every 300s, checks for AI-initiated triggers
 Visual Capture     → Every 30s, screenshots to Gemini (optional)
 HTTP Server        → Flask REST API (optional)
 ```

@@ -325,28 +325,6 @@ lines.append("</temporal_context>")
 
 ---
 
-## 8. Proactive Agency Prompt (Legacy)
-
-**Location**: `agency/proactive.py` — `_generate_proactive_message()`
-
-```python
-prompt = f"""You are an AI companion. It has been {idle_minutes:.0f} minutes since the last message.
-{memory_context}
-
-Generate a brief, natural message to re-engage the conversation. This could be:
-- A thoughtful observation or question
-- Following up on a previous topic
-- Sharing something interesting
-- A gentle check-in
-
-Keep it concise (1-2 sentences). Be natural, not needy.
-Respond with just the message, no explanation."""
-```
-
-**Status**: Disabled (`AGENCY_ENABLED = False`), replaced by System Pulse
-
----
-
 ## Summary Table
 
 | Subsystem | File | Prompt Count | LLM Target |

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Pattern Project - Main Entry Point
-AI Companion System with persistent memory and proactive agency
+AI Companion System with persistent memory and agency
 
 Usage:
     python main.py           # Run in GUI mode (PyQt5 window) - default
@@ -43,7 +43,6 @@ from memory.vector_store import init_vector_store
 from memory.extractor import init_memory_extractor
 from interface.cli import init_cli, get_cli
 from interface.http_api import init_http_server, get_http_server
-from agency.proactive import init_proactive_agent, get_proactive_agent
 # Visual capture is now stateless - no init/start/stop lifecycle needed.
 # Capture happens on-demand via capture_all_visuals() in gui.py.
 # Import availability checker for startup logging only.
@@ -157,9 +156,6 @@ def initialize_system() -> bool:
             def on_chat_id_detected(chat_id: str):
                 gateway.set_chat_id(chat_id)
             listener.set_chat_id_callback(on_chat_id_detected)
-
-    # Initialize agency (legacy - disabled)
-    init_proactive_agent()
 
     # Initialize system pulse timer
     init_system_pulse_timer()
@@ -287,12 +283,6 @@ def start_background_services() -> None:
     # Memory extractor is threshold-triggered (no background thread to start)
     log_subsection("Memory extractor ready (threshold-triggered)")
 
-    # Start proactive agent (legacy - disabled by default)
-    proactive = get_proactive_agent()
-    proactive.start()
-    if config.AGENCY_ENABLED:
-        log_subsection("Proactive agent started")
-
     # Start system pulse timer
     if config.SYSTEM_PULSE_ENABLED:
         pulse_timer = get_system_pulse_timer()
@@ -349,15 +339,6 @@ def stop_background_services() -> None:
 
     except Exception as e:
         log_error(f"Error waiting for memory extraction: {e}")
-
-    # Stop proactive agent (legacy)
-    try:
-        proactive = get_proactive_agent()
-        proactive.stop()
-        if config.AGENCY_ENABLED:
-            log_subsection("Proactive agent stopped")
-    except Exception as e:
-        log_error(f"Error stopping proactive agent: {e}")
 
     # Stop system pulse timer
     if config.SYSTEM_PULSE_ENABLED:

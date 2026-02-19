@@ -248,8 +248,6 @@ LOG_LEVEL=INFO
 | `CONTEXT_OVERFLOW_TRIGGER` | 40 | Turns before extraction fires |
 | `CONTEXT_EXTRACTION_BATCH` | 10 | Turns extracted per cycle |
 | `MEMORY_FRESHNESS_HALF_LIFE_DAYS` | 30 | Standard memory decay rate |
-| `AGENCY_IDLE_TRIGGER_SECONDS` | 900 | 15 min idle trigger |
-| `AGENCY_CHECK_INTERVAL` | 300 | 5 min check interval |
 | `MAX_CONCURRENT_LLM_REQUESTS` | 3 | LLM call limit |
 
 ---
