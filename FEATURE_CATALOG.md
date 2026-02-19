@@ -83,10 +83,10 @@ Decay category is inferred from memory type and importance automatically.
 |----------|------|-------|
 | Anthropic Claude | Primary (conversation) | claude-sonnet-4-6 |
 | Anthropic Claude | Extraction | claude-sonnet-4-6 |
-| KoboldCpp (Local) | Fallback only | Llama-3 compatible |
+| Anthropic Claude | Reflection/Pulses | claude-opus-4-6 |
 
-- **Task-Based Routing**: CONVERSATION, EXTRACTION, SIMPLE
-- **Fallback**: Automatic retry with secondary provider on failure
+- **Task-Based Routing**: CONVERSATION, EXTRACTION, PULSE_ACTION, PULSE_REFLECTIVE, DELEGATION
+- **Model Failover**: Automatic failover between Opus and Sonnet on overload/rate limit
 - **Concurrent Limit**: Max 3 simultaneous LLM requests
 
 ### 2.2 Web Search Integration

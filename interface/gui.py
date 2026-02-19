@@ -3344,8 +3344,7 @@ def run_gui():
 
     init_vector_store()
     init_llm_router(
-        primary_provider=config.LLM_PRIMARY_PROVIDER,
-        fallback_enabled=config.LLM_FALLBACK_ENABLED
+        primary_provider=config.LLM_PRIMARY_PROVIDER
     )
     init_memory_extractor()
     init_prompt_builder()

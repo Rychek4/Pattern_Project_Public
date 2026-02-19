@@ -185,7 +185,7 @@ class AnthropicClient:
         self,
         api_key: str,
         model: str = "claude-sonnet-4-6",
-        max_tokens: int = 4096,
+        max_tokens: int = 64000,
         timeout: int = 120
     ):
         """
@@ -1185,7 +1185,7 @@ def get_anthropic_client() -> AnthropicClient:
 def init_anthropic_client(
     api_key: str,
     model: str = "claude-sonnet-4-6",
-    max_tokens: int = 4096
+    max_tokens: int = 64000
 ) -> AnthropicClient:
     """Initialize the global Anthropic client."""
     global _anthropic_client

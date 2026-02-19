@@ -163,14 +163,16 @@ Memory B: "User's birthday is December 15"
 ## Phase 4: LLM Routing
 
 ```
-Task Type → Provider Selection
+Task Type → Provider / Model Selection
 
-CONVERSATION  →  Anthropic Claude (quality)
-EXTRACTION    →  KoboldCpp (local, cost-free)
-SIMPLE        →  KoboldCpp (quick tasks)
+CONVERSATION      →  Anthropic Claude (user-selected model)
+EXTRACTION        →  Anthropic Claude Sonnet
+PULSE_ACTION      →  Anthropic Claude Sonnet
+PULSE_REFLECTIVE  →  Anthropic Claude Opus
+DELEGATION        →  Anthropic Claude Haiku
 
-If primary fails & fallback enabled:
-  → Retry with secondary provider
+If primary model fails (overload/rate limit):
+  → Failover to alternate model (Opus ↔ Sonnet)
 ```
 
 ---

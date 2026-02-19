@@ -44,9 +44,6 @@ Pattern is an AI companion system that doesn't just respond—it understands, re
 │  │  • Web search & fetch (built-in tools)                    │  │
 │  │  • Visual understanding (native multimodal)               │  │
 │  └──────────────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  KoboldCpp (Optional local fallback, non-conversation)    │  │
-│  └──────────────────────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────────────────┘
                              │
                              ▼
@@ -68,9 +65,8 @@ Pattern is an AI companion system that doesn't just respond—it understands, re
 - **Telegram** (`interface/telegram_listener.py`): Bot-based messaging interface
 
 ### 2. LLM Layer
-- **Router** (`llm/router.py`): Task-based routing (Claude primary, KoboldCpp optional fallback for non-conversation tasks)
+- **Router** (`llm/router.py`): Task-based routing with model failover (Opus/Sonnet)
 - **Anthropic Client** (`llm/anthropic_client.py`): Claude API with native tool use, web search, web fetch, and multimodal vision
-- **Kobold Client** (`llm/kobold_client.py`): Optional local LLM fallback
 
 ### 3. Memory System
 - **Conversation Manager** (`memory/conversation.py`): Turn storage with temporal data and windowed context
