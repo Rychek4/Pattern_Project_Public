@@ -81,8 +81,8 @@ Decay category is inferred from memory type and importance automatically.
 ### 2.1 Multi-Provider Routing
 | Provider | Role | Model |
 |----------|------|-------|
-| Anthropic Claude | Primary (conversation) | claude-sonnet-4-5-20250929 |
-| Anthropic Claude | Extraction | claude-sonnet-4-5-20250929 |
+| Anthropic Claude | Primary (conversation) | claude-sonnet-4-6 |
+| Anthropic Claude | Extraction | claude-sonnet-4-6 |
 | KoboldCpp (Local) | Fallback only | Llama-3 compatible |
 
 - **Task-Based Routing**: CONVERSATION, EXTRACTION, SIMPLE

@@ -40,7 +40,7 @@ class UserSettings:
     """All user-configurable settings."""
     voice: VoiceSettings = None
     font_size: int = 12
-    conversation_model: str = "claude-sonnet-4-5-20250929"  # Default to Sonnet for first-time users
+    conversation_model: str = "claude-sonnet-4-6"  # Default to Sonnet for first-time users
     thinking_enabled: bool = True  # Extended thinking on by default
 
     def __post_init__(self):
@@ -142,7 +142,7 @@ class UserSettingsManager:
 
                 # Parse other settings
                 self._settings.font_size = data.get('font_size', 12)
-                self._settings.conversation_model = data.get('conversation_model', 'claude-sonnet-4-5-20250929')
+                self._settings.conversation_model = data.get('conversation_model', 'claude-sonnet-4-6')
                 self._settings.thinking_enabled = data.get('thinking_enabled', config.ANTHROPIC_THINKING_ENABLED)
 
                 log_info("User settings loaded", prefix="⚙️")
