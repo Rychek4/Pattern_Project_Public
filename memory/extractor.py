@@ -364,7 +364,6 @@ class MemoryExtractor:
             CONTEXT_OVERFLOW_TRIGGER,
             CONTEXT_EXTRACTION_BATCH,
             MEMORY_MIN_TURNS_PER_TOPIC,
-            MEMORY_MAX_PER_EXTRACTION,
             MEMORY_SKIP_MINOR_TOPICS,
             MEMORY_LARGE_TOPIC_THRESHOLD,
             MEMORY_SMALL_BATCH_THRESHOLD,
@@ -373,14 +372,13 @@ class MemoryExtractor:
             MEMORY_MAX_FACTUAL_PER_EXTRACTION
         )
 
-        # Windowed extraction settings (NEW)
+        # Windowed extraction settings
         self.context_window_size = CONTEXT_WINDOW_SIZE          # 30
         self.overflow_trigger = CONTEXT_OVERFLOW_TRIGGER        # 40
         self.extraction_batch = CONTEXT_EXTRACTION_BATCH        # 10
 
         # Episodic extraction settings (topic-based)
         self.min_turns_per_topic = MEMORY_MIN_TURNS_PER_TOPIC
-        self.max_memories_per_extraction = MEMORY_MAX_PER_EXTRACTION  # Legacy
         self.max_episodic_per_extraction = MEMORY_MAX_EPISODIC_PER_EXTRACTION
         self.skip_minor_topics = MEMORY_SKIP_MINOR_TOPICS
         self.large_topic_threshold = MEMORY_LARGE_TOPIC_THRESHOLD

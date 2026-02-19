@@ -108,7 +108,7 @@ class ChatCLI:
         )
         if config.SYSTEM_PULSE_ENABLED:
             self.console.print(
-                f"[dim]System pulse active: AI will speak every {config.SYSTEM_PULSE_INTERVAL // 60} minutes if idle[/dim]"
+                f"[dim]System pulse active: action every {config.ACTION_PULSE_INTERVAL // 3600}h, reflection every {config.REFLECTIVE_PULSE_INTERVAL // 3600}h[/dim]"
             )
         if config.TELEGRAM_ENABLED:
             self.console.print(
@@ -490,106 +490,6 @@ class ChatCLI:
 
         # Hit max passes
         return current_response.text, current_provider
-
-    def _process_legacy_commands_response_cli(
-        self,
-        response,
-        history: list,
-        system_prompt: str,
-        max_passes: int,
-        pass1_duration: float,
-        router
-    ) -> tuple:
-        """
-        Process response using legacy [[COMMAND]] pattern (CLI version).
-
-        DEPRECATED (December 2025): This method is no longer called.
-        The legacy [[COMMAND]] syntax has been replaced by native tool use.
-        Use `process_with_tools` from agency.tools instead.
-        Kept for reference during migration period.
-
-        Returns:
-            Tuple of (final_text, final_provider)
-        """
-        import time
-        from llm.router import TaskType
-        from agency.commands import get_command_processor
-
-        processor = get_command_processor()
-        current_text = response.text
-        current_provider = response.provider.value
-        current_history = history.copy()
-        pass_num = 1
-        current_duration = pass1_duration
-
-        while pass_num <= max_passes:
-            # Process current response for commands
-            processed = processor.process(current_text)
-
-            # Extract command names for dev display
-            commands_detected = [cmd.command_name for cmd in processed.commands_executed]
-
-            # Display dev mode response pass info
-            self._display_dev_response_pass(
-                pass_num, current_provider, current_text,
-                commands_detected, current_duration
-            )
-
-            # Display dev mode command execution info
-            for cmd_result in processed.commands_executed:
-                self._display_dev_command_execution(
-                    cmd_result.command_name,
-                    cmd_result.query,
-                    cmd_result.data,
-                    str(cmd_result.error) if cmd_result.error else None
-                )
-
-            # If no continuation needed, we're done
-            if not processed.needs_continuation:
-                return processed.display_text, current_provider
-
-            # Show status for command execution
-            if pass_num == 1:
-                self.console.print("[dim]  ↳ Executing command...[/dim]")
-            else:
-                self.console.print(f"[dim]  ↳ Executing command (pass {pass_num})...[/dim]")
-
-            # Build continuation history
-            current_history.append({"role": "assistant", "content": current_text})
-            current_history.append({"role": "user", "content": processed.continuation_prompt})
-
-            # Get next response
-            cont_start = time.time()
-            with self.console.status("[bold blue]Continuing...[/bold blue]", spinner="dots"):
-                from core.user_settings import get_user_settings
-                continuation = router.chat(
-                    messages=current_history,
-                    system_prompt=system_prompt,
-                    task_type=TaskType.CONVERSATION,
-                    temperature=0.7,
-                    thinking_enabled=True
-                )
-            current_duration = (time.time() - cont_start) * 1000
-
-            if not continuation.success:
-                return processed.display_text, current_provider
-
-            # Prepare for next iteration
-            current_text = continuation.text
-            current_provider = continuation.provider.value
-            pass_num += 1
-
-        # Hit max passes - use final response as-is
-        processed = processor.process(current_text)
-
-        # Display final pass in dev mode
-        self._display_dev_response_pass(
-            pass_num, "max_passes_reached", current_text,
-            [cmd.command_name for cmd in processed.commands_executed],
-            current_duration
-        )
-
-        return processed.display_text, current_provider
 
     def _on_pulse_fired(self) -> None:
         """Called when the system pulse timer fires (from background thread)."""

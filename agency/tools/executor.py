@@ -1,9 +1,9 @@
 """
 Pattern Project - Tool Executor
-Maps native tool calls to existing command handlers.
+Routes native tool calls to command handlers.
 
-This module bridges Claude's native tool use with the existing handler infrastructure.
-Each tool call is routed to the appropriate handler, reusing all existing logic.
+Each tool call is routed to the appropriate handler in agency/commands/handlers/,
+which encapsulates the business logic for that capability.
 """
 
 from dataclasses import dataclass, field
@@ -33,11 +33,11 @@ class ToolResult:
 
 class ToolExecutor:
     """
-    Executes tool calls by routing to existing handlers.
+    Executes tool calls by routing to handler functions.
 
-    This class maps tool names to handler execution functions.
-    Each function wraps an existing CommandHandler, adapting the
-    structured tool input to the handler's expected format.
+    Maps tool names to execution methods. Each method instantiates
+    the appropriate handler from agency/commands/handlers/ and
+    adapts the structured tool input to the handler's format.
     """
 
     def __init__(self):

@@ -50,7 +50,6 @@ from agency.visual_capture import is_visual_capture_available, release_webcam
 from agency.system_pulse import init_system_pulse_timer, get_system_pulse_timer
 from agency.intentions import init_reminder_scheduler, get_reminder_scheduler
 from subprocess_mgmt.manager import init_subprocess_manager, get_subprocess_manager
-from subprocess_mgmt.chat_overlay import register_chat_overlay
 from prompt_builder import init_prompt_builder
 
 
@@ -167,9 +166,9 @@ def initialize_system() -> bool:
     # Just verify availability for startup logging.
     if config.VISUAL_ENABLED:
         screenshot_ok, webcam_ok = is_visual_capture_available()
-        if not screenshot_ok and config.VISUAL_SCREENSHOT_ENABLED:
+        if not screenshot_ok and config.VISUAL_SCREENSHOT_MODE != "disabled":
             log_warning("Screenshot capture unavailable (PIL not installed)")
-        if not webcam_ok and config.VISUAL_WEBCAM_ENABLED:
+        if not webcam_ok and config.VISUAL_WEBCAM_MODE != "disabled":
             log_warning("Webcam capture unavailable (OpenCV not installed)")
 
     # Load STT model if voice pipeline is enabled
@@ -180,9 +179,8 @@ def initialize_system() -> bool:
         if not load_stt_model(voice_settings.stt_model_size):
             log_warning("STT model failed to load — voice STT will be unavailable")
 
-    # Initialize subprocess manager and register subprocesses
+    # Initialize subprocess manager
     init_subprocess_manager()
-    register_chat_overlay(enabled=config.SUBPROCESS_OVERLAY_ENABLED)
 
     # Initialize HTTP server if enabled
     if config.HTTP_ENABLED:
@@ -237,9 +235,8 @@ def print_configuration() -> None:
     # Visual settings
     if config.VISUAL_ENABLED:
         log_section("Visual Capture", "📷")
-        log_subsection(f"Capture Interval: {config.VISUAL_CAPTURE_INTERVAL}s")
-        log_subsection(f"Screenshot: {'ENABLED' if config.VISUAL_SCREENSHOT_ENABLED else 'DISABLED'}")
-        log_subsection(f"Webcam: {'ENABLED' if config.VISUAL_WEBCAM_ENABLED else 'DISABLED'}")
+        log_subsection(f"Screenshot: {config.VISUAL_SCREENSHOT_MODE}")
+        log_subsection(f"Webcam: {config.VISUAL_WEBCAM_MODE}")
 
     # Communication settings
     if config.EMAIL_GATEWAY_ENABLED or config.TELEGRAM_ENABLED:
@@ -302,10 +299,6 @@ def start_background_services() -> None:
     subprocess_mgr = get_subprocess_manager()
     subprocess_mgr.start_monitor()
     log_subsection("Subprocess monitor started")
-
-    # Start registered subprocesses
-    if config.SUBPROCESS_OVERLAY_ENABLED:
-        subprocess_mgr.start("chat_overlay")
 
     # Start HTTP server if enabled
     if config.HTTP_ENABLED:

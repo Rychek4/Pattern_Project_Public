@@ -214,9 +214,6 @@ def create_default_builder() -> PromptBuilder:
     import config
     from prompt_builder.sources.core_memory import CoreMemorySource
     from prompt_builder.sources.semantic_memory import SemanticMemorySource
-    # ConversationSource DEPRECATED: Now using API messages with timestamps directly
-    # Conversation context is provided via get_api_messages() in the messages array
-    # instead of duplicating it in the system prompt. See memory/conversation.py
     from prompt_builder.sources.temporal import TemporalSource
     from prompt_builder.sources.system_pulse import SystemPulseSource
     from prompt_builder.sources.ai_commands import AICommandsSource
@@ -230,9 +227,6 @@ def create_default_builder() -> PromptBuilder:
     log_section("Initializing PromptBuilder", "🔧")
 
     # Register sources in priority order (though they're sorted anyway)
-    # NOTE: ConversationSource removed - conversation context now provided via
-    # get_api_messages() in the messages array with semantic timestamps.
-    # This eliminates duplicate tokens and provides unified time awareness.
     sources = [
         DevModeSource(),        # Dev mode awareness (priority 5) - first if enabled
         CoreMemorySource(),     # Core identity (priority 10)
@@ -274,11 +268,6 @@ def create_default_builder() -> PromptBuilder:
         from prompt_builder.sources.response_scope import ResponseScopeSource
         sources.append(ResponseScopeSource())
         log_info("ResponseScopeSource enabled", prefix="📏")
-
-    # Legacy VisualSource is disabled - the new visual capture system sends images
-    # directly to Claude via multimodal messages. VisualSource (which used Gemini
-    # for text descriptions) is kept in code for potential fallback but not loaded.
-    log_info("VisualSource disabled (using direct Claude multimodal)", prefix="📷")
 
     for source in sources:
         builder.register_source(source)

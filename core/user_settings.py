@@ -31,10 +31,6 @@ class VoiceSettings:
         return config.OPENAI_TTS_DEFAULT_VOICE
 
 
-# Keep old name as alias for any external code that references it directly
-TTSSettings = VoiceSettings
-
-
 @dataclass
 class UserSettings:
     """All user-configurable settings."""
@@ -46,16 +42,6 @@ class UserSettings:
     def __post_init__(self):
         if self.voice is None:
             self.voice = VoiceSettings()
-
-    # Backward-compat alias so old code referencing settings.tts still works
-    @property
-    def tts(self) -> VoiceSettings:
-        return self.voice
-
-    @tts.setter
-    def tts(self, value):
-        if isinstance(value, VoiceSettings):
-            self.voice = value
 
 
 class UserSettingsManager:
