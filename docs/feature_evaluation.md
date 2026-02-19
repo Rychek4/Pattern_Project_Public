@@ -7,7 +7,7 @@
 - **Stack**: Python 3 / PyQt5 GUI / SQLite (WAL) / Anthropic Claude API
 - **UI**: PyQt5 with QTextBrowser (HTML rendering), custom theme system, QPropertyAnimation
 - **Memory**: Semantic vector search (sentence-transformers, 384-dim), dual-track episodic+factual, decay categories (permanent/standard/ephemeral)
-- **Agency**: System pulse (configurable timer), proactive triggers, curiosity engine, growth threads, active thoughts (ranked 1-10)
+- **Agency**: System pulse (configurable timer), curiosity engine, growth threads, active thoughts (ranked 1-10)
 - **Data flow**: Ephemeral context windows -- prompt rebuilt from scratch each turn from ~12 prioritized context sources. Memory lives in SQLite, not context.
 - **Existing visualizations**: Dev window with memory scoring tabs, toast notifications with fade animations, streaming indicators, status bar with operation types, command palette
 
@@ -109,7 +109,6 @@ Purely UI feature consuming existing signals.
 
 - Infrastructure already exists:
   - `system_pulse.py`: idle/active cycle with configurable intervals
-  - `proactive.py`: trigger states (IDLE, REFLECTION, CURIOSITY, GREETING, REMINDER)
   - `active_thoughts/manager.py`: ranked topics (1-10) with elaboration
   - `growth_threads/manager.py`: stages (seed/growing/integrating/dormant/abandoned)
   - `curiosity/engine.py`: current goal, exploration state
@@ -130,7 +129,7 @@ All state data already exists in memory. Purely UI-side.
 
 ### Verdict
 
-**Highest priority. Best ratio of impact to effort.** Define a state enum mapping existing backend states to visual modes. Add ambient indicator widget (colored orb, gradient bar, or animated element) with smooth transitions via QPropertyAnimation. Data sources: `system_pulse.py`, `proactive.py`, `active_thoughts/manager.py`, `curiosity/engine.py`. Touch points: new widget class in `gui_components.py`, state mapping logic, integration in `gui.py` header/sidebar.
+**Highest priority. Best ratio of impact to effort.** Define a state enum mapping existing backend states to visual modes. Add ambient indicator widget (colored orb, gradient bar, or animated element) with smooth transitions via QPropertyAnimation. Data sources: `system_pulse.py`, `active_thoughts/manager.py`, `curiosity/engine.py`. Touch points: new widget class in `gui_components.py`, state mapping logic, integration in `gui.py` header/sidebar.
 
 ---
 

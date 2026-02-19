@@ -253,13 +253,6 @@ SESSION_IDLE_WARNING_SECONDS = 600  # 10 minutes
 SESSION_AUTO_EXTRACT_ON_END = True
 
 # =============================================================================
-# AGENCY CONFIGURATION (Legacy - Disabled in favor of System Pulse)
-# =============================================================================
-AGENCY_ENABLED = False  # Disabled - replaced by System Pulse Timer
-AGENCY_CHECK_INTERVAL = 300  # 5 minutes
-AGENCY_IDLE_TRIGGER_SECONDS = 900  # 15 minutes before AI initiates
-
-# =============================================================================
 # SYSTEM PULSE CONFIGURATION
 # =============================================================================
 SYSTEM_PULSE_ENABLED = os.getenv("SYSTEM_PULSE_ENABLED", "true").lower() == "true"

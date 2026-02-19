@@ -796,7 +796,7 @@ class MemoryExtractor:
             prompt=unified_prompt,
             task_type=TaskType.EXTRACTION,  # Routes to API for unified extraction
             temperature=0.3,  # Balanced for both synthesis and extraction
-            max_tokens=2048   # Allow room for multiple memories
+            max_tokens=4096   # Room for up to 14 memories (6 episodic + 8 factual)
         )
 
         if not response.success:
