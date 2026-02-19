@@ -2796,19 +2796,14 @@ class ChatWindow(QMainWindow):
 
             self.signals.update_status.emit(f"{label} pulse...", StatusManager.STATUS_THINKING)
 
-            # Show system message in chat
+            # Show system message in chat (UI only — DB storage deferred until
+            # we have a valid assistant response to prevent orphaned system turns)
             timestamp = self._get_timestamp()
             self.signals.new_message.emit("system", stored_message, timestamp)
 
-            # Store abbreviated pulse message in conversation history
-            if self._conversation_mgr:
-                self._conversation_mgr.add_turn(
-                    role="system",
-                    content=stored_message,
-                    input_type="system"
-                )
-            else:
+            if not self._conversation_mgr:
                 log_error("PULSE: _conversation_mgr is None!")
+                return
 
             # Build prompt (mark as pulse so CuriositySource provides directive context)
             assembled = self._prompt_builder.build(
@@ -2872,16 +2867,54 @@ class ChatWindow(QMainWindow):
                 final_text = result.final_text
                 log_info(f"PULSE: Processed in {result.passes_executed} pass(es)", prefix="⏱️")
 
-                # Only store non-empty responses in conversation history
-                # Tool-only responses (no visible text) can produce empty final_text
+                # Auto-retry once if response is thinking-only (no visible text, no tools)
+                # Sonnet can return only thinking blocks, producing empty visible output
+                if not (final_text and final_text.strip()) and result.passes_executed == 1:
+                    thinking_text = getattr(response, 'thinking_text', '')
+                    if thinking_text:
+                        log_warning(
+                            f"PULSE: {label} pulse returned thinking-only response "
+                            f"({len(thinking_text)} chars thinking, no visible text) — retrying once"
+                        )
+                        response = self._llm_router.chat(
+                            messages=history,
+                            system_prompt=assembled.full_system_prompt,
+                            task_type=task_type,
+                            temperature=0.7,
+                            tools=tools,
+                            thinking_enabled=True
+                        )
+                        if response.success:
+                            result = process_with_tools(
+                                llm_router=self._llm_router,
+                                response=response,
+                                history=history,
+                                system_prompt=assembled.full_system_prompt,
+                                max_passes=5,
+                                pulse_callback=lambda change: self._emit_pulse_interval_change(change),
+                                tools=tools,
+                                dev_mode_callbacks=dev_callbacks,
+                                thinking_enabled=True,
+                                task_type=task_type
+                            )
+                            final_text = result.final_text
+                            log_info(f"PULSE: Retry processed in {result.passes_executed} pass(es)", prefix="⏱️")
+
+                # Store BOTH system and assistant turns together — prevents orphaned
+                # system messages when the response is empty
                 if final_text and final_text.strip():
+                    self._conversation_mgr.add_turn(
+                        role="system",
+                        content=stored_message,
+                        input_type="system"
+                    )
                     self._conversation_mgr.add_turn(
                         role="assistant",
                         content=final_text,
                         input_type="text"
                     )
                 else:
-                    log_warning(f"PULSE: {label} pulse produced empty response - skipping conversation storage")
+                    log_warning(f"PULSE: {label} pulse produced empty response — skipping conversation storage")
 
                 timestamp = self._get_timestamp()
                 if result.clarification_requested and result.clarification_data:

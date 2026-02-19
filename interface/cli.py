@@ -633,12 +633,9 @@ class ChatCLI:
             pulse_prompt = get_action_pulse_prompt(interval_label)
             stored_message = ACTION_PULSE_STORED_MESSAGE
 
-            # Store abbreviated pulse message
-            conversation_mgr.add_turn(
-                role="user",
-                content=stored_message,
-                input_type="system_pulse"
-            )
+            # DB storage of pulse message deferred until we have a valid
+            # assistant response — prevents orphaned user turns that create
+            # consecutive user messages in API history
 
             # Build prompt
             assembled = prompt_builder.build(
@@ -699,15 +696,53 @@ class ChatCLI:
                 final_text = result.final_text
                 final_provider = result.final_provider
 
-                # Only store non-empty responses in conversation history
+                # Auto-retry once if response is thinking-only (no visible text, no tools)
+                if not (final_text and final_text.strip()) and result.passes_executed == 1:
+                    thinking_text = getattr(response, 'thinking_text', '')
+                    if thinking_text:
+                        log_warning(
+                            f"PULSE: Action pulse returned thinking-only response "
+                            f"({len(thinking_text)} chars thinking, no visible text) — retrying once"
+                        )
+                        with self.console.status("[bold magenta]Pulse retrying...[/bold magenta]", spinner="dots"):
+                            response = router.chat(
+                                messages=history,
+                                system_prompt=assembled.full_system_prompt,
+                                task_type=TaskType.PULSE_ACTION,
+                                temperature=0.7,
+                                tools=tools,
+                                thinking_enabled=True
+                            )
+                        if response.success:
+                            result = process_with_tools(
+                                llm_router=router,
+                                response=response,
+                                history=history,
+                                system_prompt=assembled.full_system_prompt,
+                                max_passes=5,
+                                pulse_callback=on_pulse_change,
+                                tools=tools,
+                                dev_mode_callbacks=dev_callbacks,
+                                thinking_enabled=True,
+                                task_type=TaskType.PULSE_ACTION
+                            )
+                            final_text = result.final_text
+                            final_provider = result.final_provider
+
+                # Store BOTH pulse and assistant turns together
                 if final_text and final_text.strip():
+                    conversation_mgr.add_turn(
+                        role="user",
+                        content=stored_message,
+                        input_type="system_pulse"
+                    )
                     conversation_mgr.add_turn(
                         role="assistant",
                         content=final_text,
                         input_type="text"
                     )
                 else:
-                    log_warning("PULSE: Action pulse produced empty response - skipping conversation storage")
+                    log_warning("PULSE: Action pulse produced empty response — skipping conversation storage")
 
                 # Check for clarification request
                 if result.clarification_requested and result.clarification_data:
