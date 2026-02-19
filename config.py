@@ -271,7 +271,9 @@ AGENCY_IDLE_TRIGGER_SECONDS = 900  # 15 minutes before AI initiates
 # SYSTEM PULSE CONFIGURATION
 # =============================================================================
 SYSTEM_PULSE_ENABLED = os.getenv("SYSTEM_PULSE_ENABLED", "true").lower() == "true"
-SYSTEM_PULSE_INTERVAL = 600  # 10 minutes between pulses (default)
+SYSTEM_PULSE_INTERVAL = 600  # Legacy — unused, kept for backward compatibility
+REFLECTIVE_PULSE_INTERVAL = 43200   # 12 hours (deep reflection, Opus)
+ACTION_PULSE_INTERVAL = 7200        # 2 hours (open-ended agency, Sonnet)
 
 # =============================================================================
 # CURIOSITY ENGINE CONFIGURATION

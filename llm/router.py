@@ -28,6 +28,8 @@ class TaskType(Enum):
     ANALYSIS = "analysis"          # Analysis tasks
     SIMPLE = "simple"              # Simple/quick tasks
     DELEGATION = "delegation"      # Lightweight sub-agent tasks (Haiku)
+    PULSE_REFLECTIVE = "pulse_reflective"  # Deep reflective pulse (always Opus)
+    PULSE_ACTION = "pulse_action"          # Action moment pulse (always Sonnet)
 
 
 @dataclass
@@ -234,7 +236,9 @@ class LLMRouter:
         web_fetch_config = None
         web_fetch_unavailable_msg = None
 
-        if provider == LLMProvider.ANTHROPIC and task_type == TaskType.CONVERSATION:
+        if provider == LLMProvider.ANTHROPIC and task_type in (
+            TaskType.CONVERSATION, TaskType.PULSE_REFLECTIVE, TaskType.PULSE_ACTION
+        ):
             enable_web_search, web_search_max_uses, web_search_unavailable_msg = (
                 self._check_web_search_availability()
             )
@@ -320,6 +324,10 @@ class LLMRouter:
                 from core.user_settings import get_user_settings
                 user_model = get_user_settings().conversation_model
                 primary_model = user_model if user_model else _cfg.ANTHROPIC_MODEL_CONVERSATION
+            elif task_type == TaskType.PULSE_REFLECTIVE:
+                primary_model = "claude-opus-4-6"
+            elif task_type == TaskType.PULSE_ACTION:
+                primary_model = "claude-sonnet-4-6"
             elif task_type in (TaskType.EXTRACTION, TaskType.FACT_EXTRACTION):
                 primary_model = _cfg.ANTHROPIC_MODEL_EXTRACTION
             elif task_type == TaskType.DELEGATION:
@@ -435,7 +443,7 @@ class LLMRouter:
         web_fetch_config = None
         web_fetch_unavailable_msg = None
 
-        if task_type == TaskType.CONVERSATION:
+        if task_type in (TaskType.CONVERSATION, TaskType.PULSE_REFLECTIVE, TaskType.PULSE_ACTION):
             enable_web_search, web_search_max_uses, web_search_unavailable_msg = (
                 self._check_web_search_availability()
             )
@@ -464,6 +472,10 @@ class LLMRouter:
             from core.user_settings import get_user_settings
             user_model = get_user_settings().conversation_model
             model = user_model if user_model else config.ANTHROPIC_MODEL_CONVERSATION
+        elif task_type == TaskType.PULSE_REFLECTIVE:
+            model = "claude-opus-4-6"
+        elif task_type == TaskType.PULSE_ACTION:
+            model = "claude-sonnet-4-6"
         elif task_type in (TaskType.EXTRACTION, TaskType.FACT_EXTRACTION):
             model = config.ANTHROPIC_MODEL_EXTRACTION
         elif task_type == TaskType.DELEGATION:
@@ -811,6 +823,10 @@ class LLMRouter:
                     from core.user_settings import get_user_settings
                     user_model = get_user_settings().conversation_model
                     model = user_model if user_model else config.ANTHROPIC_MODEL_CONVERSATION
+                elif task_type == TaskType.PULSE_REFLECTIVE:
+                    model = "claude-opus-4-6"  # Always Opus for reflection
+                elif task_type == TaskType.PULSE_ACTION:
+                    model = "claude-sonnet-4-6"  # Always Sonnet for action
                 elif task_type in (TaskType.EXTRACTION, TaskType.FACT_EXTRACTION):
                     model = config.ANTHROPIC_MODEL_EXTRACTION  # Sonnet for extraction
                 elif task_type == TaskType.DELEGATION:

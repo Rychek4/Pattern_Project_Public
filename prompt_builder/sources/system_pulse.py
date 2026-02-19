@@ -1,10 +1,9 @@
 """
-Pattern Project - System Pulse Source
-Provides AI with awareness of the pulse timer.
+Pattern Project - System Pulse Context Source
+Provides AI with awareness of both pulse timers (reflective + action).
 
-NOTE: The pulse timer is controlled via the native `set_pulse_interval` tool.
-This source provides context about the current timer setting, but the AI
-adjusts it using the tool, not embedded commands.
+NOTE: The pulse timers are controlled via the native `set_pulse_interval` tool.
+This source provides context about the current timer settings.
 """
 
 from typing import Optional, Dict, Any
@@ -13,28 +12,30 @@ from prompt_builder.sources.base import ContextSource, ContextBlock, SourcePrior
 from core.logger import log_info
 
 
-# Mapping of interval seconds to human-readable labels
+# ─── Interval Mappings ───────────────────────────────────────────────────────
+
+# Human-readable labels for all supported intervals
 PULSE_INTERVAL_OPTIONS = {
-    180: "3 minutes",
-    600: "10 minutes",
-    1800: "30 minutes",
     3600: "1 hour",
     7200: "2 hours",
     10800: "3 hours",
     21600: "6 hours",
     43200: "12 hours",
+    86400: "24 hours",
 }
 
-# Mapping for tool input validation (used by ToolExecutor)
+# Valid intervals per pulse type
+REFLECTIVE_INTERVALS = {"6h": 21600, "12h": 43200, "24h": 86400}
+ACTION_INTERVALS = {"1h": 3600, "2h": 7200, "3h": 10800, "6h": 21600}
+
+# Combined mapping for tool input validation (used by ToolExecutor)
 PULSE_COMMAND_TO_SECONDS = {
-    "3m": 180,
-    "10m": 600,
-    "30m": 1800,
     "1h": 3600,
     "2h": 7200,
     "3h": 10800,
     "6h": 21600,
     "12h": 43200,
+    "24h": 86400,
 }
 
 
@@ -43,17 +44,14 @@ def get_interval_label(seconds: float) -> str:
     return PULSE_INTERVAL_OPTIONS.get(int(seconds), f"{int(seconds)} seconds")
 
 
+# ─── Context Source ──────────────────────────────────────────────────────────
+
 class SystemPulseSource(ContextSource):
     """
-    Provides context about the system pulse timer.
+    Provides context about both pulse timers to the AI.
 
-    This gives the AI awareness of:
-    - What the pulse timer is
-    - Current timer setting
-    - The set_pulse_interval tool can be used to adjust it
-
-    The AI controls the pulse timer via the `set_pulse_interval` native tool,
-    not via embedded commands.
+    Injects current interval settings so the AI knows its own pulse schedule
+    and can adjust via the set_pulse_interval tool.
     """
 
     @property
@@ -70,30 +68,31 @@ class SystemPulseSource(ContextSource):
         session_context: Dict[str, Any]
     ) -> Optional[ContextBlock]:
         """Get system pulse context for prompt injection."""
-        from agency.system_pulse import get_system_pulse_timer
+        from agency.system_pulse import get_pulse_manager
         import config
 
-        # Check if pulse is enabled
         if not config.SYSTEM_PULSE_ENABLED:
             return None
 
-        # Get current timer setting
-        timer = get_system_pulse_timer()
-        current_interval = timer.pulse_interval
-        current_label = get_interval_label(current_interval)
+        manager = get_pulse_manager()
+        reflective_interval = manager.reflective_timer.interval
+        reflective_label = get_interval_label(reflective_interval)
+        action_interval = manager.action_timer.interval
+        action_label = get_interval_label(action_interval)
 
-        # Build a minimal context block - tool description provides the rest
-        # We only need to inform the AI of the current setting
         lines = [
-            "<system_pulse_info>",
-            f"Pulse timer is currently set to: {current_label}",
-            "(Use the set_pulse_interval tool to adjust)",
-            "</system_pulse_info>",
+            "<pulse_info>",
+            f"Reflective pulse: {reflective_label} (Opus 4.6)",
+            f"Action pulse: {action_label} (Sonnet 4.6)",
+            "(Use set_pulse_interval with pulse_type to adjust either)",
+            "</pulse_info>",
         ]
 
-        # Store current setting in session context for other sources
-        session_context["pulse_interval_seconds"] = current_interval
-        session_context["pulse_interval_label"] = current_label
+        # Store in session context for other sources
+        session_context["reflective_pulse_interval_seconds"] = reflective_interval
+        session_context["reflective_pulse_interval_label"] = reflective_label
+        session_context["action_pulse_interval_seconds"] = action_interval
+        session_context["action_pulse_interval_label"] = action_label
 
         return ContextBlock(
             source_name=self.source_name,
@@ -101,8 +100,10 @@ class SystemPulseSource(ContextSource):
             priority=self.priority,
             include_always=True,
             metadata={
-                "current_interval_seconds": current_interval,
-                "current_interval_label": current_label,
+                "reflective_interval_seconds": reflective_interval,
+                "reflective_interval_label": reflective_label,
+                "action_interval_seconds": action_interval,
+                "action_interval_label": action_label,
             }
         )
 

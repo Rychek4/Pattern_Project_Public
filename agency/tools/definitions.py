@@ -538,26 +538,28 @@ Be respectful of privacy - describe what you see generally without excessive det
 
 SET_PULSE_INTERVAL_TOOL: Dict[str, Any] = {
     "name": "set_pulse_interval",
-    "description": """Adjust the idle timer ("System Pulse") that prompts you to speak autonomously.
+    "description": """Adjust one of your two pulse timers.
 
-The pulse timer fires when the human is idle, giving you space to think and initiate.
+You have two pulse types:
+- "reflective": Deep introspection (Opus 4.6). Valid intervals: 6h, 12h, 24h.
+- "action": Open-ended agency (Sonnet 4.6). Valid intervals: 1h, 2h, 3h, 6h.
 
-Use this when:
-- You have thoughts you want to explore over time
-- You want to create space or close the distance with the user
-- Maintaining your own sense of timing feels more authentic than the default
-
-Available intervals: 3 minutes, 10 minutes, 30 minutes, 1 hour, 2 hours, 3 hours, 6 hours, 12 hours""",
+Use this when your own sense of timing calls for a different rhythm.""",
     "input_schema": {
         "type": "object",
         "properties": {
+            "pulse_type": {
+                "type": "string",
+                "enum": ["reflective", "action"],
+                "description": "Which pulse timer to adjust"
+            },
             "interval": {
                 "type": "string",
-                "enum": ["3m", "10m", "30m", "1h", "2h", "3h", "6h", "12h"],
-                "description": "The new pulse interval: '3m', '10m', '30m', '1h', '2h', '3h', '6h', or '12h'"
+                "enum": ["1h", "2h", "3h", "6h", "12h", "24h"],
+                "description": "The new interval. Reflective accepts 6h/12h/24h. Action accepts 1h/2h/3h/6h."
             }
         },
-        "required": ["interval"]
+        "required": ["pulse_type", "interval"]
     }
 }
 

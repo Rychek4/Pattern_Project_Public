@@ -320,10 +320,11 @@ class ToolResponseHelper:
             # Handle pulse interval change from this pass
             if processed.has_pulse_interval_change():
                 pulse_interval_changed = True
-                log_info(f"PULSE DEBUG: pulse_interval_change detected: {processed.pulse_interval_change}s", prefix="🔍")
+                change = processed.pulse_interval_change
+                log_info(f"PULSE DEBUG: pulse_interval_change detected: {change}", prefix="🔍")
                 if pulse_callback:
-                    log_info(f"PULSE DEBUG: Invoking pulse_callback({processed.pulse_interval_change})", prefix="🔍")
-                    pulse_callback(processed.pulse_interval_change)
+                    log_info(f"PULSE DEBUG: Invoking pulse_callback({change})", prefix="🔍")
+                    pulse_callback(change)
                     log_info("PULSE DEBUG: pulse_callback returned", prefix="🔍")
                 else:
                     log_warning("PULSE DEBUG: No pulse_callback provided!")
@@ -539,12 +540,13 @@ def process_with_tools(
     history: List[Dict[str, Any]],
     system_prompt: str,
     max_passes: int = 5,
-    pulse_callback: Optional[Callable[[int], None]] = None,
+    pulse_callback: Optional[Callable] = None,
     tools: Optional[List[Dict[str, Any]]] = None,
     dev_mode_callbacks: Optional[Dict[str, Callable]] = None,
     thinking_enabled: bool = False,
     thinking_budget_tokens: Optional[int] = None,
-    round_recorder=None
+    round_recorder=None,
+    task_type=None
 ) -> ToolProcessingResult:
     """
     Convenience function for processing a response with native tools.
@@ -557,7 +559,8 @@ def process_with_tools(
         history: Conversation history
         system_prompt: System prompt
         max_passes: Maximum tool execution passes
-        pulse_callback: Optional callback for pulse interval changes
+        pulse_callback: Optional callback for pulse interval changes.
+            Called with dict: {"pulse_type": str, "interval_seconds": int}
         tools: Optional tool definitions
         dev_mode_callbacks: Optional dict of callbacks for dev window:
             - emit_response_pass: For Response Pipeline tab
@@ -565,6 +568,7 @@ def process_with_tools(
         thinking_enabled: Whether to enable extended thinking for continuations
         thinking_budget_tokens: Max tokens for thinking (None = use config default)
         round_recorder: Optional RoundRecorder for prompt export
+        task_type: Task type for router calls (defaults to CONVERSATION)
 
     Returns:
         ToolProcessingResult with final text and metadata
@@ -573,6 +577,7 @@ def process_with_tools(
         llm_router=llm_router,
         system_prompt=system_prompt,
         tools=tools,
+        task_type=task_type,
         thinking_enabled=thinking_enabled,
         thinking_budget_tokens=thinking_budget_tokens,
         round_recorder=round_recorder

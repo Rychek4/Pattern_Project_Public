@@ -81,7 +81,7 @@ class MessageSignals(QObject):
     update_status = pyqtSignal(str, str)  # status text, status type
     update_timer = pyqtSignal(str, str)  # session_time, total_time
     response_complete = pyqtSignal()
-    pulse_interval_change = pyqtSignal(int)  # new interval in seconds
+    pulse_interval_change = pyqtSignal(object)  # dict: {"pulse_type": str, "interval_seconds": int}
     show_notification = pyqtSignal(str, str)  # message, level (info/success/warning/error)
     tool_executing = pyqtSignal(str)  # tool name being executed
     # Streaming signals
@@ -236,7 +236,8 @@ class ChatWindow(QMainWindow):
         self._llm_router = None
         self._prompt_builder = None
         self._temporal_tracker = None
-        self._system_pulse_timer = None
+        self._pulse_manager = None
+        self._system_pulse_timer = None  # Legacy alias
         self._reminder_scheduler = None
         self._telegram_listener = None
 
@@ -266,7 +267,7 @@ class ChatWindow(QMainWindow):
         self.signals.update_status.connect(self._update_status_with_type)
         self.signals.update_timer.connect(self._update_timer_display)
         self.signals.response_complete.connect(self._on_response_complete)
-        self.signals.pulse_interval_change.connect(self.set_pulse_interval_by_seconds)
+        self.signals.pulse_interval_change.connect(self._on_pulse_interval_change_signal)
         self.signals.show_notification.connect(self._show_notification)
         # Streaming signal connections
         self.signals.stream_start.connect(self._on_stream_start)
@@ -379,30 +380,29 @@ class ChatWindow(QMainWindow):
         # Add spacing between session timer and pulse timer
         layout.addSpacing(20)
 
-        # Pulse countdown (only if enabled)
-        self.pulse_label = QLabel("Pulse: --:--")
+        # Pulse countdown labels (only if enabled)
+        self.pulse_label = QLabel("R: --:-- | A: --:--")
         self.pulse_label.setFont(QFont(UI_FONT_FAMILY, 11))
         self.pulse_label.setStyleSheet(f"color: {COLORS['pulse']};")
-        self.pulse_label.setToolTip("Time until next system pulse")
+        self.pulse_label.setToolTip("Time until next pulse (R=Reflective, A=Action)")
         if not config.SYSTEM_PULSE_ENABLED:
             self.pulse_label.hide()
         layout.addWidget(self.pulse_label)
 
-        # Pulse interval dropdown
-        self.pulse_dropdown = QComboBox()
-        self.pulse_dropdown.setFont(QFont(UI_FONT_FAMILY, 10))
-        self.pulse_dropdown.addItems(["3 min", "10 min", "30 min", "1 hour", "2 hours", "3 hours", "6 hours", "12 hours"])
-        self.pulse_dropdown.setCurrentIndex(1)  # Default: 10 min
-        self.pulse_dropdown.setToolTip("Set pulse timer interval")
-        self.pulse_dropdown.currentIndexChanged.connect(self._on_pulse_interval_changed)
+        # Pulse type toggle (Reflective / Action) for manual pulse button
+        self.pulse_type_toggle = QComboBox()
+        self.pulse_type_toggle.setFont(QFont(UI_FONT_FAMILY, 10))
+        self.pulse_type_toggle.addItems(["Reflective", "Action"])
+        self.pulse_type_toggle.setCurrentIndex(0)  # Default: Reflective
+        self.pulse_type_toggle.setToolTip("Select pulse type for manual trigger")
         if not config.SYSTEM_PULSE_ENABLED:
-            self.pulse_dropdown.hide()
-        layout.addWidget(self.pulse_dropdown)
+            self.pulse_type_toggle.hide()
+        layout.addWidget(self.pulse_type_toggle)
 
         # Pulse Now button
         self.pulse_now_btn = QPushButton("Pulse")
         self.pulse_now_btn.setFont(QFont(UI_FONT_FAMILY, 9))
-        self.pulse_now_btn.setToolTip("Fire a system pulse now")
+        self.pulse_now_btn.setToolTip("Fire a pulse now (uses selected type)")
         self.pulse_now_btn.clicked.connect(self._on_pulse_now_clicked)
         if not config.SYSTEM_PULSE_ENABLED:
             self.pulse_now_btn.hide()
@@ -763,13 +763,16 @@ class ChatWindow(QMainWindow):
         self._llm_router = llm_router
         self._prompt_builder = prompt_builder
         self._temporal_tracker = temporal_tracker
-        self._system_pulse_timer = system_pulse_timer
+        # PulseManager is passed as system_pulse_timer for backward compat
+        self._pulse_manager = system_pulse_timer
+        self._system_pulse_timer = system_pulse_timer  # Legacy alias
         self._reminder_scheduler = reminder_scheduler
         self._telegram_listener = telegram_listener
 
-        # Set up pulse callback if timer is provided
-        if self._system_pulse_timer:
-            self._system_pulse_timer.set_callback(self._on_pulse_fired)
+        # Set up pulse callbacks if manager is provided
+        if self._pulse_manager:
+            self._pulse_manager.set_reflective_callback(self._on_reflective_pulse_fired)
+            self._pulse_manager.set_action_callback(self._on_action_pulse_fired)
 
         # Set up Telegram listener callback if provided
         if self._telegram_listener:
@@ -811,104 +814,75 @@ class ChatWindow(QMainWindow):
         session_str = self._format_duration(session_duration)
         self.timer_label.setText(f"Session: {session_str}")
 
-        # Update pulse countdown
-        if self._system_pulse_timer and config.SYSTEM_PULSE_ENABLED:
-            remaining = self._system_pulse_timer.get_seconds_remaining()
-            minutes = remaining // 60
-            seconds = remaining % 60
-            pulse_str = f"{minutes}:{seconds:02d}"
+        # Update pulse countdowns (reflective + action)
+        if self._pulse_manager and config.SYSTEM_PULSE_ENABLED:
+            r_remaining = self._pulse_manager.reflective_timer.get_seconds_remaining()
+            a_remaining = self._pulse_manager.action_timer.get_seconds_remaining()
 
-            # Change color when paused or close to firing
-            if self._system_pulse_timer.is_paused():
+            def _fmt(secs):
+                m, s = divmod(secs, 60)
+                if m >= 60:
+                    h = m // 60
+                    m = m % 60
+                    return f"{h}:{m:02d}:{s:02d}"
+                return f"{m}:{s:02d}"
+
+            r_str = _fmt(r_remaining)
+            a_str = _fmt(a_remaining)
+
+            if self._pulse_manager.is_paused():
                 self.pulse_label.setStyleSheet(f"color: {COLORS['text_dim']};")
-                pulse_str = f"{pulse_str} (paused)"
-            elif remaining <= 30:
-                self.pulse_label.setStyleSheet(f"color: {COLORS['accent']};")
+                self.pulse_label.setText(f"R: {r_str} | A: {a_str} (paused)")
             else:
-                self.pulse_label.setStyleSheet(f"color: {COLORS['pulse']};")
+                # Highlight whichever is closer to firing
+                next_remaining = min(r_remaining, a_remaining)
+                if next_remaining <= 30:
+                    self.pulse_label.setStyleSheet(f"color: {COLORS['accent']};")
+                else:
+                    self.pulse_label.setStyleSheet(f"color: {COLORS['pulse']};")
+                self.pulse_label.setText(f"R: {r_str} | A: {a_str}")
 
-            self.pulse_label.setText(f"Pulse: {pulse_str}")
+    def _emit_pulse_interval_change(self, change_info):
+        """Emit pulse interval change signal with debug logging.
 
-    def _on_pulse_interval_changed(self, index: int):
-        """Handle pulse interval dropdown change."""
-        # Map dropdown index to seconds
-        interval_map = {
-            0: 180,    # 3 min
-            1: 600,    # 10 min
-            2: 1800,   # 30 min
-            3: 3600,   # 1 hour
-            4: 7200,   # 2 hours
-            5: 10800,  # 3 hours
-            6: 21600,  # 6 hours
-            7: 43200,  # 12 hours
-        }
-
-        new_interval = interval_map.get(index, 600)
-
-        if self._system_pulse_timer:
-            old_interval = self._system_pulse_timer.pulse_interval
-            self._system_pulse_timer.pulse_interval = new_interval
-            self._system_pulse_timer.reset()
-
-            # Log the change
-            from prompt_builder.sources.system_pulse import get_interval_label
-            old_label = get_interval_label(old_interval)
-            new_label = get_interval_label(new_interval)
-            log_info(f"Pulse timer changed: {old_label} -> {new_label}", prefix="⏱️")
-
-    def _emit_pulse_interval_change(self, interval: int):
-        """Emit pulse interval change signal with debug logging."""
-        log_info(f"PULSE DEBUG: Emitting pulse_interval_change signal with {interval}s", prefix="🔍")
-        self.signals.pulse_interval_change.emit(interval)
+        Args:
+            change_info: dict with "pulse_type" and "interval_seconds"
+        """
+        log_info(f"PULSE DEBUG: Emitting pulse_interval_change signal: {change_info}", prefix="🔍")
+        self.signals.pulse_interval_change.emit(change_info)
         log_info("PULSE DEBUG: Signal emitted", prefix="🔍")
 
-    def set_pulse_interval_by_seconds(self, seconds: int):
-        """Set the pulse interval and update dropdown to match.
+    def _on_pulse_interval_change_signal(self, change_info):
+        """Handle pulse interval change signal from AI tool call.
 
-        Used when AI changes the interval via [[PULSE:Xm]] command.
+        Args:
+            change_info: dict with "pulse_type" and "interval_seconds"
         """
-        log_info(f"PULSE DEBUG: set_pulse_interval_by_seconds({seconds}) ENTRY", prefix="🔍")
+        if not isinstance(change_info, dict):
+            log_warning(f"PULSE DEBUG: Invalid change_info type: {type(change_info)}")
+            return
 
-        # Map seconds to dropdown index
-        seconds_to_index = {
-            180: 0,    # 3 min
-            600: 1,    # 10 min
-            1800: 2,   # 30 min
-            3600: 3,   # 1 hour
-            7200: 4,   # 2 hours
-            10800: 5,  # 3 hours
-            21600: 6,  # 6 hours
-            43200: 7,  # 12 hours
-        }
+        pulse_type = change_info.get("pulse_type", "")
+        interval_seconds = change_info.get("interval_seconds", 0)
 
-        index = seconds_to_index.get(seconds)
-        log_info(f"PULSE DEBUG: seconds={seconds} mapped to index={index}", prefix="🔍")
+        log_info(f"PULSE DEBUG: Applying interval change: {pulse_type} -> {interval_seconds}s", prefix="🔍")
 
-        if index is not None:
-            # Block signals to avoid triggering _on_pulse_interval_changed twice
-            log_info(f"PULSE DEBUG: Updating dropdown to index {index}", prefix="🔍")
-            self.pulse_dropdown.blockSignals(True)
-            self.pulse_dropdown.setCurrentIndex(index)
-            self.pulse_dropdown.blockSignals(False)
-            log_info(f"PULSE DEBUG: Dropdown updated, current index now: {self.pulse_dropdown.currentIndex()}", prefix="🔍")
+        if self._pulse_manager:
+            from prompt_builder.sources.system_pulse import get_interval_label
+            new_label = get_interval_label(interval_seconds)
 
-            # Update the timer
-            if self._system_pulse_timer:
-                old_interval = self._system_pulse_timer.pulse_interval
-                log_info(f"PULSE DEBUG: Updating timer: {old_interval}s -> {seconds}s", prefix="🔍")
-                self._system_pulse_timer.pulse_interval = seconds
-                self._system_pulse_timer.reset()
-                log_info(f"PULSE DEBUG: Timer updated, pulse_interval now: {self._system_pulse_timer.pulse_interval}s", prefix="🔍")
-
-                # Log the change
-                from prompt_builder.sources.system_pulse import get_interval_label
-                old_label = get_interval_label(old_interval)
-                new_label = get_interval_label(seconds)
-                log_info(f"AI adjusted pulse timer: {old_label} -> {new_label}", prefix="⏱️")
+            if pulse_type == "reflective":
+                old_label = get_interval_label(self._pulse_manager.reflective_timer.interval)
+                self._pulse_manager.set_reflective_interval(interval_seconds)
+                log_info(f"AI adjusted reflective pulse: {old_label} -> {new_label}", prefix="⏱️")
+            elif pulse_type == "action":
+                old_label = get_interval_label(self._pulse_manager.action_timer.interval)
+                self._pulse_manager.set_action_interval(interval_seconds)
+                log_info(f"AI adjusted action pulse: {old_label} -> {new_label}", prefix="⏱️")
             else:
-                log_warning("PULSE DEBUG: _system_pulse_timer is None!")
+                log_warning(f"PULSE DEBUG: Unknown pulse_type '{pulse_type}'")
         else:
-            log_warning(f"PULSE DEBUG: Invalid seconds value {seconds} - not in mapping!")
+            log_warning("PULSE DEBUG: _pulse_manager is None!")
 
     def _init_model_dropdown(self):
         """Initialize model dropdown based on saved user preference."""
@@ -1466,10 +1440,10 @@ class ChatWindow(QMainWindow):
             self._retry_manager.cancel()
             log_info("Deferred retry cancelled - user sent new message", prefix="🔄")
 
-        # Reset and pause the pulse timer (user is active)
-        if self._system_pulse_timer:
-            self._system_pulse_timer.reset()
-            self._system_pulse_timer.pause()
+        # Reset and pause pulse timers (user is active)
+        if self._pulse_manager:
+            self._pulse_manager.reset_all()
+            self._pulse_manager.pause()
 
         # Pause Telegram listener during processing to prevent message loss
         if self._telegram_listener:
@@ -2230,9 +2204,9 @@ class ChatWindow(QMainWindow):
         self._status_manager.set_ready()
         self._hide_cancel_button()
 
-        # Resume the pulse timer
-        if self._system_pulse_timer:
-            self._system_pulse_timer.resume()
+        # Resume pulse timers
+        if self._pulse_manager:
+            self._pulse_manager.resume()
 
         # Resume the Telegram listener
         if self._telegram_listener:
@@ -2284,8 +2258,8 @@ class ChatWindow(QMainWindow):
 
         try:
             # Pause timers during processing
-            if self._system_pulse_timer:
-                self._system_pulse_timer.pause()
+            if self._pulse_manager:
+                self._pulse_manager.pause()
             if self._telegram_listener:
                 self._telegram_listener.pause()
 
@@ -2489,8 +2463,8 @@ class ChatWindow(QMainWindow):
 
         try:
             # Pause timers
-            if self._system_pulse_timer:
-                self._system_pulse_timer.pause()
+            if self._pulse_manager:
+                self._pulse_manager.pause()
             if self._telegram_listener:
                 self._telegram_listener.pause()
 
@@ -2587,8 +2561,8 @@ class ChatWindow(QMainWindow):
 
         try:
             # Pause timers
-            if self._system_pulse_timer:
-                self._system_pulse_timer.pause()
+            if self._pulse_manager:
+                self._pulse_manager.pause()
             if self._telegram_listener:
                 self._telegram_listener.pause()
 
@@ -2678,83 +2652,101 @@ class ChatWindow(QMainWindow):
             self.signals.response_complete.emit()
 
     def _on_pulse_now_clicked(self):
-        """Handle Pulse Now button click — fire a pulse immediately."""
+        """Handle Pulse Now button click — fire a pulse of the selected type."""
         if self._is_processing:
             return
-        # Reset the countdown so it restarts from the full interval after this pulse
-        if self._system_pulse_timer:
-            self._system_pulse_timer.reset()
-        self._on_pulse_fired()
+        # Determine which type the user selected
+        selected_index = self.pulse_type_toggle.currentIndex()
+        if selected_index == 0:
+            # Reflective — reset reflective timer (and action, since reflective subsumes)
+            if self._pulse_manager:
+                self._pulse_manager.reflective_timer.reset()
+                self._pulse_manager.action_timer.reset()
+            self._on_reflective_pulse_fired()
+        else:
+            # Action — reset action timer only
+            if self._pulse_manager:
+                self._pulse_manager.action_timer.reset()
+            self._on_action_pulse_fired()
 
-    def _on_pulse_fired(self):
-        """Called when the system pulse timer fires."""
-        log_info("PULSE DEBUG: _on_pulse_fired() callback triggered", prefix="🔍")
-
-        # Don't fire if already processing a message
+    def _on_reflective_pulse_fired(self):
+        """Called when reflective pulse fires (timer or manual)."""
+        log_info("PULSE DEBUG: _on_reflective_pulse_fired() triggered", prefix="🔍")
         if self._is_processing:
-            log_warning("PULSE DEBUG: Skipping pulse - already processing (_is_processing=True)")
+            log_warning("PULSE DEBUG: Skipping reflective pulse - already processing")
+            if self._pulse_manager:
+                self._pulse_manager.mark_pulse_complete()
             return
-
-        log_info("PULSE DEBUG: Starting pulse processing thread...", prefix="🔍")
-
-        # Process the pulse in a background thread
+        log_info("PULSE DEBUG: Starting reflective pulse thread...", prefix="🔍")
         thread = threading.Thread(
-            target=self._process_pulse,
+            target=self._process_reflective_pulse,
             daemon=True
         )
         thread.start()
-        log_info(f"PULSE DEBUG: Pulse thread started (thread={thread.name})", prefix="🔍")
 
-    def _process_pulse(self):
-        """Process a system pulse in background thread using native tools."""
-        from agency.system_pulse import get_pulse_prompt, PULSE_STORED_MESSAGE
+    def _on_action_pulse_fired(self):
+        """Called when action pulse fires (timer or manual)."""
+        log_info("PULSE DEBUG: _on_action_pulse_fired() triggered", prefix="🔍")
+        if self._is_processing:
+            log_warning("PULSE DEBUG: Skipping action pulse - already processing")
+            if self._pulse_manager:
+                self._pulse_manager.mark_pulse_complete()
+            return
+        log_info("PULSE DEBUG: Starting action pulse thread...", prefix="🔍")
+        thread = threading.Thread(
+            target=self._process_action_pulse,
+            daemon=True
+        )
+        thread.start()
+
+    def _process_typed_pulse(self, pulse_type_str, pulse_prompt, stored_message, task_type):
+        """Shared pulse processing logic for both reflective and action pulses.
+
+        Args:
+            pulse_type_str: "reflective" or "action" (for logging)
+            pulse_prompt: The full prompt to send to the LLM
+            stored_message: Abbreviated message for conversation history
+            task_type: TaskType.PULSE_REFLECTIVE or TaskType.PULSE_ACTION
+        """
         from agency.tools import get_tool_definitions, process_with_tools
-        from prompt_builder.sources.system_pulse import get_interval_label
 
-        # Get dynamic pulse prompt with current interval
-        current_interval = self._system_pulse_timer.pulse_interval if self._system_pulse_timer else 600
-        interval_label = get_interval_label(current_interval)
-        pulse_prompt = get_pulse_prompt(interval_label)
+        label = pulse_type_str.capitalize()
+        log_info(f"=== PULSE: Starting _process_{pulse_type_str}_pulse() ===", prefix="⏱️")
 
-        log_info("=== PULSE: Starting _process_pulse() ===", prefix="⏱️")
-
-        # Emit to process panel with interval detail
         get_process_event_bus().emit_event(
             ProcessEventType.PULSE_FIRED,
-            detail="Choosing what to do",
+            detail=f"{label} pulse",
             origin="isaac"
         )
 
         try:
             self._is_processing = True
 
-            # Pause timer during processing
-            if self._system_pulse_timer:
-                self._system_pulse_timer.pause()
+            # Pause timers during processing
+            if self._pulse_manager:
+                self._pulse_manager.pause()
 
-            # Pause Telegram listener during processing to prevent message loss
+            # Pause Telegram listener during processing
             if self._telegram_listener:
                 self._telegram_listener.pause()
 
-            # Update UI status
-            self.signals.update_status.emit("System pulse...", StatusManager.STATUS_THINKING)
+            self.signals.update_status.emit(f"{label} pulse...", StatusManager.STATUS_THINKING)
 
             # Show system message in chat
             timestamp = self._get_timestamp()
-            self.signals.new_message.emit("system", PULSE_STORED_MESSAGE, timestamp)
+            self.signals.new_message.emit("system", stored_message, timestamp)
 
             # Store abbreviated pulse message in conversation history
             if self._conversation_mgr:
                 self._conversation_mgr.add_turn(
                     role="system",
-                    content=PULSE_STORED_MESSAGE,
+                    content=stored_message,
                     input_type="system"
                 )
             else:
                 log_error("PULSE: _conversation_mgr is None!")
 
-            # Build prompt with full pulse message
-            # Mark as pulse so CuriositySource can provide directive context
+            # Build prompt (mark as pulse so CuriositySource provides directive context)
             assembled = self._prompt_builder.build(
                 user_input=pulse_prompt,
                 system_prompt="",
@@ -2762,21 +2754,10 @@ class ChatWindow(QMainWindow):
             )
             get_process_event_bus().emit_event(ProcessEventType.PROMPT_ASSEMBLED)
 
-            # Get conversation history (uses saved context count from shutdown)
             history = self._conversation_mgr.get_api_messages()
-
-            # Add the pulse prompt as the message to respond to
-            # (role="user" is an API constraint, but content clarifies it's automated)
-            # No screenshots during pulse — the AI's autonomous moment should focus
-            # on introspection, curiosity, and intentions, not whatever is on screen.
-            # The AI can still request screenshots on-demand via [[SCREENSHOT]] if needed.
             history.append({"role": "user", "content": pulse_prompt})
 
-            # Get tool definitions for native tool use (pulse-only tools included)
             tools = get_tool_definitions(is_pulse=True)
-
-            # Get LLM response WITH tools enabled
-            from llm.router import TaskType
 
             get_process_event_bus().emit_event(
                 ProcessEventType.STREAM_START, is_active=True
@@ -2784,15 +2765,14 @@ class ChatWindow(QMainWindow):
             response = self._llm_router.chat(
                 messages=history,
                 system_prompt=assembled.full_system_prompt,
-                task_type=TaskType.CONVERSATION,
+                task_type=task_type,
                 temperature=0.7,
-                tools=tools,  # Enable native tools for pulse responses
+                tools=tools,
                 thinking_enabled=True
             )
 
             log_info(f"PULSE: Router returned, success={response.success}", prefix="⏱️")
 
-            # Emit initial response to process panel
             if response.success:
                 token_detail = ""
                 if hasattr(response, 'tokens_out') and response.tokens_out:
@@ -2804,7 +2784,6 @@ class ChatWindow(QMainWindow):
                 )
 
             if response.success:
-                # Set up dev window callbacks for tool/response tracking
                 dev_callbacks = None
                 if config.DEV_MODE_ENABLED:
                     from interface.dev_window import emit_response_pass, emit_command_executed
@@ -2813,33 +2792,29 @@ class ChatWindow(QMainWindow):
                         "emit_command_executed": emit_command_executed
                     }
 
-                # Use shared helper to process response with native tools
-                # The helper handles multi-pass tool execution and pulse interval changes
                 result = process_with_tools(
                     llm_router=self._llm_router,
                     response=response,
                     history=history,
                     system_prompt=assembled.full_system_prompt,
                     max_passes=5,
-                    pulse_callback=lambda interval: self._emit_pulse_interval_change(interval),
+                    pulse_callback=lambda change: self._emit_pulse_interval_change(change),
                     tools=tools,
                     dev_mode_callbacks=dev_callbacks,
-                    thinking_enabled=True
+                    thinking_enabled=True,
+                    task_type=task_type
                 )
 
                 final_text = result.final_text
                 log_info(f"PULSE: Processed in {result.passes_executed} pass(es)", prefix="⏱️")
 
-                # Store response
                 self._conversation_mgr.add_turn(
                     role="assistant",
                     content=final_text,
                     input_type="text"
                 )
 
-                # Emit to GUI
                 timestamp = self._get_timestamp()
-                # Check for clarification request
                 if result.clarification_requested and result.clarification_data:
                     self.signals.show_clarification.emit(result.clarification_data, timestamp)
                     if final_text.strip():
@@ -2847,29 +2822,61 @@ class ChatWindow(QMainWindow):
                 else:
                     self.signals.new_message.emit("assistant", final_text, timestamp)
             else:
-                error_msg = f"Pulse API error: {response.error}"
+                error_msg = f"{label} pulse API error: {response.error}"
                 log_error(f"PULSE: API call failed - {error_msg}")
-
-                # Show error in CHAT (not just status bar) so it's visible
                 timestamp = self._get_timestamp()
-                self.signals.new_message.emit("system", f"[Pulse Error: {response.error}]", timestamp)
+                self.signals.new_message.emit("system", f"[{label} Pulse Error: {response.error}]", timestamp)
                 self.signals.update_status.emit(error_msg, StatusManager.STATUS_ERROR)
 
         except Exception as e:
-            error_msg = f"Pulse exception: {str(e)}"
+            error_msg = f"{label} pulse exception: {str(e)}"
             tb = traceback.format_exc()
             log_error(f"PULSE: Exception - {error_msg}")
             log_error(f"PULSE: Traceback:\n{tb}")
-
-            # Show error in CHAT (not just status bar) so it's visible
             timestamp = self._get_timestamp()
-            self.signals.new_message.emit("system", f"[Pulse Exception: {str(e)}]", timestamp)
+            self.signals.new_message.emit("system", f"[{label} Pulse Exception: {str(e)}]", timestamp)
             self.signals.update_status.emit(error_msg, StatusManager.STATUS_ERROR)
 
         finally:
-            log_info("=== PULSE: _process_pulse() completing ===", prefix="⏱️")
+            log_info(f"=== PULSE: _process_{pulse_type_str}_pulse() completing ===", prefix="⏱️")
+            if self._pulse_manager:
+                self._pulse_manager.mark_pulse_complete()
             get_process_event_bus().emit_event(ProcessEventType.PROCESSING_COMPLETE)
             self.signals.response_complete.emit()
+
+    def _process_reflective_pulse(self):
+        """Process a reflective pulse (deep introspection, Opus)."""
+        from agency.system_pulse import get_reflective_pulse_prompt, REFLECTIVE_PULSE_STORED_MESSAGE
+        from prompt_builder.sources.system_pulse import get_interval_label
+        from llm.router import TaskType
+
+        interval = self._pulse_manager.reflective_timer.interval if self._pulse_manager else 43200
+        interval_label = get_interval_label(interval)
+        prompt = get_reflective_pulse_prompt(interval_label)
+
+        self._process_typed_pulse(
+            pulse_type_str="reflective",
+            pulse_prompt=prompt,
+            stored_message=REFLECTIVE_PULSE_STORED_MESSAGE,
+            task_type=TaskType.PULSE_REFLECTIVE
+        )
+
+    def _process_action_pulse(self):
+        """Process an action pulse (open-ended agency, Sonnet)."""
+        from agency.system_pulse import get_action_pulse_prompt, ACTION_PULSE_STORED_MESSAGE
+        from prompt_builder.sources.system_pulse import get_interval_label
+        from llm.router import TaskType
+
+        interval = self._pulse_manager.action_timer.interval if self._pulse_manager else 7200
+        interval_label = get_interval_label(interval)
+        prompt = get_action_pulse_prompt(interval_label)
+
+        self._process_typed_pulse(
+            pulse_type_str="action",
+            pulse_prompt=prompt,
+            stored_message=ACTION_PULSE_STORED_MESSAGE,
+            task_type=TaskType.PULSE_ACTION
+        )
 
     def _on_reminder_fired(self, triggered_intentions):
         """Called when the reminder scheduler detects due intentions."""
@@ -2923,8 +2930,8 @@ class ChatWindow(QMainWindow):
             self._is_processing = True
 
             # Pause idle timer during processing (so we don't double-fire)
-            if self._system_pulse_timer:
-                self._system_pulse_timer.pause()
+            if self._pulse_manager:
+                self._pulse_manager.pause()
 
             # Pause Telegram listener during processing to prevent message loss
             if self._telegram_listener:

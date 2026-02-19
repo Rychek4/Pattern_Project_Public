@@ -32,7 +32,8 @@ class ProcessedToolResponse:
         needs_continuation: Whether to call Claude again with results
         tool_result_message: Message dict to send tool results back to Claude
         continuation_images: Images to include in continuation (from visual tools)
-        pulse_interval_change: New pulse interval in seconds if AI requested change
+        pulse_interval_change: Pulse interval change dict if AI requested change.
+            Format: {"pulse_type": "reflective"|"action", "interval_seconds": int}
         telegram_sent: True if send_telegram was executed successfully
     """
     original_text: str
@@ -41,7 +42,7 @@ class ProcessedToolResponse:
     needs_continuation: bool = False
     tool_result_message: Optional[Dict[str, Any]] = None
     continuation_images: Optional[List["ImageContent"]] = field(default=None)
-    pulse_interval_change: Optional[int] = None
+    pulse_interval_change: Optional[Dict[str, Any]] = None
     telegram_sent: bool = False
 
     def has_tool_results(self) -> bool:
