@@ -166,9 +166,9 @@ def initialize_system() -> bool:
     # Just verify availability for startup logging.
     if config.VISUAL_ENABLED:
         screenshot_ok, webcam_ok = is_visual_capture_available()
-        if not screenshot_ok and config.VISUAL_SCREENSHOT_ENABLED:
+        if not screenshot_ok and config.VISUAL_SCREENSHOT_MODE != "disabled":
             log_warning("Screenshot capture unavailable (PIL not installed)")
-        if not webcam_ok and config.VISUAL_WEBCAM_ENABLED:
+        if not webcam_ok and config.VISUAL_WEBCAM_MODE != "disabled":
             log_warning("Webcam capture unavailable (OpenCV not installed)")
 
     # Load STT model if voice pipeline is enabled
@@ -235,9 +235,8 @@ def print_configuration() -> None:
     # Visual settings
     if config.VISUAL_ENABLED:
         log_section("Visual Capture", "📷")
-        log_subsection(f"Capture Interval: {config.VISUAL_CAPTURE_INTERVAL}s")
-        log_subsection(f"Screenshot: {'ENABLED' if config.VISUAL_SCREENSHOT_ENABLED else 'DISABLED'}")
-        log_subsection(f"Webcam: {'ENABLED' if config.VISUAL_WEBCAM_ENABLED else 'DISABLED'}")
+        log_subsection(f"Screenshot: {config.VISUAL_SCREENSHOT_MODE}")
+        log_subsection(f"Webcam: {config.VISUAL_WEBCAM_MODE}")
 
     # Communication settings
     if config.EMAIL_GATEWAY_ENABLED or config.TELEGRAM_ENABLED:

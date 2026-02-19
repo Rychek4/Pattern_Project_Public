@@ -108,7 +108,7 @@ class ChatCLI:
         )
         if config.SYSTEM_PULSE_ENABLED:
             self.console.print(
-                f"[dim]System pulse active: AI will speak every {config.SYSTEM_PULSE_INTERVAL // 60} minutes if idle[/dim]"
+                f"[dim]System pulse active: action every {config.ACTION_PULSE_INTERVAL // 3600}h, reflection every {config.REFLECTIVE_PULSE_INTERVAL // 3600}h[/dim]"
             )
         if config.TELEGRAM_ENABLED:
             self.console.print(

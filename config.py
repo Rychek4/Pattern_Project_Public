@@ -129,9 +129,6 @@ CONTEXT_WINDOW_SIZE = 30           # Target turns to keep in active context
 CONTEXT_OVERFLOW_TRIGGER = 40      # Extract when context reaches this size
 CONTEXT_EXTRACTION_BATCH = 10      # Turns to extract per overflow (40 - 30 = 10)
 
-# DEPRECATED: Old threshold-based extraction (replaced by windowed system)
-# MEMORY_EXTRACTION_THRESHOLD = 10  # No longer used - see CONTEXT_OVERFLOW_TRIGGER
-
 # -----------------------------------------------------------------------------
 # Dual-Track Retrieval Settings
 # -----------------------------------------------------------------------------
@@ -169,7 +166,6 @@ MEMORY_MAX_FACTUAL_PER_EXTRACTION = 8    # Max factual memories per extraction r
 # Topic-Based Extraction Settings (for episodic extraction)
 # These control how conversations are clustered into topics before memory creation
 MEMORY_MIN_TURNS_PER_TOPIC = 1  # Allow single-turn topics (importance isn't determined by length)
-MEMORY_MAX_PER_EXTRACTION = 3  # Legacy: Hard cap on memories (now MEMORY_MAX_EPISODIC_PER_EXTRACTION)
 MEMORY_SKIP_MINOR_TOPICS = True  # Skip topics marked as "minor" significance
 MEMORY_LARGE_TOPIC_THRESHOLD = 15  # Topics with more turns may get 2 memories
 MEMORY_SMALL_BATCH_THRESHOLD = 10  # Below this turn count, preserve all topics (don't skip minor)
@@ -256,7 +252,6 @@ SESSION_AUTO_EXTRACT_ON_END = True
 # SYSTEM PULSE CONFIGURATION
 # =============================================================================
 SYSTEM_PULSE_ENABLED = os.getenv("SYSTEM_PULSE_ENABLED", "true").lower() == "true"
-SYSTEM_PULSE_INTERVAL = 600  # Legacy — unused, kept for backward compatibility
 REFLECTIVE_PULSE_INTERVAL = 43200   # 12 hours (deep reflection, Opus)
 ACTION_PULSE_INTERVAL = 7200        # 2 hours (open-ended agency, Sonnet)
 
@@ -424,14 +419,6 @@ VISUAL_ENABLED = os.getenv("VISUAL_ENABLED", "true").lower() == "true"
 VISUAL_SCREENSHOT_MODE = os.getenv("VISUAL_SCREENSHOT_MODE", "auto")  # "auto", "on_demand", "disabled"
 VISUAL_WEBCAM_MODE = os.getenv("VISUAL_WEBCAM_MODE", "on_demand")  # "auto", "on_demand", "disabled"
 
-# Legacy enable flags (now derived from mode != "disabled")
-VISUAL_SCREENSHOT_ENABLED = VISUAL_SCREENSHOT_MODE != "disabled"
-VISUAL_WEBCAM_ENABLED = VISUAL_WEBCAM_MODE != "disabled"
-
-# Legacy: Timer-based capture interval (deprecated, kept for fallback system)
-VISUAL_CAPTURE_INTERVAL = int(os.getenv("VISUAL_CAPTURE_INTERVAL", "30"))
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
-
 # =============================================================================
 # AI COMMAND SYSTEM CONFIGURATION
 # =============================================================================
@@ -457,24 +444,6 @@ DELEGATION_TEMPERATURE = 0.2        # Low temp for deterministic tool execution;
 # Requires: pip install playwright && playwright install chromium
 BROWSER_SESSIONS_DIR = DATA_DIR / "browser_sessions"   # Per-service cookie/session persistence
 BROWSER_CREDENTIALS_PATH = DATA_DIR / "credentials.toml"  # Read-only service credentials
-
-# =============================================================================
-# NATIVE TOOL USE CONFIGURATION (DEPRECATED)
-# =============================================================================
-# Native tool use is now the ONLY supported mode. The legacy [[COMMAND]] pattern
-# system has been deprecated and removed.
-#
-# This flag is kept for backwards compatibility but has no effect.
-# It will be removed in a future version.
-#
-# MIGRATION NOTE (December 2025):
-# - All message entry points (user input, pulse, telegram, reminder) now use
-#   native tool use exclusively
-# - The [[COMMAND: arg]] syntax is no longer parsed or supported
-# - Tool definitions in agency/tools/definitions.py define all available tools
-# - The legacy command processor (agency/commands/processor.py) was removed Feb 2026
-# - The handlers in agency/commands/handlers/ are still active (called by ToolExecutor)
-USE_NATIVE_TOOLS = True  # Always True - legacy mode no longer available
 
 # =============================================================================
 # INTENTION SYSTEM CONFIGURATION
