@@ -42,7 +42,7 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")  # Default/fallback model
 ANTHROPIC_MODEL_CONVERSATION = os.getenv("ANTHROPIC_MODEL_CONVERSATION", "claude-sonnet-4-6")  # User-facing chat (Sonnet)
 ANTHROPIC_MODEL_EXTRACTION = os.getenv("ANTHROPIC_MODEL_EXTRACTION", "claude-sonnet-4-6")  # Memory extraction (Sonnet)
-ANTHROPIC_MAX_TOKENS = int(os.getenv("ANTHROPIC_MAX_TOKENS", "4096"))
+ANTHROPIC_MAX_TOKENS = int(os.getenv("ANTHROPIC_MAX_TOKENS", "64000"))
 
 # Extended Thinking
 # Claude uses a private scratchpad to reason before responding.
@@ -57,16 +57,8 @@ ANTHROPIC_MAX_TOKENS = int(os.getenv("ANTHROPIC_MAX_TOKENS", "4096"))
 ANTHROPIC_THINKING_EFFORT = "high"                 # Effort level for adaptive thinking
 ANTHROPIC_THINKING_ENABLED = True                   # Default state for new users (on by default)
 
-# KoboldCpp (Local)
-KOBOLD_API_URL = os.getenv("KOBOLD_API_URL", "http://127.0.0.1:5001")
-KOBOLD_MAX_CONTEXT = int(os.getenv("KOBOLD_MAX_CONTEXT", "4096"))
-KOBOLD_MAX_LENGTH = int(os.getenv("KOBOLD_MAX_LENGTH", "512"))
-
 # Routing
-LLM_PRIMARY_PROVIDER = os.getenv("LLM_PRIMARY_PROVIDER", "anthropic")  # 'anthropic' or 'kobold'
-# LLM_EXTRACTION_PROVIDER - DEPRECATED: Unified extraction now uses API (single call)
-# Memory extraction was consolidated from 5+ local LLM calls to 1 API call for better quality
-LLM_FALLBACK_ENABLED = True  # Fall back to kobold if anthropic fails (not for extraction)
+LLM_PRIMARY_PROVIDER = "anthropic"
 
 # API Retry & Failover
 # Layer 1: Automatic retry for transient errors (500, 502, 503, timeouts)

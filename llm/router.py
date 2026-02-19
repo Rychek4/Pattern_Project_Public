@@ -8,7 +8,6 @@ from typing import Optional, List, Dict, Any, Generator
 from dataclasses import dataclass
 
 from core.logger import log_info, log_warning, log_error, log_success
-from llm.kobold_client import KoboldClient, KoboldResponse, get_kobold_client
 from llm.anthropic_client import (
     AnthropicClient, AnthropicResponse, ToolCall, StreamingState, get_anthropic_client
 )
@@ -17,7 +16,6 @@ from llm.anthropic_client import (
 class LLMProvider(Enum):
     """Available LLM providers."""
     ANTHROPIC = "anthropic"
-    KOBOLD = "kobold"
 
 
 class TaskType(Enum):
@@ -83,20 +81,16 @@ class LLMRouter:
 
     def __init__(
         self,
-        primary_provider: LLMProvider = LLMProvider.ANTHROPIC,
-        fallback_enabled: bool = True
+        primary_provider: LLMProvider = LLMProvider.ANTHROPIC
     ):
         """
         Initialize the router.
 
         Args:
             primary_provider: Primary provider for conversation
-            fallback_enabled: Whether to fall back to secondary on failure
         """
         self.primary_provider = primary_provider
-        self.fallback_enabled = fallback_enabled
         self._anthropic: Optional[AnthropicClient] = None
-        self._kobold: Optional[KoboldClient] = None
         self._provider_status: Dict[LLMProvider, bool] = {}
 
     def _get_anthropic(self) -> AnthropicClient:
@@ -104,12 +98,6 @@ class LLMRouter:
         if self._anthropic is None:
             self._anthropic = get_anthropic_client()
         return self._anthropic
-
-    def _get_kobold(self) -> KoboldClient:
-        """Get or create Kobold client."""
-        if self._kobold is None:
-            self._kobold = get_kobold_client()
-        return self._kobold
 
     def _get_failover_model(self, current_model: str) -> Optional[str]:
         """
@@ -145,18 +133,6 @@ class LLMRouter:
                 status[LLMProvider.ANTHROPIC] = (False, "API key not configured")
         except Exception as e:
             status[LLMProvider.ANTHROPIC] = (False, str(e))
-
-        # Check Kobold
-        try:
-            client = self._get_kobold()
-            is_available = client.is_available()
-            if is_available:
-                model = client.get_model_name() or "Unknown model"
-                status[LLMProvider.KOBOLD] = (True, f"Available ({model})")
-            else:
-                status[LLMProvider.KOBOLD] = (False, "Not responding")
-        except Exception as e:
-            status[LLMProvider.KOBOLD] = (False, str(e))
 
         self._provider_status = {p: s[0] for p, s in status.items()}
         return status
@@ -374,29 +350,8 @@ class LLMRouter:
                     response.error_type = "both_models_unavailable"
                     return response
 
-        # Handle fallback to Kobold - but NOT for conversation tasks
-        if not response.success and self.fallback_enabled and task_type != TaskType.CONVERSATION:
-            fallback_provider = (
-                LLMProvider.KOBOLD if provider == LLMProvider.ANTHROPIC
-                else LLMProvider.ANTHROPIC
-            )
-
-            log_warning(
-                f"{provider.value} failed, falling back to {fallback_provider.value}"
-            )
-
-            response = self._send_to_provider(
-                provider=fallback_provider,
-                messages=messages,
-                system_prompt=system_prompt,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                enable_web_search=False,  # No web search on fallback
-                web_search_max_uses=None,
-                task_type=task_type
-            )
-        elif not response.success and task_type == TaskType.CONVERSATION:
-            log_warning(f"{provider.value} failed for CONVERSATION task - error_type={response.error_type}")
+        if not response.success:
+            log_warning(f"{provider.value} failed for {task_type.value} task - error_type={response.error_type}")
 
         return response
 
@@ -413,8 +368,6 @@ class LLMRouter:
     ) -> Generator[tuple[str, StreamingState], None, None]:
         """
         Stream a chat request, yielding text chunks as they arrive.
-
-        Only supports Anthropic provider (streaming not available for Kobold).
 
         Args:
             messages: List of message dicts
@@ -870,25 +823,6 @@ class LLMRouter:
 
                 return llm_response
 
-            elif provider == LLMProvider.KOBOLD:
-                client = self._get_kobold()
-                response = client.chat(
-                    messages=messages,
-                    system_prompt=system_prompt,
-                    max_length=max_tokens,
-                    temperature=temperature
-                )
-
-                llm_response = LLMResponse(
-                    text=response.text,
-                    success=response.success,
-                    provider=provider,
-                    tokens_out=response.tokens_generated,
-                    error=response.error
-                )
-
-                return llm_response
-
             else:
                 log_error(f"Unknown provider: {provider}")
                 return LLMResponse(
@@ -946,23 +880,18 @@ def get_llm_router() -> LLMRouter:
     """Get the global LLM router instance."""
     global _router
     if _router is None:
-        from config import LLM_PRIMARY_PROVIDER, LLM_FALLBACK_ENABLED
+        from config import LLM_PRIMARY_PROVIDER
         primary = LLMProvider(LLM_PRIMARY_PROVIDER)
-        _router = LLMRouter(
-            primary_provider=primary,
-            fallback_enabled=LLM_FALLBACK_ENABLED
-        )
+        _router = LLMRouter(primary_provider=primary)
     return _router
 
 
 def init_llm_router(
-    primary_provider: str = "anthropic",
-    fallback_enabled: bool = True
+    primary_provider: str = "anthropic"
 ) -> LLMRouter:
     """Initialize the global LLM router."""
     global _router
     _router = LLMRouter(
-        primary_provider=LLMProvider(primary_provider),
-        fallback_enabled=fallback_enabled
+        primary_provider=LLMProvider(primary_provider)
     )
     return _router

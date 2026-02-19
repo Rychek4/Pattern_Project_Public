@@ -120,8 +120,7 @@ def initialize_system() -> bool:
 
     # Initialize LLM router and check providers
     init_llm_router(
-        primary_provider=config.LLM_PRIMARY_PROVIDER,
-        fallback_enabled=config.LLM_FALLBACK_ENABLED
+        primary_provider=config.LLM_PRIMARY_PROVIDER
     )
     check_llm_providers()
 
@@ -273,19 +272,12 @@ def check_llm_providers() -> None:
     else:
         log_subsection(f"Primary ({primary.value}): ❌ {primary_status[1]}")
 
-    # Secondary provider (extraction)
-    secondary = LLMProvider.KOBOLD
-    secondary_status = status.get(secondary, (False, "Unknown"))
-    if secondary_status[0]:
-        log_subsection(f"Extraction ({secondary.value}): ✅ {secondary_status[1]}")
+    # Model failover status
+    failover_map = getattr(config, 'ANTHROPIC_MODEL_FAILOVER', {})
+    if failover_map:
+        log_subsection("Model failover: ENABLED")
     else:
-        log_subsection(f"Extraction ({secondary.value}): ❌ {secondary_status[1]}")
-
-    # Fallback status
-    if config.LLM_FALLBACK_ENABLED:
-        log_subsection("Fallback: ENABLED")
-    else:
-        log_subsection("Fallback: DISABLED")
+        log_subsection("Model failover: DISABLED")
 
 
 def start_background_services() -> None:
