@@ -57,6 +57,8 @@ class WebcamManager:
                     cls._instance._initialized = False
         return cls._instance
 
+    IDLE_TIMEOUT_SECONDS = 600  # 10 minutes
+
     def __init__(self):
         if self._initialized:
             return
@@ -64,6 +66,7 @@ class WebcamManager:
         self._cap = None
         self._device_lock = threading.Lock()
         self._is_open = False
+        self._idle_timer: Optional[threading.Timer] = None
 
     def _open_device(self) -> bool:
         """Open the webcam device if not already open."""
@@ -114,12 +117,26 @@ class WebcamManager:
                 image_bytes = buffer.tobytes()
 
                 log_info(f"Webcam captured: {len(image_bytes)} bytes", prefix="📷")
+                self._reset_idle_timer()
                 return image_bytes
 
             except Exception as e:
                 log_error(f"Webcam capture failed: {e}")
                 self._close_device_internal()
                 return None
+
+    def _reset_idle_timer(self):
+        """Reset the idle timeout timer. Called after each successful capture."""
+        if self._idle_timer is not None:
+            self._idle_timer.cancel()
+        self._idle_timer = threading.Timer(self.IDLE_TIMEOUT_SECONDS, self._on_idle_timeout)
+        self._idle_timer.daemon = True
+        self._idle_timer.start()
+
+    def _on_idle_timeout(self):
+        """Called when the webcam has been idle for IDLE_TIMEOUT_SECONDS."""
+        log_info("Webcam idle for 10 minutes, releasing device", prefix="📷")
+        self.release()
 
     def _close_device_internal(self):
         """Internal close without lock (called from within locked sections)."""
@@ -133,6 +150,9 @@ class WebcamManager:
 
     def release(self):
         """Release the webcam device. Call on application shutdown."""
+        if self._idle_timer is not None:
+            self._idle_timer.cancel()
+            self._idle_timer = None
         with self._device_lock:
             if self._cap is not None:
                 self._close_device_internal()
