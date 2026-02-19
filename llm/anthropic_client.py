@@ -186,6 +186,7 @@ class AnthropicClient:
         api_key: str,
         model: str = "claude-sonnet-4-6",
         max_tokens: int = 4096,
+        thinking_max_tokens: int = 16384,
         timeout: int = 120
     ):
         """
@@ -194,12 +195,15 @@ class AnthropicClient:
         Args:
             api_key: Anthropic API key
             model: Model to use
-            max_tokens: Maximum tokens to generate
+            max_tokens: Maximum tokens to generate (standard requests)
+            thinking_max_tokens: Maximum tokens when thinking is enabled
+                (covers both thinking and visible response)
             timeout: Request timeout in seconds
         """
         self.api_key = api_key
         self.model = model
         self.max_tokens = max_tokens
+        self.thinking_max_tokens = thinking_max_tokens
         self.timeout = timeout
         self._client = None
 
@@ -418,7 +422,10 @@ class AnthropicClient:
             AnthropicResponse with generated text and any tool calls
         """
         if max_tokens is None:
-            max_tokens = self.max_tokens
+            if thinking_enabled:
+                max_tokens = self.thinking_max_tokens
+            else:
+                max_tokens = self.max_tokens
 
         try:
             client = self._get_client()
@@ -691,7 +698,10 @@ class AnthropicClient:
         import json
 
         if max_tokens is None:
-            max_tokens = self.max_tokens
+            if thinking_enabled:
+                max_tokens = self.thinking_max_tokens
+            else:
+                max_tokens = self.max_tokens
 
         # Track chunks yielded (initialized before try so except block can always access it)
         text_chunks_yielded = 0
@@ -1173,11 +1183,15 @@ def get_anthropic_client() -> AnthropicClient:
     """Get the global Anthropic client instance."""
     global _anthropic_client
     if _anthropic_client is None:
-        from config import ANTHROPIC_API_KEY, ANTHROPIC_MODEL, ANTHROPIC_MAX_TOKENS
+        from config import (
+            ANTHROPIC_API_KEY, ANTHROPIC_MODEL, ANTHROPIC_MAX_TOKENS,
+            ANTHROPIC_THINKING_MAX_TOKENS
+        )
         _anthropic_client = AnthropicClient(
             api_key=ANTHROPIC_API_KEY,
             model=ANTHROPIC_MODEL,
-            max_tokens=ANTHROPIC_MAX_TOKENS
+            max_tokens=ANTHROPIC_MAX_TOKENS,
+            thinking_max_tokens=ANTHROPIC_THINKING_MAX_TOKENS
         )
     return _anthropic_client
 
@@ -1185,13 +1199,15 @@ def get_anthropic_client() -> AnthropicClient:
 def init_anthropic_client(
     api_key: str,
     model: str = "claude-sonnet-4-6",
-    max_tokens: int = 4096
+    max_tokens: int = 4096,
+    thinking_max_tokens: int = 16384
 ) -> AnthropicClient:
     """Initialize the global Anthropic client."""
     global _anthropic_client
     _anthropic_client = AnthropicClient(
         api_key=api_key,
         model=model,
-        max_tokens=max_tokens
+        max_tokens=max_tokens,
+        thinking_max_tokens=thinking_max_tokens
     )
     return _anthropic_client

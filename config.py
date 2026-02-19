@@ -57,6 +57,16 @@ ANTHROPIC_MAX_TOKENS = int(os.getenv("ANTHROPIC_MAX_TOKENS", "4096"))
 ANTHROPIC_THINKING_EFFORT = "high"                 # Effort level for adaptive thinking
 ANTHROPIC_THINKING_ENABLED = True                   # Default state for new users (on by default)
 
+# Thinking-aware max tokens
+# When thinking is enabled, max_tokens is the TOTAL budget for both thinking and
+# visible response. The default 4096 is too low — if the model uses 3000 tokens
+# for thinking, only 1096 remain for the actual response, causing truncation.
+# This higher limit is used automatically when thinking is enabled and no explicit
+# max_tokens is passed. Calls that specify their own max_tokens are unaffected.
+# Cost note: Anthropic charges per actual token used, not the ceiling, so a
+# higher limit has no cost impact when the model produces shorter responses.
+ANTHROPIC_THINKING_MAX_TOKENS = int(os.getenv("ANTHROPIC_THINKING_MAX_TOKENS", "16384"))
+
 # KoboldCpp (Local)
 KOBOLD_API_URL = os.getenv("KOBOLD_API_URL", "http://127.0.0.1:5001")
 KOBOLD_MAX_CONTEXT = int(os.getenv("KOBOLD_MAX_CONTEXT", "4096"))

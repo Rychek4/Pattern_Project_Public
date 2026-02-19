@@ -97,6 +97,12 @@ class KoboldClient:
         """
         if max_length is None:
             max_length = self.max_length
+        elif max_length > self.max_length:
+            log_warning(
+                f"Requested max_length ({max_length}) exceeds configured limit "
+                f"({self.max_length}), capping to {self.max_length}"
+            )
+            max_length = self.max_length
 
         payload = {
             "prompt": prompt,
