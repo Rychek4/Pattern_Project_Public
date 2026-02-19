@@ -474,7 +474,8 @@ BROWSER_CREDENTIALS_PATH = DATA_DIR / "credentials.toml"  # Read-only service cr
 #   native tool use exclusively
 # - The [[COMMAND: arg]] syntax is no longer parsed or supported
 # - Tool definitions in agency/tools/definitions.py define all available tools
-# - The legacy command processor in agency/commands/ is deprecated
+# - The legacy command processor (agency/commands/processor.py) was removed Feb 2026
+# - The handlers in agency/commands/handlers/ are still active (called by ToolExecutor)
 USE_NATIVE_TOOLS = True  # Always True - legacy mode no longer available
 
 # =============================================================================
