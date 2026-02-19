@@ -46,7 +46,8 @@ from agency.tools.processor import ToolProcessor, ProcessedToolResponse, get_too
 from agency.tools.response_helper import (
     ToolResponseHelper,
     ToolProcessingResult,
-    process_with_tools
+    process_with_tools,
+    ensure_tool_results
 )
 
 
@@ -65,4 +66,5 @@ __all__ = [
     'ToolResponseHelper',
     'ToolProcessingResult',
     'process_with_tools',
+    'ensure_tool_results',
 ]

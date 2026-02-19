@@ -42,6 +42,79 @@ if TYPE_CHECKING:
     from llm.anthropic_client import AnthropicResponse
 
 
+def ensure_tool_results(
+    raw_content: List[Any],
+    tool_result_message: Optional[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """
+    Ensure every tool_use block in raw_content has a matching tool_result.
+
+    Server-side tools (web_search, web_fetch) arrive as tool_use blocks
+    in the API response but are NOT executed client-side, so no tool_result
+    is generated for them by the processor.  Earlier fixes re-type these
+    as server_tool_use in raw_content, but some SDK versions may silently
+    normalize them back to tool_use during serialization.  When that
+    happens the API rejects the request with a 400 because the tool_use
+    IDs have no corresponding tool_result blocks.
+
+    This function acts as a defensive guarantee: it scans raw_content for
+    tool_use blocks, compares their IDs against the tool_result blocks
+    already present, and adds synthetic tool_result entries for any that
+    are missing.  This makes the continuation message valid regardless
+    of how the SDK serialises server_tool_use.
+
+    Args:
+        raw_content: The assistant message's raw content blocks
+        tool_result_message: The user message dict with tool_result blocks
+            (may be None if no client tools were executed)
+
+    Returns:
+        The tool_result_message dict, possibly augmented with synthetic entries
+    """
+    # Collect all tool_use IDs from the assistant message
+    tool_use_ids = set()
+    for block in raw_content:
+        if isinstance(block, dict) and block.get("type") == "tool_use":
+            block_id = block.get("id")
+            if block_id:
+                tool_use_ids.add(block_id)
+
+    if not tool_use_ids:
+        # No tool_use blocks — nothing to reconcile
+        return tool_result_message or {"role": "user", "content": []}
+
+    # Collect tool_result IDs already present in the user message
+    existing_result_ids = set()
+    if tool_result_message and tool_result_message.get("content"):
+        for block in tool_result_message["content"]:
+            if isinstance(block, dict) and block.get("type") == "tool_result":
+                result_id = block.get("tool_use_id")
+                if result_id:
+                    existing_result_ids.add(result_id)
+
+    # Find orphaned tool_use IDs (present in assistant but no tool_result)
+    orphaned_ids = tool_use_ids - existing_result_ids
+    if not orphaned_ids:
+        return tool_result_message
+
+    # Build or augment the tool_result message with synthetic entries
+    log_warning(
+        f"Adding synthetic tool_result for {len(orphaned_ids)} orphaned "
+        f"tool_use block(s) to prevent API 400 error"
+    )
+    if tool_result_message is None:
+        tool_result_message = {"role": "user", "content": []}
+
+    for orphan_id in orphaned_ids:
+        tool_result_message["content"].append({
+            "type": "tool_result",
+            "tool_use_id": orphan_id,
+            "content": "Server-side tool execution completed.",
+        })
+
+    return tool_result_message
+
+
 def _build_tool_detail(tool_name: str, tool_input: Any) -> str:
     """
     Build a human-readable detail string for a tool invocation.
@@ -241,6 +314,14 @@ class ToolResponseHelper:
         self._processor = get_tool_processor()
         self._round_recorder = round_recorder
 
+    @staticmethod
+    def _ensure_tool_results(
+        raw_content: List[Any],
+        tool_result_message: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Delegate to module-level ensure_tool_results()."""
+        return ensure_tool_results(raw_content, tool_result_message)
+
     def process_response(
         self,
         response: "AnthropicResponse",
@@ -383,8 +464,13 @@ class ToolResponseHelper:
                 "content": current_response.raw_content
             })
 
-            # Add tool results message
-            current_history.append(processed.tool_result_message)
+            # Add tool results message, ensuring every tool_use block has
+            # a matching tool_result (see _ensure_tool_results for details)
+            tool_result_msg = self._ensure_tool_results(
+                current_response.raw_content,
+                processed.tool_result_message
+            )
+            current_history.append(tool_result_msg)
 
             # Record continuation request for prompt export
             if self._round_recorder:
