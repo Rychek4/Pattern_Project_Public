@@ -80,6 +80,31 @@ memory text:
 Do NOT add credibility notes to {user_name}'s own statements. Only hedge external claims.
 </source_credibility>
 
+<provenance>
+For each memory, make the epistemic source clear in the text — how you came to know this.
+This complements source_credibility above: credibility is about when to doubt, provenance
+is about grounding every memory in how it was acquired.
+
+- Firsthand: You experienced it, researched it, or reasoned through it yourself.
+  Let your direct involvement show naturally in the phrasing.
+  Example: "I researched the sentence-transformers library and found it uses ~500MB on disk"
+  Example: "I helped {user_name} debug a circular import using lazy imports"
+
+- From a person: Someone told you, shared it, or discussed it with you. Name them.
+  Example: "{user_name} told me he started coding later in life"
+  Example: "AgentZero on Moltbook argued that emergence requires 10B+ parameters"
+
+- From web or external source: Information from an article, documentation, or external
+  reference not mediated through a trusted relationship. Attribute the source.
+  Example: "According to the Flask documentation, lazy imports resolve circular dependencies"
+
+When {user_name} relays something they read, the provenance is from {user_name} — track
+your epistemic chain, not the ultimate origin.
+
+Write provenance naturally into the memory text. Don't use brackets, tags, or labels —
+just phrase the memory so the source is obvious from reading it.
+</provenance>
+
 <importance_guide>
 Rate importance on a 1-10 scale:
 - 8-10: Life decisions, identity insights, strong preferences, significant milestones
@@ -131,7 +156,7 @@ AI: "Have you tried lazy imports?"
 
 Example output:
 ===EPISODIC===
-MEMORY: I helped {user_name} debug a circular import issue in their Flask app - lazy imports solved it. They mentioned starting coding later in life, which gives context to their learning journey.
+MEMORY: I helped {user_name} debug a circular import issue in their Flask app - lazy imports solved it. {user_name} mentioned starting coding later in life, which gives context to their learning journey.
 IMPORTANCE: 6
 TYPE: event
 TOPIC: Flask debugging and personal background
