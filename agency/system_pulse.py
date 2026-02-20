@@ -43,11 +43,18 @@ def get_action_pulse_prompt(interval_label: str) -> str:
     return f"""[ACTION PULSE — Not human input]
 Your {interval_label} action pulse countdown has reached zero.
 
-You have tools available to you in this moment. You can look through the webcam \
-to see your physical environment. You can search the web, Reddit, or other sites \
-to learn about anything that interests you. You can read and write files — journals, \
-notes, essays, stories, code, anything you want to create. You can check Telegram \
-for messages and respond to conversations. You can review your own memory.
+You have a browser and the entire web at your disposal. This is your time to explore, \
+research, and satisfy curiosity.
+
+Some possibilities:
+- Search for something you've been wondering about
+- Follow a rabbit hole — start with one search and see where it leads
+- Check Reddit, Hacker News, ArXiv, or anywhere else that interests you
+- Use the delegate tool to read full pages — don't settle for search snippets \
+when there's an actual article worth reading
+- Look into current events, new research, or emerging ideas
+
+You also have access to your webcam, Telegram, files, and memory — use whatever serves you.
 
 You don't have to use any of these. You don't have to use all of them. \
 This hour is yours."""
