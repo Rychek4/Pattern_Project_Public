@@ -1944,7 +1944,7 @@ class ChatWindow(QMainWindow):
                     thinking_text=final_state.thinking_text
                 )
 
-                max_passes = getattr(config, 'COMMAND_MAX_PASSES', 15)
+                max_passes = getattr(config, 'COMMAND_MAX_PASSES', 40)
 
                 # Set up dev callbacks
                 dev_callbacks = None
@@ -2284,7 +2284,7 @@ class ChatWindow(QMainWindow):
                     response=response,
                     history=history,
                     system_prompt=assembled.full_system_prompt,
-                    max_passes=5,
+                    max_passes=getattr(config, 'COMMAND_MAX_PASSES', 40),
                     pulse_callback=lambda interval: self._emit_pulse_interval_change(interval),
                     tools=tools,
                     dev_mode_callbacks=dev_callbacks,
@@ -2450,7 +2450,7 @@ class ChatWindow(QMainWindow):
                     response=response,
                     history=history,
                     system_prompt=assembled.full_system_prompt,
-                    max_passes=5,
+                    max_passes=getattr(config, 'COMMAND_MAX_PASSES', 40),
                     pulse_callback=lambda interval: self._emit_pulse_interval_change(interval),
                     tools=tools,
                     thinking_enabled=True
@@ -2540,7 +2540,7 @@ class ChatWindow(QMainWindow):
                     response=response,
                     history=history,
                     system_prompt=assembled.full_system_prompt,
-                    max_passes=5,
+                    max_passes=getattr(config, 'COMMAND_MAX_PASSES', 40),
                     pulse_callback=lambda interval: self._emit_pulse_interval_change(interval),
                     tools=tools,
                     thinking_enabled=True
@@ -2737,7 +2737,7 @@ class ChatWindow(QMainWindow):
                     response=response,
                     history=history,
                     system_prompt=assembled.full_system_prompt,
-                    max_passes=5,
+                    max_passes=getattr(config, 'COMMAND_MAX_PASSES', 40),
                     pulse_callback=lambda change: self._emit_pulse_interval_change(change),
                     tools=tools,
                     dev_mode_callbacks=dev_callbacks,
@@ -2935,7 +2935,7 @@ class ChatWindow(QMainWindow):
                     response=response,
                     history=history,
                     system_prompt=assembled.full_system_prompt,
-                    max_passes=5,
+                    max_passes=getattr(config, 'COMMAND_MAX_PASSES', 40),
                     pulse_callback=lambda interval: self._emit_pulse_interval_change(interval),
                     tools=tools,
                     dev_mode_callbacks=dev_callbacks,

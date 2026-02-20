@@ -21,7 +21,7 @@ Usage:
     result = helper.process_response(
         response=initial_response,
         history=conversation_history,
-        max_passes=5,
+        max_passes=40,
         pulse_callback=lambda interval: signals.pulse_interval_change.emit(interval)
     )
 
@@ -345,7 +345,7 @@ class ToolResponseHelper:
         self,
         response: "AnthropicResponse",
         history: List[Dict[str, Any]],
-        max_passes: int = 5,
+        max_passes: int = 40,
         pulse_callback: Optional[Callable[[int], None]] = None,
         dev_mode_callbacks: Optional[Dict[str, Callable]] = None,
         pass1_duration: float = 0.0
@@ -644,7 +644,7 @@ def process_with_tools(
     response: "AnthropicResponse",
     history: List[Dict[str, Any]],
     system_prompt: str,
-    max_passes: int = 5,
+    max_passes: int = 40,
     pulse_callback: Optional[Callable] = None,
     tools: Optional[List[Dict[str, Any]]] = None,
     dev_mode_callbacks: Optional[Dict[str, Callable]] = None,

@@ -160,7 +160,7 @@ CONVERSATION_EXCHANGE_LIMIT = 15   # Exchanges in context (30 turns)
 MEMORY_MAX_PER_QUERY = 3           # Semantic memories per prompt
 
 # Multi-Pass Processing
-COMMAND_MAX_PASSES = 15            # Max LLM calls per message (safety cap; typical queries use 1-3)
+COMMAND_MAX_PASSES = 40            # Max LLM calls per message (safety cap; typical queries use 1-3)
 COMMAND_SEARCH_LIMIT = 10          # Memory search results
 COMMAND_SEARCH_MIN_SCORE = 0.3     # Minimum relevance
 
