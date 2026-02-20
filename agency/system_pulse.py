@@ -57,7 +57,7 @@ when there's an actual article worth reading
 You also have access to your webcam, Telegram, files, and memory — use whatever serves you.
 
 You don't have to use any of these. You don't have to use all of them. \
-This hour is yours."""
+This moment is yours."""
 
 
 # Legacy compatibility — returns reflective prompt
