@@ -90,6 +90,11 @@ def ensure_tool_results(
             # Skip server tool IDs (srvtoolu_ prefix)
             if isinstance(block_id, str) and block_id.startswith("srvtoolu_"):
                 continue
+            # Skip known server-side tools by name (safety net in case
+            # the API ever sends them with a toolu_ prefix instead)
+            block_name = block.get("name", "") if isinstance(block, dict) else getattr(block, "name", "")
+            if block_name in ("web_search", "web_fetch"):
+                continue
             client_tool_use_ids.add(block_id)
         # Explicitly skip server_tool_use blocks (no elif needed, just don't collect)
 

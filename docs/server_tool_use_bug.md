@@ -145,56 +145,67 @@ were invisible in logs, making the bug appear more mysterious than it was.
 
 ---
 
+## Fix Attempt 4 — Homogeneous dicts via model_dump()
+
+Converted ALL blocks to plain dicts using `model_dump()` to ensure
+homogeneous types.  This also failed — the SDK's `ContentBlockParam`
+union apparently does NOT include server-side block types as TypedDict
+variants.  Dicts with `type: "server_tool_use"` or
+`type: "web_search_tool_result"` don't match any TypedDict variant and
+get silently dropped during serialization.  Same error, zero behavioral
+change from 4 PRs.
+
+---
+
 ## The Fix (Current)
 
 ### Principle
 
-**Convert ALL blocks in `raw_content` to plain dicts (homogeneous types).**
-Use `model_dump()` from the SDK's Pydantic objects to preserve all fields
-including `encrypted_content`, `encrypted_index`, and thinking signatures.
-This eliminates the mixed-type serialization issue entirely.
+**Pass `response.content` VERBATIM.  Do not rebuild, convert, re-type,
+or model_dump() ANY content blocks.**
 
-Also fix the two compounding issues: non-alternating messages and the
-`server_tool_use` parsing gap.
+The Anthropic docs explicitly state that `response.content` must be passed
+back as-is in multi-turn conversations.  The SDK is designed to serialize
+its own Pydantic response objects when they appear in message content.
+Any modification (hand-crafted dicts, re-typing, model_dump) breaks this
+round-trip because it changes the objects from SDK types to dict/TypedDict
+types that may not match the `ContentBlockParam` union.
 
 ### Changes Made
 
-#### Part 1: `memory/conversation.py` — Message alternation
+#### `llm/anthropic_client.py` — Verbatim passthrough (non-streaming)
 
-`get_api_messages()` now merges consecutive same-role messages after
-filtering out system turns, and drops leading assistant messages. This
-ensures the API always receives strictly alternating user/assistant messages
-starting with a user message.
+Replaced the block-by-block raw_content building loop with:
+```python
+raw_content_list = list(content_blocks)
+```
+No re-typing, no model_dump(), no dict conversion.  Just pass through
+the original SDK Pydantic objects exactly as received from the API.
 
-#### Part 2: `llm/anthropic_client.py` — Homogeneous raw_content
+Added diagnostic logging of block types and count for debugging.
 
-Added `_content_block_to_dict()` helper that converts SDK Pydantic objects
-to plain dicts via `model_dump()`, preserving all fields.
+#### `llm/anthropic_client.py` — Pydantic preservation (streaming)
 
-**Non-streaming path**: All blocks are now converted to dicts. The only
-special case remains web_search/web_fetch `tool_use` blocks being re-typed
-to `server_tool_use` dicts (since the API may return them with the wrong
-type).
+Reverted `web_search_tool_result` / `web_fetch_tool_result` handling in
+`content_block_stop` to store the original Pydantic object from
+`content_block_start`, not a model_dump() dict.
 
-**Streaming path**: `web_search_tool_result` / `web_fetch_tool_result`
-blocks (previously stored as Pydantic objects) are now converted to dicts
-via `_content_block_to_dict()`. All other streaming blocks were already
-built as dicts.
-
-Result: `raw_content` is now 100% plain dicts in both paths.
-
-#### Part 3: `llm/anthropic_client.py` — `server_tool_use` parsing
+#### `llm/anthropic_client.py` — `server_tool_use` parsing
 
 Added `elif block_type == "server_tool_use"` handling in the non-streaming
-content block parsing loop. Web search/fetch invocations that arrive as
+content block parsing loop.  Web search/fetch invocations that arrive as
 `server_tool_use` (the correct type) are now properly logged, counted, and
 added to `server_tool_details`.
 
+#### `memory/conversation.py` — Message alternation
+
+`get_api_messages()` now merges consecutive same-role messages after
+filtering out system turns, and drops leading assistant messages.
+
 #### `agency/tools/response_helper.py` — `ensure_tool_results()`
 
-No changes needed. Already handles both dicts and Pydantic objects, skips
-`server_tool_use` typed blocks, and skips `srvtoolu_` ID prefixes. With
-all-dict `raw_content`, it now consistently uses the dict code path.
+Added name-based skip for `web_search` and `web_fetch` tool_use blocks
+(safety net in case the API sends them with a `toolu_` prefix).
 
 ---
 
