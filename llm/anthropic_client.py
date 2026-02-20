@@ -110,37 +110,6 @@ class StreamingState:
         return len(self.tool_calls) > 0
 
 
-def _content_block_to_dict(block) -> dict:
-    """
-    Convert an SDK Pydantic content block to a plain dict.
-
-    Uses the SDK's own model_dump() to preserve ALL fields including
-    encrypted_content (in web_search_tool_result / web_fetch_tool_result),
-    encrypted_index (in text block citations), and thinking signatures.
-
-    This ensures raw_content contains only plain dicts (homogeneous types),
-    avoiding silent serialization failures when the SDK's union discriminator
-    encounters mixed Pydantic objects and dicts in the same content list.
-
-    See docs/server_tool_use_bug.md for full history.
-    """
-    if isinstance(block, dict):
-        return block
-    if hasattr(block, "model_dump"):
-        return block.model_dump()
-    # Pydantic v1 fallback
-    if hasattr(block, "dict"):
-        return block.dict()
-    # Last resort: extract known attributes manually
-    result = {"type": getattr(block, "type", "unknown")}
-    for attr in ("text", "id", "name", "input", "thinking", "signature",
-                 "data", "tool_use_id", "content", "encrypted_content"):
-        val = getattr(block, attr, None)
-        if val is not None:
-            result[attr] = val
-    return result
-
-
 class _StreamInactivityWatchdog:
     """
     Background watchdog that closes a stream if no content arrives within a timeout.
@@ -630,49 +599,25 @@ class AnthropicClient:
 
             # Build raw_content for continuation.
             #
-            # CRITICAL: All blocks are converted to plain dicts to ensure
-            # homogeneous types.  The previous approach stored a mix of
-            # hand-crafted dicts (for re-typed server_tool_use) and SDK
-            # Pydantic objects (for everything else).  This mixed-type list
-            # caused the SDK's Pydantic v2 union discriminator to silently
-            # drop web_search_tool_result blocks during serialization,
-            # producing the persistent "web_search tool use without
-            # corresponding web_search_tool_result" API 400 error.
+            # CRITICAL: Pass response.content VERBATIM as original SDK
+            # Pydantic objects.  The Anthropic docs explicitly state that
+            # response.content must be passed back as-is in multi-turn
+            # conversations.  Any conversion (to dicts via model_dump(),
+            # re-typing blocks, hand-crafting dicts) breaks the SDK's
+            # internal serialization of server-side blocks and their
+            # encrypted_content / encrypted_index fields.
             #
-            # We use _content_block_to_dict() (which calls model_dump())
-            # to preserve ALL fields including encrypted_content,
-            # encrypted_index, and thinking signatures.
-            #
-            # The one re-typing: if the SDK returns web_search / web_fetch
-            # invocations as plain `tool_use` blocks (instead of the expected
-            # `server_tool_use`), we re-type them so the API doesn't demand
-            # client-side tool_result blocks.
+            # Previous fix attempts tried: hand-crafted dicts (lost fields),
+            # re-typing tool_use→server_tool_use (created mixed types),
+            # model_dump() (SDK dropped server-side TypedDicts).  All failed
+            # because they modified blocks the SDK needs to round-trip.
             #
             # See docs/server_tool_use_bug.md for full history.
-            raw_content_list = []
-            for block in content_blocks:
-                block_type = getattr(block, "type", None)
+            raw_content_list = list(content_blocks)
 
-                if block_type == "tool_use":
-                    tool_name = getattr(block, "name", "")
-                    if tool_name in ("web_search", "web_fetch"):
-                        # Re-type to server_tool_use so the API doesn't
-                        # demand a client-side tool_result for this block.
-                        raw_content_list.append({
-                            "type": "server_tool_use",
-                            "id": getattr(block, "id", ""),
-                            "name": tool_name,
-                            "input": getattr(block, "input", {})
-                        })
-                    else:
-                        raw_content_list.append(_content_block_to_dict(block))
-                else:
-                    # All other block types (text, thinking, redacted_thinking,
-                    # server_tool_use, web_search_tool_result,
-                    # web_fetch_tool_result) — convert to dict preserving
-                    # all fields including encrypted_content / encrypted_index
-                    # / signatures.
-                    raw_content_list.append(_content_block_to_dict(block))
+            # Diagnostic: log block types for debugging server tool issues
+            block_types = [getattr(b, "type", "?") for b in raw_content_list]
+            log_info(f"raw_content: {len(raw_content_list)} blocks, types={block_types}", prefix="🔍")
 
             # Extract prompt caching metrics from usage
             cache_creation = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
@@ -1041,14 +986,13 @@ class AnthropicClient:
 
                         elif current_block_type in ("web_search_tool_result", "web_fetch_tool_result"):
                             # Finalize server tool result block.
-                            # Convert to dict via model_dump() to keep
-                            # raw_content homogeneously typed (all dicts).
-                            # This preserves encrypted_content (required for
-                            # citation continuity) while avoiding mixed
-                            # Pydantic/dict serialization issues.
+                            # Store the original SDK Pydantic object to
+                            # preserve encrypted_content (required for
+                            # citation continuity in multi-turn conversations).
+                            # The SDK knows how to serialize its own objects.
                             result_block = getattr(state, '_current_server_result', None)
                             if result_block:
-                                state.raw_content.append(_content_block_to_dict(result_block))
+                                state.raw_content.append(result_block)
                                 state._current_server_result = None
 
                         elif current_block_type == "text":
