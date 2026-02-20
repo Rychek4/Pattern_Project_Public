@@ -203,7 +203,7 @@ class ChatCLI:
                 pass1_duration = (time.time() - start_time) * 1000
 
                 if response.success:
-                    max_passes = getattr(config, 'COMMAND_MAX_PASSES', 15)
+                    max_passes = getattr(config, 'COMMAND_MAX_PASSES', 40)
 
                     # Set up dev window callbacks for tool/response tracking
                     dev_callbacks = None
@@ -596,7 +596,7 @@ class ChatCLI:
                     response=response,
                     history=history,
                     system_prompt=assembled.full_system_prompt,
-                    max_passes=5,
+                    max_passes=getattr(config, 'COMMAND_MAX_PASSES', 40),
                     pulse_callback=on_pulse_change,
                     tools=tools,
                     dev_mode_callbacks=dev_callbacks,
@@ -741,7 +741,7 @@ class ChatCLI:
                     response=response,
                     history=history,
                     system_prompt=assembled.full_system_prompt,
-                    max_passes=5,
+                    max_passes=getattr(config, 'COMMAND_MAX_PASSES', 40),
                     pulse_callback=on_pulse_change,
                     tools=tools,
                     dev_mode_callbacks=dev_callbacks,
@@ -888,7 +888,7 @@ class ChatCLI:
                     response=response,
                     history=history,
                     system_prompt=assembled.full_system_prompt,
-                    max_passes=5,
+                    max_passes=getattr(config, 'COMMAND_MAX_PASSES', 40),
                     pulse_callback=on_pulse_change,
                     tools=tools,
                     dev_mode_callbacks=dev_callbacks,
