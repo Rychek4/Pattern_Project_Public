@@ -312,6 +312,25 @@ class ConversationManager:
             if turn.role in ("user", "assistant") and turn.content and turn.content.strip()
         ]
 
+        # Enforce strict user/assistant alternation (required by Anthropic API).
+        # System turn filtering can leave consecutive same-role messages — e.g.
+        # multiple pulse responses (system + assistant) between user messages,
+        # where the system turns are filtered out above, leaving adjacent
+        # assistant messages.  Consecutive same-role messages cause the API (or
+        # SDK) to silently merge them, shifting block indices unpredictably.
+        merged = []
+        for msg in result:
+            if merged and merged[-1]["role"] == msg["role"]:
+                merged[-1]["content"] += "\n\n" + msg["content"]
+            else:
+                merged.append(msg)
+
+        # API requires first message to be from user
+        while merged and merged[0]["role"] != "user":
+            merged.pop(0)
+
+        result = merged
+
         log_info(f"Formatted {len(result)} messages for API (after filtering)", prefix="📜")
 
         # Log role distribution

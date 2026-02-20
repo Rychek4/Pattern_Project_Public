@@ -110,6 +110,37 @@ class StreamingState:
         return len(self.tool_calls) > 0
 
 
+def _content_block_to_dict(block) -> dict:
+    """
+    Convert an SDK Pydantic content block to a plain dict.
+
+    Uses the SDK's own model_dump() to preserve ALL fields including
+    encrypted_content (in web_search_tool_result / web_fetch_tool_result),
+    encrypted_index (in text block citations), and thinking signatures.
+
+    This ensures raw_content contains only plain dicts (homogeneous types),
+    avoiding silent serialization failures when the SDK's union discriminator
+    encounters mixed Pydantic objects and dicts in the same content list.
+
+    See docs/server_tool_use_bug.md for full history.
+    """
+    if isinstance(block, dict):
+        return block
+    if hasattr(block, "model_dump"):
+        return block.model_dump()
+    # Pydantic v1 fallback
+    if hasattr(block, "dict"):
+        return block.dict()
+    # Last resort: extract known attributes manually
+    result = {"type": getattr(block, "type", "unknown")}
+    for attr in ("text", "id", "name", "input", "thinking", "signature",
+                 "data", "tool_use_id", "content", "encrypted_content"):
+        val = getattr(block, attr, None)
+        if val is not None:
+            result[attr] = val
+    return result
+
+
 class _StreamInactivityWatchdog:
     """
     Background watchdog that closes a stream if no content arrives within a timeout.
@@ -554,6 +585,21 @@ class AnthropicClient:
                             input=getattr(block, "input", {}) or {}
                         ))
                         log_info(f"Tool call: {tool_name}", prefix="🔧")
+                elif block_type == "server_tool_use":
+                    # Server-side tool block (correct type from API).
+                    # Previously invisible — only tool_use was checked,
+                    # so server_tool_use blocks were silently skipped.
+                    tool_name = getattr(block, "name", None)
+                    if tool_name == "web_search":
+                        web_searches_used += 1
+                        tool_input = getattr(block, "input", {}) or {}
+                        server_tool_details.append({"name": "web_search", "input": tool_input})
+                        log_info(f"Server web search invoked ({web_searches_used})", prefix="🔍")
+                    elif tool_name == "web_fetch":
+                        web_fetches_used += 1
+                        tool_input = getattr(block, "input", {}) or {}
+                        server_tool_details.append({"name": "web_fetch", "input": tool_input})
+                        log_info(f"Server web fetch invoked ({web_fetches_used})", prefix="🌐")
 
             # Extract citations from the response if present
             # Citations appear in server_tool_use blocks or as part of the response metadata
@@ -582,21 +628,25 @@ class AnthropicClient:
                         url=getattr(citation, "url", "")
                     ))
 
-            # Build raw_content for continuation (preserve SDK content blocks)
+            # Build raw_content for continuation.
             #
-            # IMPORTANT: We store the original Pydantic objects from the SDK
-            # response wherever possible.  The SDK knows how to serialize its
-            # own objects when they are passed back in messages.create(),
-            # and this preserves critical fields that hand-crafted dicts would
-            # drop — most importantly `encrypted_content` inside
-            # web_search_tool_result / web_fetch_tool_result blocks (required
-            # for citation continuity) and `encrypted_index` in text block
-            # citations.
+            # CRITICAL: All blocks are converted to plain dicts to ensure
+            # homogeneous types.  The previous approach stored a mix of
+            # hand-crafted dicts (for re-typed server_tool_use) and SDK
+            # Pydantic objects (for everything else).  This mixed-type list
+            # caused the SDK's Pydantic v2 union discriminator to silently
+            # drop web_search_tool_result blocks during serialization,
+            # producing the persistent "web_search tool use without
+            # corresponding web_search_tool_result" API 400 error.
             #
-            # The one exception: if the SDK returns web_search / web_fetch
+            # We use _content_block_to_dict() (which calls model_dump())
+            # to preserve ALL fields including encrypted_content,
+            # encrypted_index, and thinking signatures.
+            #
+            # The one re-typing: if the SDK returns web_search / web_fetch
             # invocations as plain `tool_use` blocks (instead of the expected
-            # `server_tool_use`), we re-type them to `server_tool_use` dicts
-            # so the API doesn't demand client-side tool_result blocks.
+            # `server_tool_use`), we re-type them so the API doesn't demand
+            # client-side tool_result blocks.
             #
             # See docs/server_tool_use_bug.md for full history.
             raw_content_list = []
@@ -615,15 +665,14 @@ class AnthropicClient:
                             "input": getattr(block, "input", {})
                         })
                     else:
-                        # Client tool — store the Pydantic object directly
-                        raw_content_list.append(block)
+                        raw_content_list.append(_content_block_to_dict(block))
                 else:
                     # All other block types (text, thinking, redacted_thinking,
                     # server_tool_use, web_search_tool_result,
-                    # web_fetch_tool_result) — store the Pydantic object
-                    # directly to preserve all fields including
-                    # encrypted_content / encrypted_index / signatures.
-                    raw_content_list.append(block)
+                    # web_fetch_tool_result) — convert to dict preserving
+                    # all fields including encrypted_content / encrypted_index
+                    # / signatures.
+                    raw_content_list.append(_content_block_to_dict(block))
 
             # Extract prompt caching metrics from usage
             cache_creation = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
@@ -992,12 +1041,14 @@ class AnthropicClient:
 
                         elif current_block_type in ("web_search_tool_result", "web_fetch_tool_result"):
                             # Finalize server tool result block.
-                            # Store the original Pydantic object to preserve
-                            # encrypted_content (required for citation continuity
-                            # in multi-turn conversations).
+                            # Convert to dict via model_dump() to keep
+                            # raw_content homogeneously typed (all dicts).
+                            # This preserves encrypted_content (required for
+                            # citation continuity) while avoiding mixed
+                            # Pydantic/dict serialization issues.
                             result_block = getattr(state, '_current_server_result', None)
                             if result_block:
-                                state.raw_content.append(result_block)
+                                state.raw_content.append(_content_block_to_dict(result_block))
                                 state._current_server_result = None
 
                         elif current_block_type == "text":

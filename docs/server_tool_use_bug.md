@@ -110,70 +110,91 @@ it.
 
 ---
 
-## The Fix
+## Fix Attempt 3 (Commit 832c7e8) — Preserve Pydantic Objects
 
 ### Principle
 
-**Store the SDK's original Pydantic objects in `raw_content` wherever
-possible.** The SDK knows how to serialize its own objects when they are
-passed back in `messages.create()`. This preserves all fields including
-`encrypted_content`, `encrypted_index`, and thinking block signatures.
+Store the SDK's original Pydantic objects in `raw_content` wherever
+possible.  The SDK knows how to serialize its own objects when they are
+passed back in `messages.create()`.
+
+### What It Fixed
+
+- `encrypted_content` preservation (Problem 1)
+- Streaming text duplication (Problem 2)
+- `ensure_tool_results()` now skips server tools (Problem 3 partially)
+
+### Why It Still Failed
+
+The fix still **mixed types** in `raw_content`: re-typed `server_tool_use`
+blocks were plain dicts while all other blocks (including the paired
+`web_search_tool_result`) remained SDK Pydantic objects. When the SDK's
+Pydantic v2 union discriminator encountered this mixed list during
+serialization, it could silently drop the Pydantic `web_search_tool_result`
+block — leaving `server_tool_use` without its matching result.
+
+Additionally, `get_api_messages()` in `conversation.py` never enforced
+user/assistant alternation. Pulse responses create system + assistant turns;
+after filtering out system turns, consecutive assistant messages remained.
+The API or SDK merges these, shifting block indices unpredictably (the error
+index varied between runs: 20 → 22 → 21).
+
+The non-streaming parsing code also only checked `block_type == "tool_use"`
+for web_search/web_fetch — genuine `server_tool_use` blocks from the API
+were invisible in logs, making the bug appear more mysterious than it was.
+
+---
+
+## The Fix (Current)
+
+### Principle
+
+**Convert ALL blocks in `raw_content` to plain dicts (homogeneous types).**
+Use `model_dump()` from the SDK's Pydantic objects to preserve all fields
+including `encrypted_content`, `encrypted_index`, and thinking signatures.
+This eliminates the mixed-type serialization issue entirely.
+
+Also fix the two compounding issues: non-alternating messages and the
+`server_tool_use` parsing gap.
 
 ### Changes Made
 
-#### `llm/anthropic_client.py` — Non-streaming path (`chat()`)
+#### Part 1: `memory/conversation.py` — Message alternation
 
-Replaced the manual dict-construction loop with logic that stores original
-Pydantic objects for all block types *except* `tool_use` blocks for
-web_search/web_fetch (which are re-typed to `server_tool_use` dicts since
-the API may return them with the wrong type):
+`get_api_messages()` now merges consecutive same-role messages after
+filtering out system turns, and drops leading assistant messages. This
+ensures the API always receives strictly alternating user/assistant messages
+starting with a user message.
 
-```python
-for block in content_blocks:
-    block_type = getattr(block, "type", None)
-    if block_type == "tool_use":
-        tool_name = getattr(block, "name", "")
-        if tool_name in ("web_search", "web_fetch"):
-            # Re-type to server_tool_use dict
-            raw_content_list.append({
-                "type": "server_tool_use",
-                "id": getattr(block, "id", ""),
-                "name": tool_name,
-                "input": getattr(block, "input", {})
-            })
-        else:
-            raw_content_list.append(block)  # Pydantic object
-    else:
-        raw_content_list.append(block)  # Pydantic object
-```
+#### Part 2: `llm/anthropic_client.py` — Homogeneous raw_content
 
-#### `llm/anthropic_client.py` — Streaming path (`chat_stream()`)
+Added `_content_block_to_dict()` helper that converts SDK Pydantic objects
+to plain dicts via `model_dump()`, preserving all fields.
 
-Three fixes:
+**Non-streaming path**: All blocks are now converted to dicts. The only
+special case remains web_search/web_fetch `tool_use` blocks being re-typed
+to `server_tool_use` dicts (since the API may return them with the wrong
+type).
 
-1. **Text block accumulation**: Added `_current_block_text` field to
-   `StreamingState` that tracks text per-block (reset on each
-   `content_block_start`, accumulated on each `text_delta`). The
-   `content_block_stop` handler now uses `state._current_block_text`
-   instead of the cumulative `state.text`.
+**Streaming path**: `web_search_tool_result` / `web_fetch_tool_result`
+blocks (previously stored as Pydantic objects) are now converted to dicts
+via `_content_block_to_dict()`. All other streaming blocks were already
+built as dicts.
 
-2. **Server tool result preservation**: Changed
-   `web_search_tool_result` / `web_fetch_tool_result` handling in
-   `content_block_stop` to store the original Pydantic object from
-   `content_block_start` instead of extracting fields into a dict.
+Result: `raw_content` is now 100% plain dicts in both paths.
 
-3. **Server tool use blocks**: These were already handled correctly
-   (built as dicts with `"type": "server_tool_use"`), and cannot be
-   stored as Pydantic objects since their input is streamed via deltas.
+#### Part 3: `llm/anthropic_client.py` — `server_tool_use` parsing
+
+Added `elif block_type == "server_tool_use"` handling in the non-streaming
+content block parsing loop. Web search/fetch invocations that arrive as
+`server_tool_use` (the correct type) are now properly logged, counted, and
+added to `server_tool_details`.
 
 #### `agency/tools/response_helper.py` — `ensure_tool_results()`
 
-Updated to:
-- Handle both plain dicts and SDK Pydantic objects in `raw_content`
-- Skip `server_tool_use` typed blocks entirely
-- Skip blocks with `srvtoolu_` ID prefixes (server tool IDs)
-- Only create synthetic `tool_result` entries for orphaned *client*
-  `tool_use` blocks (defensive safety net, should rarely trigger)
+No changes needed. Already handles both dicts and Pydantic objects, skips
+`server_tool_use` typed blocks, and skips `srvtoolu_` ID prefixes. With
+all-dict `raw_content`, it now consistently uses the dict code path.
 
 ---
 
@@ -186,19 +207,33 @@ If this bug resurfaces, check these things:
    treated as a client tool. Check that `raw_content` has `server_tool_use`
    type (not `tool_use`) for web_search/web_fetch blocks.
 
-2. **Citations not working in multi-turn**: Check that
-   `web_search_tool_result` blocks in `raw_content` contain
-   `encrypted_content` fields. If they're plain dicts without those fields,
-   the Pydantic object storage is not working.
+2. **Mixed types in raw_content**: All items in `raw_content` should be
+   plain `dict` instances. If any are Pydantic objects (`hasattr(block,
+   'model_dump')`), the `_content_block_to_dict()` conversion is not being
+   applied. Mixed types are the root cause of silent block drops.
 
-3. **Duplicate text in continuations**: Enable prompt export
+3. **Non-alternating messages**: Check that `get_api_messages()` returns
+   strictly alternating user/assistant messages starting with user. Log the
+   role distribution; user count and assistant count should differ by at
+   most 1.
+
+4. **Citations not working in multi-turn**: Check that
+   `web_search_tool_result` dicts in `raw_content` contain
+   `encrypted_content` keys. If missing, `model_dump()` may not be
+   preserving the field.
+
+5. **Duplicate text in continuations**: Enable prompt export
    (`RoundRecorder`) and check the continuation messages for duplicate text
    content across text blocks.
 
-4. **`ensure_tool_results` firing warnings**: The log message
+6. **`ensure_tool_results` firing warnings**: The log message
    "Adding synthetic tool_result for N orphaned client tool_use block(s)"
    should be rare. If it fires frequently, investigate why client tool
    results are being dropped by the processor.
+
+7. **Invisible web_search invocations**: Check logs for "Server web search
+   invoked" messages. If web_search is being used but no log appears, the
+   `server_tool_use` parsing handler may have regressed.
 
 ---
 
