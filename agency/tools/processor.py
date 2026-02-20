@@ -179,16 +179,17 @@ class ToolProcessor:
             if result.is_error:
                 tool_result_block["is_error"] = True
 
-            # Content is always a string for tool results
-            tool_result_block["content"] = str(result.content)
-
-            content.append(tool_result_block)
-
-            # If this tool returned images, add them as image blocks
-            # These go after the tool_result block
+            # Build tool_result content.
+            # When images are present, content must be a list of blocks
+            # (text + image) INSIDE the tool_result — NOT siblings in
+            # the user message.  Placing images outside tool_result blocks
+            # breaks API validation: the API stops parsing at the first
+            # non-tool_result block and reports subsequent tool_use IDs
+            # as orphaned.
             if result.has_images():
+                result_content = [{"type": "text", "text": str(result.content)}]
                 for img in result.image_data:
-                    content.append({
+                    result_content.append({
                         "type": "image",
                         "source": {
                             "type": "base64",
@@ -196,7 +197,12 @@ class ToolProcessor:
                             "data": img.data
                         }
                     })
+                tool_result_block["content"] = result_content
                 log_info(f"Added {len(result.image_data)} image(s) from {result.tool_name}", prefix="🖼️")
+            else:
+                tool_result_block["content"] = str(result.content)
+
+            content.append(tool_result_block)
 
         return {"role": "user", "content": content}
 
