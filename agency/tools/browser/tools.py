@@ -127,7 +127,9 @@ GET_CREDENTIALS_TOOL: Dict[str, Any] = {
     "description": (
         "Look up login credentials for a service. Returns username, password, "
         "and login URL if configured. Use this before logging into a website. "
-        "Credentials are read-only and managed by the user."
+        "Credentials are read-only and managed by the user. "
+        "If a 'dashboard_url' field is present, navigate there after logging in "
+        "instead of relying on the post-login redirect."
     ),
     "input_schema": {
         "type": "object",
