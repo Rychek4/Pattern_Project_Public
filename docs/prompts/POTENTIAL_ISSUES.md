@@ -1,5 +1,10 @@
 # Potential Issues & Process Analysis
 
+> **NOTE (February 2026):** Some sections of this document reference the legacy
+> `[[COMMAND: arg]]` inline syntax, which was removed in February 2026. The system
+> now uses **native tool calling** via the Anthropic API. Tool availability is now
+> controlled by tool schema registration rather than prompt injection.
+
 This document analyzes the prompt building system for bugs, design issues, and areas that may need review. Since prompt formation is the most critical part of the project (given the ephemeral context window design), this analysis focuses on what could cause malformed, confusing, or suboptimal prompts.
 
 ---

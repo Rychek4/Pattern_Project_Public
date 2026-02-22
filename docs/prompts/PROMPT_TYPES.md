@@ -1,5 +1,11 @@
 # Prompt Types
 
+> **NOTE (February 2026):** This document references the legacy `[[COMMAND: arg]]`
+> inline syntax and the two-pass "CommandProcessor" continuation flow, which were
+> removed in February 2026. The system now uses **native tool calling** via the
+> Anthropic API. The "Second Pass" sections below have been replaced by the standard
+> tool_use/tool_result message loop. See `agency/tools/` for the current architecture.
+
 This document details the four distinct prompt types used in the Pattern Project, their structure, and when each is used.
 
 ## Overview

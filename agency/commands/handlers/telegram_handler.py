@@ -1,6 +1,6 @@
 """
 Pattern Project - Telegram Command Handler
-Handles [[SEND_TELEGRAM: message]] commands for AI-initiated messaging.
+Handles messaging via the send_telegram native tool.
 
 Messages are sent to the configured Telegram chat via the Bot API.
 """
@@ -11,12 +11,11 @@ from agency.commands.errors import ToolError, ToolErrorType
 
 class SendTelegramHandler(CommandHandler):
     """
-    Handles [[SEND_TELEGRAM: message]] commands for sending Telegram messages.
+    Handles Telegram messaging via the send_telegram native tool.
 
     Messages are sent to the configured chat ID via the Telegram Bot API.
 
-    Example AI usage:
-        "I'll message you... [[SEND_TELEGRAM: Don't forget your appointment at 3pm!]]"
+    Called by ToolExecutor when the AI invokes the send_telegram tool.
     """
 
     @property

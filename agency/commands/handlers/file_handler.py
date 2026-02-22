@@ -269,10 +269,9 @@ def _parse_write_command(query: str) -> Tuple[str, str]:
 
 class ReadFileHandler(CommandHandler):
     """
-    Handles [[READ_FILE: filename]] commands for reading text files.
+    Handles file reading via the read_file native tool.
 
-    Example AI usage:
-        "Let me check your notes... [[READ_FILE: notes.txt]]"
+    Called by ToolExecutor when the AI invokes the read_file tool.
     """
 
     @property
@@ -430,10 +429,9 @@ The file must exist in your file storage. Use [[LIST_FILES]] to see available fi
 
 class WriteFileHandler(CommandHandler):
     """
-    Handles [[WRITE_FILE: filename | content]] commands for writing text files.
+    Handles file writing via the write_file native tool.
 
-    Example AI usage:
-        "I'll save that for you... [[WRITE_FILE: notes.txt | Meeting notes from today...]]"
+    Called by ToolExecutor when the AI invokes the write_file tool.
     """
 
     @property
@@ -570,10 +568,9 @@ Note: This overwrites any existing file with the same name. Use [[APPEND_FILE:]]
 
 class AppendFileHandler(CommandHandler):
     """
-    Handles [[APPEND_FILE: filename | content]] commands for appending to text files.
+    Handles file appending via the append_file native tool.
 
-    Example AI usage:
-        "I'll add that to your list... [[APPEND_FILE: shopping.txt | Bananas]]"
+    Called by ToolExecutor when the AI invokes the append_file tool.
     """
 
     @property
@@ -731,13 +728,12 @@ If the file doesn't exist, it will be created. Parent directories are created au
 
 class ListFilesHandler(CommandHandler):
     """
-    Handles [[LIST_FILES]] commands for listing available files and directories.
+    Handles file/directory listing via the list_files native tool.
 
     Lists the immediate contents of a directory (non-recursive), showing both
     subdirectories and files with [DIR] and [FILE] prefixes.
 
-    Example AI usage:
-        "Let me see what files are available... [[LIST_FILES]]"
+    Called by ToolExecutor when the AI invokes the list_files tool.
     """
 
     @property

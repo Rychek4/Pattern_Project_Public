@@ -63,12 +63,13 @@ class CommandHandler(ABC):
     """
     Base class for AI command handlers.
 
-    Each handler processes a specific command type (e.g., [[SEARCH: query]]).
-    Handlers define:
-    - The command syntax (regex pattern)
-    - Execution logic
-    - Whether results need to be shown to AI (continuation)
-    - Instructions for the AI on how to use the command
+    Each handler encapsulates the business logic for a specific tool capability
+    (e.g., search_memories, create_reminder). Handlers are instantiated and
+    called by the ToolExecutor in agency/tools/executor.py.
+
+    The legacy [[COMMAND: arg]] pattern-matching system has been removed.
+    The command_name, pattern, and get_instructions() properties are retained
+    for reference but are no longer used at runtime.
     """
 
     @property
@@ -76,7 +77,7 @@ class CommandHandler(ABC):
     def command_name(self) -> str:
         """
         Command identifier (e.g., 'SEARCH').
-        Used in [[COMMAND_NAME: query]] syntax.
+        Legacy property — no longer used at runtime.
         """
         pass
 
@@ -123,8 +124,8 @@ class CommandHandler(ABC):
         """
         Return prompt instructions explaining this command to the AI.
 
-        These instructions are injected into the system prompt so the AI
-        knows how and when to use this command.
+        Legacy method — no longer called at runtime. Native tool schemas
+        in agency/tools/definitions.py are self-documenting.
         """
         pass
 

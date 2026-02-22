@@ -1,6 +1,6 @@
 """
 Pattern Project - Active Thoughts Command Handler
-Handles [[SET_THOUGHTS: ...]] command for updating the AI's working memory
+Handles working memory updates via the set_active_thoughts native tool.
 """
 
 import json
@@ -14,14 +14,13 @@ from core.logger import log_info
 
 class SetThoughtsHandler(CommandHandler):
     """
-    Handles [[SET_THOUGHTS: json_array]] commands for updating active thoughts.
+    Handles active thought updates via the set_active_thoughts native tool.
 
     The AI sends its complete list of active thoughts (0-10 items) and this
     handler replaces the existing list entirely. This "full rewrite" approach
     forces the AI to consider the whole list holistically when making changes.
 
-    Example:
-        [[SET_THOUGHTS: [{"rank":1,"slug":"identity","topic":"Who I am","elaboration":"Thinking about..."}]]]
+    Called by ToolExecutor when the AI invokes the set_active_thoughts tool.
     """
 
     @property
