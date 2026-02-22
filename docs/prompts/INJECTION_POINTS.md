@@ -1,5 +1,11 @@
 # Injection Points Reference
 
+> **NOTE (February 2026):** Sections 2, 3, and 4 (Intention, Pulse, and AI Commands
+> injection) reference the legacy `[[COMMAND: arg]]` inline syntax, which was removed
+> in February 2026. Phase 2 ("Continuation Injection Points") has been replaced by the
+> standard tool_use/tool_result message loop. The system now uses **native tool calling**
+> via the Anthropic API — see `agency/tools/definitions.py` and `agency/tools/executor.py`.
+
 This document catalogs every location where dynamic content is injected into prompts, what data flows through each point, and potential consequences of malformed data.
 
 ## Overview

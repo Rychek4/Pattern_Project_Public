@@ -1,5 +1,13 @@
 # Prompt System Overview
 
+> **NOTE (February 2026):** This document references the legacy `[[COMMAND: arg]]`
+> inline pattern-matching system, which was removed in February 2026. The system now
+> uses **native tool calling** via the Anthropic API. Tool schemas are defined in
+> `agency/tools/definitions.py` and routed through `agency/tools/executor.py`.
+> The two-pass "CommandProcessor" flow described below has been replaced by the
+> standard tool_use/tool_result message loop. See `agency/tools/` for the current
+> architecture.
+
 This document provides a high-level overview of how prompts are built, assembled, and sent to the LLM in the Pattern Project.
 
 ## Core Architecture

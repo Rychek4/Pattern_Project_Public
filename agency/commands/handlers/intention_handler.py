@@ -1,6 +1,6 @@
 """
 Pattern Project - Intention Command Handlers
-Handles [[REMIND:]], [[COMPLETE:]], [[DISMISS:]], [[LIST_INTENTIONS]] commands
+Handles create_reminder, complete_reminder, dismiss_reminder, and list_reminders native tools.
 """
 
 from datetime import datetime
@@ -21,12 +21,9 @@ from core.temporal import get_temporal_tracker
 
 class RemindHandler(CommandHandler):
     """
-    Handles [[REMIND: when | what]] commands for creating reminders.
+    Handles reminder creation via the create_reminder native tool.
 
-    Examples:
-        [[REMIND: in 2 hours | ask how their meeting went]]
-        [[REMIND: tomorrow morning | check on their sleep quality]]
-        [[REMIND: next session | follow up on anxiety discussion]]
+    Called by ToolExecutor when the AI invokes the create_reminder tool.
     """
 
     @property
@@ -156,11 +153,9 @@ private — the user won't see them, but you'll be reminded at the right time.""
 
 class CompleteHandler(CommandHandler):
     """
-    Handles [[COMPLETE: I-id | outcome]] commands for completing intentions.
+    Handles intention completion via the complete_reminder native tool.
 
-    Examples:
-        [[COMPLETE: I-42 | interview went well, they got the job!]]
-        [[COMPLETE: I-15 | checked in, feeling better today]]
+    Called by ToolExecutor when the AI invokes the complete_reminder tool.
     """
 
     @property
@@ -302,7 +297,7 @@ The outcome becomes part of your memory."""
 
 class DismissHandler(CommandHandler):
     """
-    Handles [[DISMISS: I-id]] commands for cancelling intentions.
+    Handles intention dismissal via the dismiss_reminder native tool.
     """
 
     @property
@@ -375,7 +370,7 @@ Use when an intention is no longer relevant."""
 
 class ListIntentionsHandler(CommandHandler):
     """
-    Handles [[LIST_INTENTIONS]] command to review all active intentions.
+    Handles listing active intentions via the list_reminders native tool.
     """
 
     @property

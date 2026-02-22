@@ -1,6 +1,6 @@
 """
 Pattern Project - Memory Search Command Handler
-Handles [[SEARCH: query]] commands for memory retrieval
+Handles memory retrieval via the search_memories native tool.
 """
 
 from agency.commands.handlers.base import CommandHandler, CommandResult
@@ -9,13 +9,12 @@ from agency.commands.errors import ToolError, ToolErrorType
 
 class MemorySearchHandler(CommandHandler):
     """
-    Handles [[SEARCH: query]] commands for AI-initiated memory retrieval.
+    Handles AI-initiated memory retrieval via the search_memories native tool.
 
     This enables the AI to actively search its memory archive when it needs
     more context than the automatically-injected memories provide.
 
-    Example AI usage:
-        "Let me check my memories... [[SEARCH: book recommendations]]"
+    Called by ToolExecutor when the AI invokes the search_memories tool.
     """
 
     def __init__(self, default_limit: int = None, min_score: float = None):

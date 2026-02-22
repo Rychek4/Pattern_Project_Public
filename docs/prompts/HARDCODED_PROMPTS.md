@@ -1,5 +1,13 @@
 # Hardcoded Prompts Reference
 
+> **NOTE (February 2026):** Sections 2-4 and 6 of this document reference the legacy
+> `[[COMMAND: arg]]` inline syntax and the `get_instructions()` / `CommandProcessor`
+> pattern-matching system, which was removed in February 2026. The system now uses
+> **native tool calling** via the Anthropic API. Tool schemas in
+> `agency/tools/definitions.py` are self-documenting and have replaced the handler
+> `get_instructions()` methods. The continuation prompt in section 6 has been replaced
+> by the standard tool_use/tool_result message loop.
+
 This document catalogs all hardcoded prompt text in the Pattern Project system, organized by subsystem.
 
 ## Overview

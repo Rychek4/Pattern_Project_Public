@@ -23,7 +23,7 @@ class ActiveThoughtsSource(ContextSource):
     (which have triggers), active thoughts persist until explicitly changed.
 
     The AI has complete control over this list - it can add, edit,
-    rerank, or delete thoughts at any time using [[SET_THOUGHTS: ...]].
+    rerank, or delete thoughts at any time using the set_active_thoughts tool.
 
     Maximum 10 items stored, top 3 displayed in prompts to reduce token usage.
     """
@@ -90,7 +90,7 @@ class ActiveThoughtsSource(ContextSource):
 
     def _build_empty_context(self) -> str:
         """Build context when there are no active thoughts."""
-        return "<active_working_memory>Empty. Use [[SET_THOUGHTS: [...]]] to add thoughts.</active_working_memory>"
+        return "<active_working_memory>Empty. Use the set_active_thoughts tool to add thoughts.</active_working_memory>"
 
     def _build_context(self, thoughts) -> str:
         """Build context with active thoughts (displays top 3 only)."""
@@ -119,8 +119,7 @@ class ActiveThoughtsSource(ContextSource):
             lines.append("")
 
         lines.extend([
-            "You control this completely. Update anytime with:",
-            "  [[SET_THOUGHTS: [...]]]",
+            "You control this completely. Update anytime using the set_active_thoughts tool.",
             "",
             "Keep it focused (~50-75 words per elaboration). This is your compass",
             "for interacting with reality, not a place for extended prose.",
@@ -138,7 +137,7 @@ class ActiveThoughtsSource(ContextSource):
             "You have no active thoughts. Your compass is empty.",
             "What is on your mind? What matters to you right now?",
             "",
-            "Use [[SET_THOUGHTS: [...]]] to define your working memory.",
+            "Use the set_active_thoughts tool to define your working memory.",
             "</active_working_memory_pulse>",
         ])
 
@@ -173,7 +172,7 @@ class ActiveThoughtsSource(ContextSource):
             "- Is there something you've been thinking about that isn't captured here?",
             "- Are any of these stale or resolved?",
             "",
-            "Update with [[SET_THOUGHTS: [...]]] if anything has shifted.",
+            "Update using the set_active_thoughts tool if anything has shifted.",
             "</active_working_memory_pulse>",
         ])
 

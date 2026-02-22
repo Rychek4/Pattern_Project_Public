@@ -1,6 +1,6 @@
 """
 Pattern Project - Visual Capture Command Handlers
-Handlers for [[SCREENSHOT]] and [[WEBCAM]] commands (on-demand mode)
+Handlers for capture_screenshot and capture_webcam native tools (on-demand mode).
 
 These handlers allow the AI to request visual captures when in on_demand mode.
 In auto mode, visual captures are automatically attached to every prompt and
@@ -14,16 +14,12 @@ from core.logger import log_info, log_warning, log_error
 
 class ScreenshotHandler(CommandHandler):
     """
-    Handles [[SCREENSHOT]] commands for AI-initiated screen capture.
+    Handles AI-initiated screen capture via the capture_screenshot native tool.
 
     This handler captures the current screen and returns it as image data
     for the continuation prompt. The AI will see the captured image.
 
-    Usage:
-        AI includes [[SCREENSHOT]] in response
-        -> Handler captures screen
-        -> Image attached to continuation message
-        -> AI sees screenshot and continues response
+    Called by ToolExecutor when the AI invokes the capture_screenshot tool.
     """
 
     @property
@@ -94,7 +90,7 @@ class ScreenshotHandler(CommandHandler):
                     )
                 )
 
-            log_info("Screenshot captured via [[SCREENSHOT]] command", prefix="📸")
+            log_info("Screenshot captured via capture_screenshot tool", prefix="📸")
 
             return CommandResult(
                 command_name=self.command_name,
@@ -146,16 +142,12 @@ and continue your response naturally."""
 
 class WebcamHandler(CommandHandler):
     """
-    Handles [[WEBCAM]] commands for AI-initiated webcam capture.
+    Handles AI-initiated webcam capture via the capture_webcam native tool.
 
     This handler captures a frame from the default webcam and returns it
     as image data for the continuation prompt. The AI will see the captured image.
 
-    Usage:
-        AI includes [[WEBCAM]] in response
-        -> Handler captures webcam frame
-        -> Image attached to continuation message
-        -> AI sees webcam image and continues response
+    Called by ToolExecutor when the AI invokes the capture_webcam tool.
     """
 
     @property
@@ -226,7 +218,7 @@ class WebcamHandler(CommandHandler):
                     )
                 )
 
-            log_info("Webcam captured via [[WEBCAM]] command", prefix="📷")
+            log_info("Webcam captured via capture_webcam tool", prefix="📷")
 
             return CommandResult(
                 command_name=self.command_name,

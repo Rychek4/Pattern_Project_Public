@@ -1,6 +1,6 @@
 """
 Pattern Project - Email Command Handler
-Handles [[SEND_EMAIL: recipient | subject | body]] commands for AI-initiated email.
+Handles email sending via the send_email native tool.
 
 NOTE: This handler is built but DISABLED by default. Enable via EMAIL_GATEWAY_ENABLED config.
 """
@@ -52,7 +52,7 @@ def _parse_email_command(query: str) -> tuple:
 
 class SendEmailHandler(CommandHandler):
     """
-    Handles [[SEND_EMAIL: recipient | subject | body]] commands.
+    Handles email sending via the send_email native tool.
 
     Sends emails via the configured email gateway. Recipients must be
     on the whitelist for security.
@@ -60,8 +60,7 @@ class SendEmailHandler(CommandHandler):
     NOTE: This handler is DISABLED by default. Set EMAIL_GATEWAY_ENABLED=True
     in config to enable.
 
-    Example AI usage:
-        "I'll send that email now... [[SEND_EMAIL: user@example.com | Meeting Notes | Here are the notes...]]"
+    Called by ToolExecutor when the AI invokes the send_email tool.
     """
 
     @property
