@@ -671,3 +671,24 @@ NOVEL_REFLECTION_MAX_TOKENS = 4000
 # Reading progress is stored in the database (reading_sessions table).
 # Only one book can be read at a time.
 NOVEL_BOOKS_DIR = DATA_DIR / "files"  # Books stored alongside other files
+
+# =============================================================================
+# GUARDIAN WATCHDOG CONFIGURATION
+# =============================================================================
+# Guardian is an external watchdog process that monitors Pattern's health
+# and restarts it on failure. Pattern reciprocally checks that Guardian
+# is alive, creating a mutual supervision loop with no human intervention.
+#
+# Guardian is a separate project (separate repo, no shared dependencies).
+# These settings tell Pattern where to find Guardian and how to check on it.
+#
+# Setup:
+# 1. Clone/install Guardian to a separate directory
+# 2. Configure guardian.toml to point at this Pattern installation
+# 3. Set GUARDIAN_EXECUTABLE_PATH and GUARDIAN_CONFIG_PATH below
+# 4. Start Guardian (or let Pattern spawn it on first run)
+GUARDIAN_ENABLED = os.getenv("GUARDIAN_ENABLED", "true").lower() == "true"
+GUARDIAN_CHECK_INTERVAL = 300                     # Check Guardian every 5 minutes
+GUARDIAN_HEARTBEAT_PATH = DATA_DIR / "guardian_heartbeat.json"
+GUARDIAN_EXECUTABLE_PATH = os.getenv("GUARDIAN_EXECUTABLE_PATH", "")  # Path to guardian.py
+GUARDIAN_CONFIG_PATH = os.getenv("GUARDIAN_CONFIG_PATH", "")          # Path to guardian.toml
