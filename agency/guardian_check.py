@@ -58,6 +58,14 @@ class GuardianChecker:
 
     # ── Lifecycle ──
 
+    def _is_configured(self) -> bool:
+        """Check if Guardian is both enabled and has a valid executable path."""
+        if not self.enabled:
+            return False
+        if not self.guardian_executable:
+            return False
+        return True
+
     def start(self) -> None:
         """Start the periodic guardian check thread."""
         if not self.enabled:
@@ -65,9 +73,10 @@ class GuardianChecker:
             return
 
         if not self.guardian_executable:
-            log_warning(
-                "Guardian checker enabled but GUARDIAN_EXECUTABLE_PATH not configured. "
-                "Guardian cannot be spawned automatically."
+            log_info(
+                "Guardian not configured (GUARDIAN_EXECUTABLE_PATH empty). "
+                "Checker will not run. Set the path once Guardian is installed.",
+                prefix="🛡️"
             )
             return
 
@@ -103,8 +112,8 @@ class GuardianChecker:
         This is the main check method, usable both for the startup check
         and for periodic background checks.
         """
-        if not self.enabled:
-            return True  # Not our concern if disabled
+        if not self._is_configured():
+            return True  # Not configured — nothing to check
 
         result = {
             "timestamp": datetime.now().isoformat(),
