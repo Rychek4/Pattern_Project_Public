@@ -51,6 +51,7 @@ from agency.system_pulse import init_system_pulse_timer, get_system_pulse_timer
 from agency.intentions import init_reminder_scheduler, get_reminder_scheduler
 from subprocess_mgmt.manager import init_subprocess_manager, get_subprocess_manager
 from prompt_builder import init_prompt_builder
+from agency.guardian_check import init_guardian_checker, get_guardian_checker
 
 
 # Global shutdown event
@@ -178,6 +179,11 @@ def initialize_system() -> bool:
         from stt.transcriber import load_stt_model
         if not load_stt_model(voice_settings.stt_model_size):
             log_warning("STT model failed to load — voice STT will be unavailable")
+
+    # Initialize Guardian watchdog checker
+    if config.GUARDIAN_ENABLED:
+        guardian_checker = init_guardian_checker()
+        guardian_checker.check_guardian()  # One-shot check on startup
 
     # Initialize subprocess manager
     init_subprocess_manager()
@@ -313,6 +319,12 @@ def start_background_services() -> None:
         telegram_listener.start()
         log_subsection("Telegram listener started")
 
+    # Start Guardian watchdog checker (periodic background check)
+    if config.GUARDIAN_ENABLED:
+        guardian_checker = get_guardian_checker()
+        guardian_checker.start()
+        log_subsection(f"Guardian checker started (interval: {config.GUARDIAN_CHECK_INTERVAL}s)")
+
 
 def stop_background_services() -> None:
     """Stop all background services gracefully."""
@@ -383,6 +395,15 @@ def stop_background_services() -> None:
             log_subsection("Telegram listener stopped")
         except Exception as e:
             log_error(f"Error stopping Telegram listener: {e}")
+
+    # Stop Guardian checker thread (but NOT Guardian itself — it must outlive Pattern)
+    if config.GUARDIAN_ENABLED:
+        try:
+            guardian_checker = get_guardian_checker()
+            guardian_checker.stop()
+            log_subsection("Guardian checker stopped (Guardian process left running)")
+        except Exception as e:
+            log_error(f"Error stopping Guardian checker: {e}")
 
     # Log final lock stats
     try:
