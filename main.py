@@ -491,11 +491,23 @@ def run_cli_mode() -> int:
         # Start background services
         start_background_services()
 
+        # Create shared engine and wire to CLI
+        from engine import ChatEngine
+        engine = ChatEngine()
+
+        # Connect pulse and telegram to engine
+        if config.SYSTEM_PULSE_ENABLED:
+            engine.connect_pulse(get_system_pulse_timer())
+        if config.TELEGRAM_ENABLED:
+            from communication.telegram_listener import get_telegram_listener
+            engine.connect_telegram(get_telegram_listener())
+
         # Print ready message
         log_ready()
 
         # Start CLI (blocks until exit)
         cli = get_cli()
+        cli.set_engine(engine)
         cli.start()
 
         # Graceful shutdown
