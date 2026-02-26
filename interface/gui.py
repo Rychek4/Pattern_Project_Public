@@ -240,6 +240,7 @@ class ChatWindow(QMainWindow):
         self._system_pulse_timer = None  # Legacy alias
         self._reminder_scheduler = None
         self._telegram_listener = None
+        self._engine = None  # ChatEngine (set via set_backend)
 
         # Deferred retry manager for API failures
         from llm.retry_manager import get_retry_manager
@@ -755,6 +756,8 @@ class ChatWindow(QMainWindow):
     def _on_cancel_clicked(self):
         """Handle cancel button click."""
         self._cancel_requested = True
+        if self._engine:
+            self._engine.cancel()
         self.cancel_btn.setEnabled(False)
         self.cancel_btn.setText("Cancelling...")
         self._notification_manager.warning("Cancelling request...")
@@ -778,7 +781,8 @@ class ChatWindow(QMainWindow):
         temporal_tracker,
         system_pulse_timer=None,
         reminder_scheduler=None,
-        telegram_listener=None
+        telegram_listener=None,
+        engine=None
     ):
         """Set backend references for communication."""
         self._conversation_mgr = conversation_mgr
@@ -790,6 +794,11 @@ class ChatWindow(QMainWindow):
         self._system_pulse_timer = system_pulse_timer  # Legacy alias
         self._reminder_scheduler = reminder_scheduler
         self._telegram_listener = telegram_listener
+
+        # Store engine and register event adapter
+        self._engine = engine
+        if self._engine:
+            self._engine.add_listener(self._on_engine_event)
 
         # Set up pulse callbacks if manager is provided
         if self._pulse_manager:
@@ -873,6 +882,155 @@ class ChatWindow(QMainWindow):
         log_info(f"PULSE DEBUG: Emitting pulse_interval_change signal: {change_info}", prefix="🔍")
         self.signals.pulse_interval_change.emit(change_info)
         log_info("PULSE DEBUG: Signal emitted", prefix="🔍")
+
+    def _on_engine_event(self, event):
+        """Bridge engine events to PyQt signals and process panel.
+
+        This is called from background threads (the engine runs in threads),
+        so it uses signal.emit() for thread-safe GUI updates.
+        """
+        from engine.events import EngineEventType
+
+        etype = event.event_type
+        data = event.data
+
+        if etype == EngineEventType.PROCESSING_STARTED:
+            source = data.get("source", "user")
+            if source == "user":
+                get_process_event_bus().emit_event(ProcessEventType.MESSAGE_RECEIVED, origin="user")
+            elif source == "pulse":
+                get_process_event_bus().emit_event(
+                    ProcessEventType.PULSE_FIRED,
+                    detail=f"{data.get('pulse_type', 'action').capitalize()} pulse",
+                    origin="isaac")
+            elif source == "reminder":
+                get_process_event_bus().emit_event(
+                    ProcessEventType.REMINDER_FIRED,
+                    detail=data.get("detail", ""),
+                    origin="isaac")
+            elif source == "telegram":
+                get_process_event_bus().emit_event(ProcessEventType.TELEGRAM_RECEIVED, origin="user")
+
+        elif etype == EngineEventType.PROMPT_ASSEMBLED:
+            get_process_event_bus().emit_event(ProcessEventType.PROMPT_ASSEMBLED)
+            # Forward to dev window if enabled
+            if config.DEV_MODE_ENABLED:
+                from interface.dev_window import emit_prompt_assembly
+                blocks_data = data.get("blocks", [])
+                total_tokens = data.get("token_estimate", 0)
+                emit_prompt_assembly(blocks_data, total_tokens)
+
+        elif etype == EngineEventType.MEMORIES_INJECTED:
+            get_process_event_bus().emit_event(ProcessEventType.MEMORIES_INJECTED)
+
+        elif etype == EngineEventType.STREAM_START:
+            timestamp = self._get_timestamp()
+            self.signals.stream_start.emit(timestamp)
+            get_process_event_bus().emit_event(ProcessEventType.STREAM_START, is_active=True)
+
+        elif etype == EngineEventType.STREAM_CHUNK:
+            self.signals.stream_chunk.emit(data.get("text", ""))
+
+        elif etype == EngineEventType.STREAM_COMPLETE:
+            token_detail = ""
+            tokens_out = data.get("tokens_out")
+            if tokens_out:
+                token_detail = f"{tokens_out} tokens"
+            get_process_event_bus().emit_event(
+                ProcessEventType.STREAM_COMPLETE,
+                detail=token_detail,
+                round_number=1)
+
+        elif etype == EngineEventType.SERVER_TOOL_INVOKED:
+            get_process_event_bus().emit_event(
+                ProcessEventType.TOOL_INVOKED,
+                detail=data.get("detail", ""),
+                round_number=1)
+
+        elif etype == EngineEventType.RESPONSE_COMPLETE:
+            final_text = data.get("text", "")
+            source = data.get("source", "user")
+
+            if source == "user":
+                self.signals.stream_complete.emit(final_text)
+            elif source in ("pulse", "reminder"):
+                timestamp = self._get_timestamp()
+                self.signals.new_message.emit("assistant", final_text, timestamp)
+            elif source == "telegram":
+                timestamp = self._get_timestamp()
+                self.signals.new_message.emit("assistant", f"📱 {final_text}", timestamp)
+            elif source == "retry":
+                timestamp = self._get_timestamp()
+                original_source = data.get("original_source", "user")
+                if original_source == "telegram":
+                    self.signals.new_message.emit("assistant", f"📱 {final_text}", timestamp)
+                else:
+                    self.signals.new_message.emit("assistant", final_text, timestamp)
+
+        elif etype == EngineEventType.PROCESSING_ERROR:
+            error = data.get("error", "Unknown error")
+            error_type = data.get("error_type")
+
+            if error_type == "both_models_unavailable":
+                # Schedule deferred retry if engine supports it
+                self.signals.stream_complete.emit(
+                    "\u26a0 Both models are currently unavailable. Will retry automatically in 20 minutes.")
+            else:
+                self.signals.stream_complete.emit(
+                    f"\u26a0 An error occurred: {error}. Please try again.")
+
+            self.signals.update_status.emit(f"Error: {error}", StatusManager.STATUS_ERROR)
+
+        elif etype == EngineEventType.PROCESSING_COMPLETE:
+            get_process_event_bus().emit_event(ProcessEventType.PROCESSING_COMPLETE)
+            self.signals.response_complete.emit()
+
+        elif etype == EngineEventType.CLARIFICATION_REQUESTED:
+            timestamp = self._get_timestamp()
+            self.signals.show_clarification.emit(data.get("data", {}), timestamp)
+
+        elif etype == EngineEventType.PULSE_INTERVAL_CHANGED:
+            change_info = {
+                "pulse_type": data.get("pulse_type", ""),
+                "interval_seconds": data.get("interval_seconds", 0)
+            }
+            self.signals.pulse_interval_change.emit(change_info)
+
+        elif etype == EngineEventType.STATUS_UPDATE:
+            status_type = data.get("type", "ready")
+            type_map = {
+                "thinking": StatusManager.STATUS_THINKING,
+                "tools": StatusManager.STATUS_TOOLS,
+                "error": StatusManager.STATUS_ERROR,
+            }
+            self.signals.update_status.emit(
+                data.get("text", ""), type_map.get(status_type, StatusManager.STATUS_READY))
+
+        elif etype == EngineEventType.NOTIFICATION:
+            self.signals.show_notification.emit(
+                data.get("message", ""), data.get("level", "info"))
+
+        elif etype == EngineEventType.TELEGRAM_RECEIVED:
+            # Show in chat
+            from_info = f" from {data.get('from_user', '')}" if data.get('from_user') else ""
+            text = data.get("text", "")
+            timestamp = self._get_timestamp()
+            self.signals.new_message.emit("user", f"📱 Telegram{from_info}: {text}", timestamp)
+
+        elif etype == EngineEventType.PULSE_FIRED:
+            pulse_type = data.get("pulse_type", "action")
+            stored = f"[{pulse_type.capitalize()} Pulse]"
+            timestamp = self._get_timestamp()
+            self.signals.new_message.emit("system", stored, timestamp)
+
+        elif etype == EngineEventType.REMINDER_FIRED:
+            timestamp = self._get_timestamp()
+            self.signals.new_message.emit("system", "[Reminder Pulse]", timestamp)
+
+        elif etype == EngineEventType.RETRY_FAILED:
+            timestamp = self._get_timestamp()
+            source = data.get("source", "user")
+            self.signals.new_message.emit("system", "[Retry failed \u2014 models still unavailable]", timestamp)
 
     def _on_pulse_interval_change_signal(self, change_info):
         """Handle pulse interval change signal from AI tool call.
@@ -1483,13 +1641,24 @@ class ChatWindow(QMainWindow):
         self._streaming_content_position = None
 
     def _send_message(self):
-        """Handle sending a message."""
+        """Handle sending a message via the engine."""
         text = self.input_field.toPlainText().strip()
         if not text or self._is_processing:
             return
 
-        # Check for pasted image
+        # Check for pasted image - convert QImage to bytes for engine
         pasted_image = self.input_field.get_pending_image()
+        image_bytes = None
+        if pasted_image and not pasted_image.isNull():
+            try:
+                from PyQt5.QtCore import QBuffer, QIODevice
+                buffer = QBuffer()
+                buffer.open(QIODevice.ReadWrite)
+                pasted_image.save(buffer, "JPEG", 85)
+                image_bytes = bytes(buffer.data())
+                buffer.close()
+            except Exception as e:
+                log_error(f"Failed to convert pasted image to bytes: {e}")
 
         self.input_field.clear()
         self._draft_manager.clear_draft()  # Clear saved draft
@@ -1500,8 +1669,8 @@ class ChatWindow(QMainWindow):
         self._show_cancel_button()
 
         # Cancel any pending deferred retry (user has moved on)
-        if self._retry_manager.has_pending():
-            self._retry_manager.cancel()
+        if self._engine and self._engine.retry_manager.has_pending():
+            self._engine.retry_manager.cancel()
             log_info("Deferred retry cancelled - user sent new message", prefix="🔄")
 
         # Reset and pause pulse timers (user is active)
@@ -1516,17 +1685,14 @@ class ChatWindow(QMainWindow):
         # Add user message to display immediately
         timestamp = self._get_timestamp()
         display_text = text
-        if pasted_image:
+        if image_bytes:
             display_text = f"[Image] {text}" if text else "[Image attached]"
         self.signals.new_message.emit("user", display_text, timestamp)
 
-        # Emit to process panel
-        get_process_event_bus().emit_event(ProcessEventType.MESSAGE_RECEIVED, origin="user")
-
-        # Process in background thread
+        # Process via engine in background thread
         self._processing_thread = threading.Thread(
-            target=self._process_message,
-            args=(text, pasted_image),
+            target=self._engine.process_message,
+            args=(text, image_bytes),
             daemon=True
         )
         self._processing_thread.start()
@@ -2157,18 +2323,19 @@ class ChatWindow(QMainWindow):
         log_info(f"Telegram message received: {message.text[:50]}...", prefix="📱")
 
         # Cancel any pending deferred retry (user has moved on)
-        if self._retry_manager.has_pending():
-            self._retry_manager.cancel()
+        if self._engine and self._engine.retry_manager.has_pending():
+            self._engine.retry_manager.cancel()
             log_info("Deferred retry cancelled - Telegram message received", prefix="🔄")
 
         # Don't process if already handling something
-        if self._is_processing:
+        if self._is_processing or (self._engine and self._engine.is_processing):
             log_warning("Skipping Telegram message - already processing")
             return
 
-        # Process in background thread
+        # Process via engine in background thread
+        self._is_processing = True
         thread = threading.Thread(
-            target=self._process_telegram_message,
+            target=self._engine.process_telegram,
             args=(message,),
             daemon=True
         )
@@ -2612,14 +2779,16 @@ class ChatWindow(QMainWindow):
     def _on_reflective_pulse_fired(self):
         """Called when reflective pulse fires (timer or manual)."""
         log_info("PULSE DEBUG: _on_reflective_pulse_fired() triggered", prefix="🔍")
-        if self._is_processing:
+        if self._is_processing or (self._engine and self._engine.is_processing):
             log_warning("PULSE DEBUG: Skipping reflective pulse - already processing")
             if self._pulse_manager:
                 self._pulse_manager.mark_pulse_complete()
             return
-        log_info("PULSE DEBUG: Starting reflective pulse thread...", prefix="🔍")
+        self._is_processing = True
+        log_info("PULSE DEBUG: Starting reflective pulse thread via engine...", prefix="🔍")
         thread = threading.Thread(
-            target=self._process_reflective_pulse,
+            target=self._engine.process_pulse,
+            args=("reflective",),
             daemon=True
         )
         thread.start()
@@ -2627,14 +2796,16 @@ class ChatWindow(QMainWindow):
     def _on_action_pulse_fired(self):
         """Called when action pulse fires (timer or manual)."""
         log_info("PULSE DEBUG: _on_action_pulse_fired() triggered", prefix="🔍")
-        if self._is_processing:
+        if self._is_processing or (self._engine and self._engine.is_processing):
             log_warning("PULSE DEBUG: Skipping action pulse - already processing")
             if self._pulse_manager:
                 self._pulse_manager.mark_pulse_complete()
             return
-        log_info("PULSE DEBUG: Starting action pulse thread...", prefix="🔍")
+        self._is_processing = True
+        log_info("PULSE DEBUG: Starting action pulse thread via engine...", prefix="🔍")
         thread = threading.Thread(
-            target=self._process_action_pulse,
+            target=self._engine.process_pulse,
+            args=("action",),
             daemon=True
         )
         thread.start()
@@ -2820,19 +2991,19 @@ class ChatWindow(QMainWindow):
 
     def _on_reminder_fired(self, triggered_intentions):
         """Called when the reminder scheduler detects due intentions."""
-        from agency.intentions import Intention
         log_info(f"REMINDER DEBUG: _on_reminder_fired() callback triggered with {len(triggered_intentions)} intention(s)", prefix="⏰")
 
         # Don't fire if already processing a message
-        if self._is_processing:
+        if self._is_processing or (self._engine and self._engine.is_processing):
             log_warning("REMINDER DEBUG: Skipping reminder pulse - already processing")
             return
 
-        log_info("REMINDER DEBUG: Starting reminder processing thread...", prefix="⏰")
+        log_info("REMINDER DEBUG: Starting reminder processing thread via engine...", prefix="⏰")
+        self._is_processing = True
 
-        # Process the reminder pulse in a background thread
+        # Process via engine in a background thread
         thread = threading.Thread(
-            target=self._process_reminder_pulse,
+            target=self._engine.process_reminder,
             args=(triggered_intentions,),
             daemon=True
         )
@@ -3260,6 +3431,14 @@ def run_gui():
     reminder_scheduler = get_reminder_scheduler()
     reminder_scheduler.start()
 
+    # Create shared engine
+    from engine import ChatEngine
+    engine = ChatEngine()
+    if pulse_timer:
+        engine.connect_pulse(pulse_timer)
+    if telegram_listener:
+        engine.connect_telegram(telegram_listener)
+
     # Create and configure window
     window = init_gui()
     window.set_backend(
@@ -3269,7 +3448,8 @@ def run_gui():
         temporal_tracker=get_temporal_tracker(),
         system_pulse_timer=pulse_timer,
         reminder_scheduler=reminder_scheduler,
-        telegram_listener=telegram_listener
+        telegram_listener=telegram_listener,
+        engine=engine
     )
 
     window.show()

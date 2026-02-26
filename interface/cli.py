@@ -50,8 +50,13 @@ class ChatCLI:
         self._system_pulse_timer = None
         self._reminder_scheduler = None
         self._telegram_listener = None
+        self._engine = None  # ChatEngine (set via set_engine)
         self._is_first_message_of_session = True  # Track for next_session reminder triggers
         self._setup_commands()
+
+    def set_engine(self, engine):
+        """Set the ChatEngine instance for message processing."""
+        self._engine = engine
 
     def _setup_commands(self) -> None:
         """Register slash commands."""
@@ -76,9 +81,6 @@ class ChatCLI:
         """Start the CLI chat loop."""
         self._running = True
         tracker = get_temporal_tracker()
-        conversation_mgr = get_conversation_manager()
-        router = get_llm_router()
-        prompt_builder = get_prompt_builder()
 
         # Set up pulse manager if enabled
         if config.SYSTEM_PULSE_ENABLED:
@@ -97,6 +99,10 @@ class ChatCLI:
             from communication.telegram_listener import get_telegram_listener
             self._telegram_listener = get_telegram_listener()
             self._telegram_listener.set_callback(self._on_telegram_message)
+
+        # Register engine event listener for CLI display
+        if self._engine:
+            self._engine.add_listener(self._on_engine_event)
 
         # Start a session if not already active
         if not tracker.is_session_active:
@@ -119,6 +125,9 @@ class ChatCLI:
                 "[bold magenta]🔧 Dev mode active: Showing internal operations[/bold magenta]"
             )
         self.console.print()
+
+        # State for collecting engine results
+        self._last_result = {}
 
         while self._running:
             try:
@@ -143,107 +152,21 @@ class ChatCLI:
                     self._system_pulse_timer.reset_all()
                     self._system_pulse_timer.pause()
 
-                # Store user message
-                conversation_mgr.add_turn(
-                    role="user",
-                    content=user_input,
-                    input_type="text"
-                )
-
-                # Build rich prompt with all context sources (no base prompt - emergent personality)
-                # Pass is_session_start flag to trigger next_session reminders on first message
-                assembled = prompt_builder.build(
-                    user_input=user_input,
-                    system_prompt="",
-                    additional_context={"is_session_start": self._is_first_message_of_session}
-                )
-                self._is_first_message_of_session = False  # Only first message triggers session start
-
-                # Display dev mode prompt assembly info
-                self._display_dev_prompt_assembly(assembled)
-
-                # Get conversation history for LLM (uses saved context count from shutdown)
-                history = conversation_mgr.get_api_messages()
-
-                # Inject relevant memories as prefix to user message (API-only, not stored in DB)
-                # This keeps memories close to the question they're relevant to
-                relevant_memories = assembled.session_context.get("relevant_memories")
-                if relevant_memories and history:
-                    # Prefix the memories to the last message (the current user input)
-                    history[-1]["content"] = f"{relevant_memories}\n\n{history[-1]['content']}"
-
-                # Get tool definitions for native tool use
-                from agency.tools import get_tool_definitions, process_with_tools
-                tools = get_tool_definitions()
-
-                # Callback for pulse interval changes (dict format)
-                def on_pulse_change(change_info):
-                    if self._system_pulse_timer and isinstance(change_info, dict):
-                        pt = change_info.get("pulse_type", "")
-                        secs = change_info.get("interval_seconds", 0)
-                        if pt == "reflective":
-                            self._system_pulse_timer.set_reflective_interval(secs)
-                        elif pt == "action":
-                            self._system_pulse_timer.set_action_interval(secs)
-                        log_info(f"{pt} pulse interval changed to {secs}s", prefix="⏱️")
-
-                # Show thinking indicator
-                import time
-                start_time = time.time()
+                # Process via engine (synchronous — blocks until complete)
+                self._last_result = {}
                 with self.console.status("[bold blue]Thinking...[/bold blue]", spinner="dots"):
-                    # Get response from LLM with full context and native tools
-                    response = router.chat(
-                        messages=history,
-                        system_prompt=assembled.full_system_prompt,
-                        task_type=TaskType.CONVERSATION,
-                        temperature=0.7,
-                        tools=tools,
-                        thinking_enabled=True
-                    )
-                pass1_duration = (time.time() - start_time) * 1000
+                    self._engine.process_message(user_input)
 
-                if response.success:
-                    max_passes = getattr(config, 'COMMAND_MAX_PASSES', 40)
-
-                    # Set up dev window callbacks for tool/response tracking
-                    dev_callbacks = None
-                    if config.DEV_MODE_ENABLED:
-                        from interface.dev_window import emit_response_pass, emit_command_executed
-                        dev_callbacks = {
-                            "emit_response_pass": emit_response_pass,
-                            "emit_command_executed": emit_command_executed
-                        }
-
-                    # Use shared helper to process response with native tools
-                    result = process_with_tools(
-                        llm_router=router,
-                        response=response,
-                        history=history,
-                        system_prompt=assembled.full_system_prompt,
-                        max_passes=max_passes,
-                        pulse_callback=on_pulse_change,
-                        tools=tools,
-                        dev_mode_callbacks=dev_callbacks,
-                        thinking_enabled=True
-                    )
-
-                    final_text = result.final_text
-                    final_provider = result.final_provider
-                    clarification = result.clarification_data if result.clarification_requested else None
-
-                    # Store final response
-                    conversation_mgr.add_turn(
-                        role="assistant",
-                        content=final_text,
-                        input_type="text"
-                    )
-
-                    # Display response (with special styling if clarification requested)
-                    self._display_response(final_text, final_provider, clarification)
-                else:
+                # Display the result collected by the event listener
+                if self._last_result.get("error"):
                     self.console.print(
-                        f"[bold red]Error:[/bold red] {response.error}"
+                        f"[bold red]Error:[/bold red] {self._last_result['error']}"
                     )
+                elif self._last_result.get("text"):
+                    final_text = self._last_result["text"]
+                    provider = self._last_result.get("provider", "anthropic")
+                    clarification = self._last_result.get("clarification")
+                    self._display_response(final_text, provider, clarification)
 
                 # Resume pulse timer after response
                 if self._system_pulse_timer:
@@ -342,6 +265,107 @@ class ChatCLI:
             padding=(1, 2)
         )
         self.console.print(panel)
+
+    def _on_engine_event(self, event):
+        """Handle engine events for CLI display.
+
+        For user messages (synchronous), we collect results in _last_result
+        and display after the engine call returns.
+
+        For async sources (pulse, reminder, telegram), we display directly
+        since they run in background threads via the queue system.
+        """
+        from engine.events import EngineEventType
+
+        etype = event.event_type
+        data = event.data
+
+        if etype == EngineEventType.RESPONSE_COMPLETE:
+            source = data.get("source", "user")
+            text = data.get("text", "")
+            provider = data.get("provider", "anthropic")
+
+            if source == "user":
+                # Collect for synchronous display after engine returns
+                self._last_result["text"] = text
+                self._last_result["provider"] = provider
+            elif source == "pulse":
+                pulse_type = data.get("pulse_type", "action")
+                panel = Panel(
+                    Markdown(text),
+                    title=f"[bold magenta]AI ({pulse_type} pulse)[/bold magenta] [dim]({provider})[/dim]",
+                    title_align="left",
+                    border_style="magenta",
+                    padding=(0, 1)
+                )
+                self.console.print(panel)
+                self.console.print()
+            elif source == "reminder":
+                panel = Panel(
+                    Markdown(text),
+                    title=f"[bold yellow]AI (reminder)[/bold yellow] [dim]({provider})[/dim]",
+                    title_align="left",
+                    border_style="yellow",
+                    padding=(0, 1)
+                )
+                self.console.print(panel)
+                self.console.print()
+            elif source == "telegram":
+                panel = Panel(
+                    Markdown(text),
+                    title=f"[bold cyan]AI (telegram)[/bold cyan] [dim]({provider})[/dim]",
+                    title_align="left",
+                    border_style="cyan",
+                    padding=(0, 1)
+                )
+                self.console.print(panel)
+                self.console.print()
+            elif source == "retry":
+                original_source = data.get("original_source", "user")
+                style = "cyan" if original_source == "telegram" else "blue"
+                panel = Panel(
+                    Markdown(text),
+                    title=f"[bold {style}]AI (retry)[/bold {style}] [dim]({provider})[/dim]",
+                    title_align="left",
+                    border_style=style,
+                    padding=(0, 1)
+                )
+                self.console.print(panel)
+                self.console.print()
+
+        elif etype == EngineEventType.PROCESSING_ERROR:
+            error = data.get("error", "Unknown error")
+            source = data.get("source", "")
+            # For user messages, collect for synchronous display
+            if not hasattr(self, '_last_result') or self._last_result is None:
+                self._last_result = {}
+            self._last_result["error"] = error
+
+        elif etype == EngineEventType.CLARIFICATION_REQUESTED:
+            # Collect for synchronous display
+            if hasattr(self, '_last_result'):
+                self._last_result["clarification"] = data.get("data")
+
+        elif etype == EngineEventType.TELEGRAM_RECEIVED:
+            from_info = f" from {data.get('from_user', '')}" if data.get('from_user') else ""
+            text = data.get("text", "")
+            self.console.print()
+            self.console.print(f"[bold cyan]📱 Telegram Message{from_info}[/bold cyan]")
+            self.console.print(f"[dim]{text}[/dim]")
+
+        elif etype == EngineEventType.PULSE_FIRED:
+            pulse_type = data.get("pulse_type", "action")
+            self.console.print()
+            self.console.print(f"[bold magenta]⏱️ {pulse_type.capitalize()} Pulse[/bold magenta]")
+
+        elif etype == EngineEventType.REMINDER_FIRED:
+            intentions = data.get("intentions", [])
+            self.console.print()
+            self.console.print(f"[bold yellow]⏰ Reminder Triggered ({len(intentions)} intention(s))[/bold yellow]")
+
+        elif etype == EngineEventType.RETRY_FAILED:
+            source = data.get("source", "user")
+            self.console.print(f"[bold red]Retry failed ({source}):[/bold red] {data.get('error', 'unknown')}")
 
     def _display_dev_prompt_assembly(self, assembled) -> None:
         """Display prompt assembly info in dev mode."""
@@ -515,135 +539,12 @@ class ChatCLI:
             pass
 
     def _process_pulse(self) -> None:
-        """Process a system pulse using native tools (defaults to action pulse in CLI)."""
-        from agency.system_pulse import (
-            get_action_pulse_prompt, ACTION_PULSE_STORED_MESSAGE
-        )
-        from agency.tools import get_tool_definitions, process_with_tools
-        from prompt_builder.sources.system_pulse import get_interval_label
-
-        conversation_mgr = get_conversation_manager()
-        router = get_llm_router()
-        prompt_builder = get_prompt_builder()
-
-        try:
-            # Pause timer during processing
-            if self._system_pulse_timer:
-                self._system_pulse_timer.pause()
-
-            # Show pulse indicator
-            self.console.print()
-            self.console.print("[bold magenta]⏱️ Action Pulse[/bold magenta]")
-
-            # Get action pulse prompt with current interval
-            interval = self._system_pulse_timer.action_timer.interval if self._system_pulse_timer else 7200
-            interval_label = get_interval_label(interval)
-            pulse_prompt = get_action_pulse_prompt(interval_label)
-            stored_message = ACTION_PULSE_STORED_MESSAGE
-
-            # Store abbreviated pulse message
-            conversation_mgr.add_turn(
-                role="user",
-                content=stored_message,
-                input_type="system_pulse"
-            )
-
-            # Build prompt
-            assembled = prompt_builder.build(
-                user_input=pulse_prompt,
-                system_prompt="",
-                additional_context={"is_pulse": True}
-            )
-
-            history = conversation_mgr.get_api_messages()
-            history.append({"role": "user", "content": pulse_prompt})
-
-            tools = get_tool_definitions(is_pulse=True)
-
-            # Callback for pulse interval changes (dict format)
-            def on_pulse_change(change_info):
-                if self._system_pulse_timer and isinstance(change_info, dict):
-                    pt = change_info.get("pulse_type", "")
-                    secs = change_info.get("interval_seconds", 0)
-                    if pt == "reflective":
-                        self._system_pulse_timer.set_reflective_interval(secs)
-                    elif pt == "action":
-                        self._system_pulse_timer.set_action_interval(secs)
-                    log_info(f"{pt} pulse interval changed to {secs}s", prefix="⏱️")
-
-            # Show thinking indicator
+        """Process a system pulse via engine (defaults to action pulse in CLI)."""
+        if self._engine:
             with self.console.status("[bold magenta]Pulse thinking...[/bold magenta]", spinner="dots"):
-                response = router.chat(
-                    messages=history,
-                    system_prompt=assembled.full_system_prompt,
-                    task_type=TaskType.PULSE_ACTION,
-                    temperature=0.7,
-                    tools=tools,
-                    thinking_enabled=True
-                )
-
-            if response.success:
-                dev_callbacks = None
-                if config.DEV_MODE_ENABLED:
-                    from interface.dev_window import emit_response_pass, emit_command_executed
-                    dev_callbacks = {
-                        "emit_response_pass": emit_response_pass,
-                        "emit_command_executed": emit_command_executed
-                    }
-
-                result = process_with_tools(
-                    llm_router=router,
-                    response=response,
-                    history=history,
-                    system_prompt=assembled.full_system_prompt,
-                    max_passes=getattr(config, 'COMMAND_MAX_PASSES', 40),
-                    pulse_callback=on_pulse_change,
-                    tools=tools,
-                    dev_mode_callbacks=dev_callbacks,
-                    thinking_enabled=True,
-                    task_type=TaskType.PULSE_ACTION
-                )
-
-                final_text = result.final_text
-                final_provider = result.final_provider
-
-                # Store response
-                conversation_mgr.add_turn(
-                    role="assistant",
-                    content=final_text,
-                    input_type="text"
-                )
-
-                # Check for clarification request
-                if result.clarification_requested and result.clarification_data:
-                    self._display_clarification_panel(result.clarification_data)
-                    if final_text.strip():
-                        self.console.print()
-                        self.console.print(Markdown(final_text))
-                    self.console.print()
-                else:
-                    # Display with special styling
-                    panel = Panel(
-                        Markdown(final_text),
-                        title=f"[bold magenta]AI (pulse)[/bold magenta] [dim]({final_provider})[/dim]",
-                        title_align="left",
-                        border_style="magenta",
-                        padding=(0, 1)
-                    )
-                    self.console.print(panel)
-                    self.console.print()
-            else:
-                self.console.print(f"[bold red]Pulse error:[/bold red] {response.error}")
-
-        except Exception as e:
-            log_error(f"Pulse processing error: {e}")
-            self.console.print(f"[bold red]Pulse error:[/bold red] {e}")
-
-        finally:
-            # Mark pulse complete and resume timers
-            if self._system_pulse_timer:
-                self._system_pulse_timer.mark_pulse_complete()
-                self._system_pulse_timer.resume()
+                self._engine.process_pulse("action")
+        else:
+            log_error("Engine not available for pulse processing")
 
     def _on_reminder_fired(self, triggered_intentions) -> None:
         """Called when the reminder scheduler detects due intentions (from background thread)."""
@@ -661,133 +562,12 @@ class ChatCLI:
             pass
 
     def _process_reminder(self, triggered_intentions) -> None:
-        """Process a reminder pulse using native tools."""
-        from agency.intentions import get_reminder_pulse_prompt
-        from agency.tools import get_tool_definitions, process_with_tools
-
-        conversation_mgr = get_conversation_manager()
-        router = get_llm_router()
-        prompt_builder = get_prompt_builder()
-
-        # Generate reminder-specific pulse prompt
-        reminder_prompt = get_reminder_pulse_prompt(triggered_intentions)
-        stored_message = "[Reminder Pulse]"
-
-        try:
-            # Pause idle timer during processing
-            if self._system_pulse_timer:
-                self._system_pulse_timer.pause()
-
-            # Show reminder indicator
-            self.console.print()
-            self.console.print(f"[bold yellow]⏰ Reminder Triggered ({len(triggered_intentions)} intention(s))[/bold yellow]")
-
-            # Store abbreviated message
-            conversation_mgr.add_turn(
-                role="user",
-                content=stored_message,
-                input_type="reminder_pulse"
-            )
-
-            # Build prompt with reminder message
-            assembled = prompt_builder.build(
-                user_input=reminder_prompt,
-                system_prompt=""
-            )
-
-            # Get conversation history (uses saved context count from shutdown)
-            history = conversation_mgr.get_api_messages()
-            history.append({"role": "user", "content": reminder_prompt})
-
-            # Get tool definitions for native tool use
-            tools = get_tool_definitions()
-
-            # Callback for pulse interval changes (dict format)
-            def on_pulse_change(change_info):
-                if self._system_pulse_timer and isinstance(change_info, dict):
-                    pt = change_info.get("pulse_type", "")
-                    secs = change_info.get("interval_seconds", 0)
-                    if pt == "reflective":
-                        self._system_pulse_timer.set_reflective_interval(secs)
-                    elif pt == "action":
-                        self._system_pulse_timer.set_action_interval(secs)
-                    log_info(f"{pt} pulse interval changed to {secs}s", prefix="⏱️")
-
-            # Show thinking indicator
+        """Process a reminder pulse via engine."""
+        if self._engine:
             with self.console.status("[bold yellow]Reminder thinking...[/bold yellow]", spinner="dots"):
-                from core.user_settings import get_user_settings
-                response = router.chat(
-                    messages=history,
-                    system_prompt=assembled.full_system_prompt,
-                    task_type=TaskType.CONVERSATION,
-                    temperature=0.7,
-                    tools=tools,  # Enable native tools for reminder responses
-                    thinking_enabled=True
-                )
-
-            if response.success:
-                # Set up dev window callbacks for tool/response tracking
-                dev_callbacks = None
-                if config.DEV_MODE_ENABLED:
-                    from interface.dev_window import emit_response_pass, emit_command_executed
-                    dev_callbacks = {
-                        "emit_response_pass": emit_response_pass,
-                        "emit_command_executed": emit_command_executed
-                    }
-
-                # Use shared helper to process response with native tools
-                result = process_with_tools(
-                    llm_router=router,
-                    response=response,
-                    history=history,
-                    system_prompt=assembled.full_system_prompt,
-                    max_passes=getattr(config, 'COMMAND_MAX_PASSES', 40),
-                    pulse_callback=on_pulse_change,
-                    tools=tools,
-                    dev_mode_callbacks=dev_callbacks,
-                    thinking_enabled=True
-                )
-
-                final_text = result.final_text
-                final_provider = result.final_provider
-
-                # Store response
-                conversation_mgr.add_turn(
-                    role="assistant",
-                    content=final_text,
-                    input_type="text"
-                )
-
-                # Check for clarification request
-                if result.clarification_requested and result.clarification_data:
-                    self._display_clarification_panel(result.clarification_data)
-                    if final_text.strip():
-                        self.console.print()
-                        self.console.print(Markdown(final_text))
-                    self.console.print()
-                else:
-                    # Display with special styling
-                    panel = Panel(
-                        Markdown(final_text),
-                        title=f"[bold yellow]AI (reminder)[/bold yellow] [dim]({final_provider})[/dim]",
-                        title_align="left",
-                        border_style="yellow",
-                        padding=(0, 1)
-                    )
-                    self.console.print(panel)
-                    self.console.print()
-            else:
-                self.console.print(f"[bold red]Reminder error:[/bold red] {response.error}")
-
-        except Exception as e:
-            log_error(f"Reminder processing error: {e}")
-            self.console.print(f"[bold red]Reminder error:[/bold red] {e}")
-
-        finally:
-            # Mark pulse complete and resume timers
-            if self._system_pulse_timer:
-                self._system_pulse_timer.mark_pulse_complete()
-                self._system_pulse_timer.resume()
+                self._engine.process_reminder(triggered_intentions)
+        else:
+            log_error("Engine not available for reminder processing")
 
     def _on_telegram_message(self, message) -> None:
         """Called when a Telegram message is received (from background thread)."""
@@ -805,149 +585,12 @@ class ChatCLI:
             pass
 
     def _process_telegram_message(self, message) -> None:
-        """Process an inbound Telegram message and generate AI response using native tools."""
-        from agency.tools import get_tool_definitions, process_with_tools
-
-        conversation_mgr = get_conversation_manager()
-        router = get_llm_router()
-        prompt_builder = get_prompt_builder()
-
-        try:
-            # Pause timers during processing
-            if self._system_pulse_timer:
-                self._system_pulse_timer.pause()
-            if self._telegram_listener:
-                self._telegram_listener.pause()
-
-            # Show Telegram indicator
-            self.console.print()
-            from_info = f" from {message.from_user}" if message.from_user else ""
-            self.console.print(f"[bold cyan]📱 Telegram Message{from_info}[/bold cyan]")
-            self.console.print(f"[dim]{message.text}[/dim]")
-
-            # Store the message as user input
-            conversation_mgr.add_turn(
-                role="user",
-                content=message.text,
-                input_type="telegram"
-            )
-
-            # Build prompt
-            assembled = prompt_builder.build(
-                user_input=message.text,
-                system_prompt=""
-            )
-
-            # Get conversation history (uses saved context count from shutdown)
-            history = conversation_mgr.get_api_messages()
-
-            # Inject relevant memories as prefix to user message (API-only, not stored in DB)
-            relevant_memories = assembled.session_context.get("relevant_memories")
-            if relevant_memories and history:
-                history[-1]["content"] = f"{relevant_memories}\n\n{history[-1]['content']}"
-
-            # Get tool definitions for native tool use
-            tools = get_tool_definitions()
-
-            # Callback for pulse interval changes (dict format)
-            def on_pulse_change(change_info):
-                if self._system_pulse_timer and isinstance(change_info, dict):
-                    pt = change_info.get("pulse_type", "")
-                    secs = change_info.get("interval_seconds", 0)
-                    if pt == "reflective":
-                        self._system_pulse_timer.set_reflective_interval(secs)
-                    elif pt == "action":
-                        self._system_pulse_timer.set_action_interval(secs)
-                    log_info(f"{pt} pulse interval changed to {secs}s", prefix="⏱️")
-
-            # Show thinking indicator
+        """Process an inbound Telegram message via engine."""
+        if self._engine:
             with self.console.status("[bold cyan]Responding to Telegram...[/bold cyan]", spinner="dots"):
-                from core.user_settings import get_user_settings
-                response = router.chat(
-                    messages=history,
-                    system_prompt=assembled.full_system_prompt,
-                    task_type=TaskType.CONVERSATION,
-                    temperature=0.7,
-                    tools=tools,  # Enable native tools for telegram responses
-                    thinking_enabled=True
-                )
-
-            if response.success:
-                # Set up dev window callbacks for tool/response tracking
-                dev_callbacks = None
-                if config.DEV_MODE_ENABLED:
-                    from interface.dev_window import emit_response_pass, emit_command_executed
-                    dev_callbacks = {
-                        "emit_response_pass": emit_response_pass,
-                        "emit_command_executed": emit_command_executed
-                    }
-
-                # Use shared helper to process response with native tools
-                result = process_with_tools(
-                    llm_router=router,
-                    response=response,
-                    history=history,
-                    system_prompt=assembled.full_system_prompt,
-                    max_passes=getattr(config, 'COMMAND_MAX_PASSES', 40),
-                    pulse_callback=on_pulse_change,
-                    tools=tools,
-                    dev_mode_callbacks=dev_callbacks,
-                    thinking_enabled=True
-                )
-
-                final_text = result.final_text
-                final_provider = result.final_provider
-                telegram_sent = result.telegram_sent
-
-                # Store response
-                conversation_mgr.add_turn(
-                    role="assistant",
-                    content=final_text,
-                    input_type="text"
-                )
-
-                # Check for clarification request
-                if result.clarification_requested and result.clarification_data:
-                    self._display_clarification_panel(result.clarification_data)
-                    if final_text.strip():
-                        self.console.print()
-                        self.console.print(Markdown(final_text))
-                    self.console.print()
-                else:
-                    # Display with special styling
-                    panel = Panel(
-                        Markdown(final_text),
-                        title=f"[bold cyan]AI (telegram)[/bold cyan] [dim]({final_provider})[/dim]",
-                        title_align="left",
-                        border_style="cyan",
-                        padding=(0, 1)
-                    )
-                    self.console.print(panel)
-                    self.console.print()
-
-                # Also send response back to Telegram (only if not already sent via tool)
-                if config.TELEGRAM_ENABLED and not telegram_sent:
-                    try:
-                        from communication.telegram_gateway import get_telegram_gateway
-                        gateway = get_telegram_gateway()
-                        if gateway.is_available():
-                            gateway.send(final_text)
-                    except Exception as e:
-                        log_warning(f"Failed to send response to Telegram: {e}")
-
-            else:
-                self.console.print(f"[bold red]Telegram response error:[/bold red] {response.error}")
-
-        except Exception as e:
-            log_error(f"Telegram message processing error: {e}")
-            self.console.print(f"[bold red]Telegram error:[/bold red] {e}")
-
-        finally:
-            # Resume timers
-            if self._system_pulse_timer:
-                self._system_pulse_timer.resume()
-            if self._telegram_listener:
-                self._telegram_listener.resume()
+                self._engine.process_telegram(message)
+        else:
+            log_error("Engine not available for telegram processing")
 
     def _handle_command(self, input_str: str) -> None:
         """Handle a slash command."""
