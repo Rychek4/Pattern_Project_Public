@@ -16,11 +16,16 @@ sentence-transformers>=2.2.0
 # CLI Interface
 rich>=13.0.0
 
-# GUI Interface
-PyQt5>=5.15.0
+# GUI Interface (optional - only needed for --gui mode on desktop)
+# PyQt5>=5.15.0
 
-# HTTP API
+# HTTP API (legacy Flask API, still used when HTTP_ENABLED=true)
 flask>=3.0.0
+
+# Web UI (FastAPI + WebSocket, used by --web mode)
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+python-multipart>=0.0.9
 
 # Utilities
 numpy>=1.24.0

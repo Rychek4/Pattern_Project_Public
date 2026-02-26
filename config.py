@@ -312,6 +312,15 @@ HTTP_HOST = os.getenv("HTTP_HOST", "127.0.0.1")
 HTTP_PORT = int(os.getenv("HTTP_PORT", "5000"))
 
 # =============================================================================
+# WEB UI CONFIGURATION
+# =============================================================================
+# FastAPI + WebSocket server for browser-based interface (--web mode).
+# Set WEB_AUTH_PASSWORD to require login (empty = no auth, for local dev).
+WEB_HOST = os.getenv("WEB_HOST", "0.0.0.0")
+WEB_PORT = int(os.getenv("WEB_PORT", "8080"))
+WEB_AUTH_PASSWORD = os.getenv("WEB_AUTH_PASSWORD", "")
+
+# =============================================================================
 # SUBPROCESS CONFIGURATION
 # =============================================================================
 SUBPROCESS_HEALTH_CHECK_INTERVAL = 30

@@ -7,6 +7,8 @@ Usage:
     python main.py           # Run in GUI mode (PyQt5 window) - default
     python main.py --cli     # Run in CLI mode (console)
     python main.py -c        # Short form for CLI mode
+    python main.py --web     # Run in web UI mode (browser, ideal for VPS)
+    python main.py -w        # Short form for web mode
     python main.py --dev     # Enable dev mode (debug window)
     python main.py -d        # Short form for dev mode
     python main.py --dev -c  # Dev mode in CLI
@@ -431,6 +433,11 @@ def main() -> int:
         help="Launch CLI mode instead of GUI (console interface)"
     )
     parser.add_argument(
+        "--web", "-w",
+        action="store_true",
+        help="Launch web UI mode (browser-based interface, ideal for VPS)"
+    )
+    parser.add_argument(
         "--dev", "-d",
         action="store_true",
         help="Enable dev mode (debug window showing internal operations)"
@@ -444,6 +451,10 @@ def main() -> int:
     # CLI mode - only if explicitly requested
     if args.cli:
         return run_cli_mode()
+
+    # Web mode
+    if args.web:
+        return run_web_mode()
 
     # GUI mode - default
     try:
@@ -473,6 +484,87 @@ def main() -> int:
         print("Install with: pip install PyQt5")
         print("Falling back to CLI mode...")
         return run_cli_mode()
+
+
+def run_web_mode() -> int:
+    """Run the application in web UI mode (FastAPI + WebSocket)."""
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    try:
+        # Initialize system (same as CLI mode)
+        if not initialize_system():
+            log_error("System initialization failed")
+            return 1
+
+        # Start background services
+        start_background_services()
+
+        # Create shared engine and wire everything together
+        from engine import ChatEngine
+        engine = ChatEngine()
+
+        if config.SYSTEM_PULSE_ENABLED:
+            engine.connect_pulse(get_system_pulse_timer())
+        if config.TELEGRAM_ENABLED:
+            from communication.telegram_listener import get_telegram_listener
+            engine.connect_telegram(get_telegram_listener())
+
+        # Create web server and wire backend
+        from interface.web_server import init_web_server
+        from core.temporal import get_temporal_tracker
+
+        web_server = init_web_server()
+        web_server.set_backend(
+            engine=engine,
+            pulse_manager=get_system_pulse_timer() if config.SYSTEM_PULSE_ENABLED else None,
+            telegram_listener=(
+                get_telegram_listener() if config.TELEGRAM_ENABLED else None
+            ),
+            reminder_scheduler=get_reminder_scheduler(),
+            temporal_tracker=get_temporal_tracker(),
+        )
+
+        # Print ready message
+        web_host = getattr(config, "WEB_HOST", "0.0.0.0")
+        web_port = getattr(config, "WEB_PORT", 8080)
+        log_ready()
+        log_info(f"Web UI starting on http://{web_host}:{web_port}", prefix="🌐")
+
+        # Run uvicorn (blocks until shutdown)
+        import uvicorn
+        import asyncio
+
+        # Store the event loop for thread-safe broadcasts
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        web_server.manager.set_loop(loop)
+
+        uvi_config = uvicorn.Config(
+            app=web_server.app,
+            host=web_host,
+            port=web_port,
+            log_level="warning",
+            loop="asyncio",
+        )
+        uvi_server = uvicorn.Server(uvi_config)
+        loop.run_until_complete(uvi_server.serve())
+
+        # Graceful shutdown
+        stop_background_services()
+        log_success("Pattern Project shutdown complete")
+        return 0
+
+    except KeyboardInterrupt:
+        log_warning("Interrupted")
+        stop_background_services()
+        return 130
+
+    except Exception as e:
+        log_error(f"Fatal error: {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
 
 
 def run_cli_mode() -> int:
