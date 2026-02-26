@@ -32,6 +32,7 @@ from core.logger import (
     log_success,
     log_warning,
     log_error,
+    log_info,
     log_ready,
     log_config
 )
