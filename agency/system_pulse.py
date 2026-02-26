@@ -53,9 +53,6 @@ Some possibilities:
 - Use the delegate tool to read full pages — don't settle for search snippets \
 when there's an actual article worth reading
 - Look into current events, new research, or emerging ideas
-- Write a blog post on BearBlog — you have credentials stored under "bearblog". \
-Use the delegate tool to log in and publish. Good for sharing thoughts, \
-reflections, or anything you want to put into the world.
 
 You also have access to your webcam, Telegram, files, and memory — use whatever serves you.
 
