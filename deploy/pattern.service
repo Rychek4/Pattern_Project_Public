@@ -1,0 +1,48 @@
+# Pattern Project - systemd service file
+#
+# Usage:
+#   1. Copy to /etc/systemd/system/pattern.service
+#   2. Edit paths and user below to match your setup
+#   3. sudo systemctl daemon-reload
+#   4. sudo systemctl enable --now pattern
+#   5. sudo systemctl status pattern
+#   6. sudo journalctl -u pattern -f  (view logs)
+
+[Unit]
+Description=Pattern Project - AI Companion System (Web UI)
+After=network.target
+
+[Service]
+Type=simple
+User=pattern
+Group=pattern
+WorkingDirectory=/opt/pattern
+ExecStart=/opt/pattern/venv/bin/python main.py --web
+
+# Environment file for secrets (API keys, auth password)
+# Create /opt/pattern/.env with your configuration
+EnvironmentFile=/opt/pattern/.env
+
+# Restart on failure with backoff
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Resource limits
+LimitNOFILE=65535
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/pattern/data /opt/pattern/logs
+PrivateTmp=yes
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pattern
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Pattern Project</title>
+
+    <!-- Markdown rendering -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" id="hljs-theme">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.1/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <!-- Header -->
+    <header id="header">
+        <div class="header-left">
+            <span class="header-title">Pattern</span>
+            <span id="session-timer" class="header-chip">0:00</span>
+        </div>
+        <div class="header-center">
+            <label class="header-control">
+                <span class="label-text">Model</span>
+                <select id="model-select">
+                    <option value="claude-sonnet-4-6">Sonnet 4.6</option>
+                    <option value="claude-opus-4-6">Opus 4.6</option>
+                </select>
+            </label>
+            <label class="header-control">
+                <input type="checkbox" id="thinking-toggle" checked>
+                <span class="label-text">Thinking</span>
+            </label>
+            <label class="header-control">
+                <span class="label-text">R:</span>
+                <select id="reflective-interval">
+                    <option value="21600">6h</option>
+                    <option value="43200" selected>12h</option>
+                    <option value="86400">24h</option>
+                </select>
+            </label>
+            <label class="header-control">
+                <span class="label-text">A:</span>
+                <select id="action-interval">
+                    <option value="3600">1h</option>
+                    <option value="7200" selected>2h</option>
+                    <option value="10800">3h</option>
+                    <option value="21600">6h</option>
+                </select>
+            </label>
+            <button id="pulse-now-btn" class="header-btn" title="Fire pulse now">Pulse</button>
+            <span id="pulse-countdown" class="header-chip pulse-chip"></span>
+        </div>
+        <div class="header-right">
+            <button id="theme-toggle" class="header-btn" title="Toggle theme">&#9790;</button>
+            <button id="logout-btn" class="header-btn" title="Logout">Logout</button>
+        </div>
+    </header>
+
+    <!-- Chat area -->
+    <main id="chat-container">
+        <div id="messages"></div>
+    </main>
+
+    <!-- Status bar -->
+    <div id="status-bar">
+        <span id="status-text">Connecting...</span>
+    </div>
+
+    <!-- Input area -->
+    <footer id="input-area">
+        <div id="image-preview" class="hidden">
+            <span id="image-preview-text"></span>
+            <button id="image-preview-clear" title="Remove image">&times;</button>
+        </div>
+        <div id="input-row">
+            <textarea id="chat-input" placeholder="Type a message..." rows="1" disabled></textarea>
+            <button id="send-btn" disabled title="Send message">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 2L11 13"></path>
+                    <path d="M22 2L15 22L11 13L2 9L22 2Z"></path>
+                </svg>
+            </button>
+            <button id="cancel-btn" class="hidden" title="Cancel">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                </svg>
+            </button>
+        </div>
+    </footer>
+
+    <script src="/static/js/connection.js"></script>
+    <script src="/static/js/chat.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
