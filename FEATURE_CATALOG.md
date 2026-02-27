@@ -17,9 +17,9 @@ A comprehensive reference of all features, their configuration, and current stat
 - **Combined Scoring Algorithm**:
   | Weight | Factor | Description |
   |--------|--------|-------------|
-  | 65% | Semantic Similarity | Cosine similarity between query and memory embeddings |
+  | 60% | Semantic Similarity | Cosine similarity between query and memory embeddings |
   | 25% | Importance Score | AI-rated significance (0.0–1.0) |
-  | 10% | Freshness | Decay based on memory age |
+  | 15% | Freshness | Decay based on memory age |
   | 0% | Access Recency | *Deprecated* — Now handled by Warmth Cache |
 
 - **Dual-Track Retrieval**:
@@ -439,9 +439,9 @@ CONTEXT_WINDOW_SIZE = 30              # Target turns in context
 CONTEXT_OVERFLOW_TRIGGER = 40         # Extract when reached
 CONTEXT_EXTRACTION_BATCH = 10         # Turns to extract per overflow
 
-MEMORY_SEMANTIC_WEIGHT = 0.65         # Similarity importance
+MEMORY_SEMANTIC_WEIGHT = 0.60         # Similarity importance
 MEMORY_IMPORTANCE_WEIGHT = 0.25       # Rating importance
-MEMORY_FRESHNESS_WEIGHT = 0.10        # Recency importance
+MEMORY_FRESHNESS_WEIGHT = 0.15        # Recency importance
 
 MEMORY_MAX_EPISODIC_PER_QUERY = 5     # Episodic retrieval limit
 MEMORY_MAX_FACTUAL_PER_QUERY = 5      # Factual retrieval limit
@@ -458,7 +458,7 @@ WARMTH_RETRIEVAL_INITIAL = 0.15       # Boost for retrieved memories
 WARMTH_RETRIEVAL_DECAY = 0.6          # Per-turn decay
 WARMTH_TOPIC_INITIAL = 0.10           # Boost for associated memories
 WARMTH_TOPIC_DECAY = 0.5              # Per-turn decay
-WARMTH_CAP = 0.20                     # Maximum combined boost
+WARMTH_CAP = 0.40                     # Maximum combined boost
 ```
 
 ### Agency Settings

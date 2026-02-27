@@ -18,9 +18,9 @@ from prompt_builder.sources.base import ContextSource, ContextBlock
 from core.logger import log_info
 
 
-# Priority 85 - late in system prompt, after semantic memory (50) and tool
-# stance (75), just before curiosity (95). This keeps the nudge fresh in
-# context right before the AI generates its response.
+# Priority 85 - late in system prompt, after semantic memory (50) and
+# curiosity (82). This keeps the nudge fresh in context right before
+# the AI generates its response.
 PATTERN_BREAKER_PRIORITY = 85
 
 PATTERN_BREAKER_PROMPT = """<pattern_check>

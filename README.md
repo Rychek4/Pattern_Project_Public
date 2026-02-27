@@ -11,7 +11,7 @@ Pattern is an advanced AI companion system built around Claude that doesn't just
 ## Key Features
 
 ### 🧠 Persistent Memory System
-- **Semantic Memory Search** — Vector embeddings (all-MiniLM-L6-v2) with combined scoring: 65% semantic similarity, 25% importance, 10% freshness
+- **Semantic Memory Search** — Vector embeddings (all-MiniLM-L6-v2) with combined scoring: 60% semantic similarity, 25% importance, 15% freshness
 - **Dual-Track Extraction** — Episodic memories (narratives: "We discussed X") and Factual memories (concrete facts: "Brian is 45")
 - **Warmth Cache** — Session-scoped memory boosting for conversational continuity
 - **Core Memories** — Permanent foundational knowledge that never decays
@@ -216,9 +216,9 @@ python main.py
 |---------|---------|-------------|
 | `CONTEXT_WINDOW_SIZE` | 30 | Target turns in context |
 | `CONTEXT_OVERFLOW_TRIGGER` | 40 | Extract when reached |
-| `MEMORY_SEMANTIC_WEIGHT` | 0.65 | Similarity importance |
+| `MEMORY_SEMANTIC_WEIGHT` | 0.60 | Similarity importance |
 | `MEMORY_IMPORTANCE_WEIGHT` | 0.25 | Rating importance |
-| `MEMORY_FRESHNESS_WEIGHT` | 0.10 | Recency importance |
+| `MEMORY_FRESHNESS_WEIGHT` | 0.15 | Recency importance |
 | `SYSTEM_PULSE_INTERVAL` | 600 | Seconds between pulses |
 | `WEB_SEARCH_TOTAL_ALLOWED_PER_DAY` | 30 | Daily search budget |
 
