@@ -35,6 +35,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let sessionStart = Date.now();
     let pendingImage = null;   // base64 string (no prefix)
     let pulseState = { reflective: 0, action: 0, paused: false };
+    let pulseLastSync = Date.now();   // timestamp of last server state sync
     let pulseCountdownTimer = null;
     let sessionTimerInterval = null;
 
@@ -99,9 +100,13 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // Decrement each second locally (server sends periodic updates)
-        if (pulseState.reflective > 0) pulseState.reflective--;
-        if (pulseState.action > 0) pulseState.action--;
+        // Compute remaining time from server snapshot minus real elapsed time.
+        // This survives browser throttling of setInterval in background tabs.
+        const elapsed = pulseState.paused
+            ? 0
+            : Math.floor((Date.now() - pulseLastSync) / 1000);
+        const rRemaining = Math.max(0, pulseState.reflective - elapsed);
+        const aRemaining = Math.max(0, pulseState.action - elapsed);
 
         const fmtTime = (secs) => {
             if (secs <= 0) return '0:00';
@@ -115,12 +120,20 @@ document.addEventListener('DOMContentLoaded', () => {
             return `${m}:${String(s).padStart(2, '0')}`;
         };
 
-        let text = `R: ${fmtTime(pulseState.reflective)} | A: ${fmtTime(pulseState.action)}`;
+        let text = `R: ${fmtTime(rRemaining)} | A: ${fmtTime(aRemaining)}`;
         if (pulseState.paused) text += ' (paused)';
         pulseCountdown.textContent = text;
     }
 
     pulseCountdownTimer = setInterval(updatePulseCountdown, 1000);
+
+    // Re-sync with server when the tab regains focus so the pulse
+    // countdown corrects for any drift accumulated while backgrounded.
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+            Connection.send({ type: 'get_state' });
+        }
+    });
 
     // =====================================================================
     // Status helpers
@@ -336,6 +349,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (msg.pulse_remaining) {
             pulseState.reflective = Math.round(msg.pulse_remaining.reflective || 0);
             pulseState.action = Math.round(msg.pulse_remaining.action || 0);
+            pulseLastSync = Date.now();
         }
         if (typeof msg.pulse_paused === 'boolean') {
             pulseState.paused = msg.pulse_paused;
