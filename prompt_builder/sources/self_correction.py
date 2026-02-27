@@ -20,9 +20,9 @@ from typing import Optional, Dict, Any
 from prompt_builder.sources.base import ContextSource, ContextBlock
 
 
-# Priority 87 - in the metacognitive neighborhood, just after pattern_breaker (85)
-# and before curiosity (95). Late in the system prompt so it's fresh in context
-# right before the AI generates its response.
+# Priority 87 - in the metacognitive neighborhood, just after pattern_breaker (85).
+# Late in the system prompt so it's fresh in context right before the AI
+# generates its response.
 SELF_CORRECTION_PRIORITY = 87
 
 SELF_CORRECTION_PROMPT = """<self_correction>

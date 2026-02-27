@@ -11,9 +11,9 @@ from core.logger import log_info
 import config
 
 
-# Priority: after active thoughts (18), before intentions (22)
-# Curiosity is part of the AI's internal state
-CURIOSITY_PRIORITY = 20
+# Priority 82 - ambient influence, after operational sources (temporal 30,
+# semantic memory 50) but before metacognitive trio (85, 87, 88)
+CURIOSITY_PRIORITY = 82
 
 
 class CuriositySource(ContextSource):
