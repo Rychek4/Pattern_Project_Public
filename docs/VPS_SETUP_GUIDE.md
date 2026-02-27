@@ -18,6 +18,7 @@ enterprise-grade hardening.
 3. [Initial Server Hardening](#3-initial-server-hardening)
 4. [Deploy Pattern Project](#4-deploy-pattern-project)
 5. [Configure Environment](#5-configure-environment)
+   - [5.3 Migrating from an Existing Windows Installation](#53-migrating-from-an-existing-windows-installation)
 6. [Configure Nginx and SSL](#6-configure-nginx-and-ssl)
 7. [Install Guardian Watchdog](#7-install-guardian-watchdog)
 8. [Start Everything](#8-start-everything)
@@ -45,6 +46,21 @@ Gather these before touching the server:
 
 **Choose your auth password now.** You'll need a strong password for the web UI login.
 A random passphrase works well — e.g., `openssl rand -base64 24` on your local machine.
+
+> **Windows users:** This guide works from Windows 10/11. You'll SSH into the Ubuntu
+> VPS and run server commands there — your local OS doesn't matter for those. The few
+> commands you run locally (SSH, SCP, DNS checks) all work in **PowerShell** or
+> **Windows Terminal**, which ship with Windows 11. Substitutions:
+>
+> | Guide shows (Linux/Mac) | Windows equivalent |
+> |---|---|
+> | `ssh-keygen -t ed25519` | Same — works in PowerShell |
+> | `scp -r ./files root@IP:/path` | Same — works in PowerShell (use `\` paths) |
+> | `openssl rand -base64 24` | Use `python -c "import secrets; print(secrets.token_urlsafe(24))"` or generate in the VPS after you SSH in |
+> | `dig +short domain.com` | `nslookup domain.com` |
+>
+> If you're migrating from an existing Windows installation, see
+> [Section 5.3](#53-migrating-from-an-existing-windows-installation).
 
 ---
 
@@ -328,6 +344,139 @@ password = "my_password"
 login_url = "https://bearblog.dev/accounts/login/"
 dashboard_url = "https://bearblog.dev/dashboard/"
 ```
+
+### 5.3 Migrating from an Existing Windows Installation
+
+If you're moving Pattern Project from a working Windows setup to this VPS (rather than
+starting fresh), follow this section to transfer your database, configuration, and
+credentials. Skip this section if this is a brand-new deployment.
+
+#### What to Migrate
+
+| File | Windows location (typical) | VPS destination | Priority |
+|------|---------------------------|-----------------|----------|
+| `pattern.db` | `Pattern_Project\data\pattern.db` | `/opt/pattern/data/pattern.db` | **CRITICAL** — all memories, conversations, embeddings |
+| `.env` | `Pattern_Project\.env` | `/opt/pattern/.env` | **HIGH** — API keys and config |
+| `credentials.toml` | `Pattern_Project\data\credentials.toml` | `/opt/pattern/data/credentials.toml` | MEDIUM — only if using browser delegation |
+| `user_settings.json` | `Pattern_Project\data\user_settings.json` | `/opt/pattern/data/user_settings.json` | LOW — voice/UI preferences (easy to recreate) |
+
+> **Good news:** SQLite databases are fully cross-platform. A `pattern.db` created on
+> Windows works identically on Ubuntu — no conversion or export needed. Just copy the file.
+
+#### Step 1: Locate Your Files on Windows
+
+Open PowerShell and find your existing Pattern data:
+
+```powershell
+# Find your database (adjust the path to where you cloned Pattern_Project)
+dir "$env:USERPROFILE\Pattern_Project\data\pattern.db"
+
+# Check .env exists
+dir "$env:USERPROFILE\Pattern_Project\.env"
+
+# Check for credentials
+dir "$env:USERPROFILE\Pattern_Project\data\credentials.toml"
+dir "$env:USERPROFILE\Pattern_Project\data\user_settings.json"
+```
+
+If your project lives somewhere else (e.g., `C:\Projects\Pattern_Project`), adjust
+the paths accordingly.
+
+#### Step 2: Stop Pattern on the VPS (if running)
+
+SSH into your VPS and stop the service so you can safely replace the database:
+
+```bash
+sudo systemctl stop pattern
+```
+
+#### Step 3: Transfer Files from Windows
+
+Run these commands from **PowerShell on your Windows machine**. The `scp` command is
+built into Windows 11 (via OpenSSH).
+
+```powershell
+# Transfer the database (MOST IMPORTANT)
+scp "$env:USERPROFILE\Pattern_Project\data\pattern.db" root@YOUR_DROPLET_IP:/opt/pattern/data/pattern.db
+
+# Transfer .env (you'll adjust it in the next step)
+scp "$env:USERPROFILE\Pattern_Project\.env" root@YOUR_DROPLET_IP:/opt/pattern/.env
+
+# Transfer credentials (only if you use browser delegation)
+scp "$env:USERPROFILE\Pattern_Project\data\credentials.toml" root@YOUR_DROPLET_IP:/opt/pattern/data/credentials.toml
+
+# Transfer user settings (optional)
+scp "$env:USERPROFILE\Pattern_Project\data\user_settings.json" root@YOUR_DROPLET_IP:/opt/pattern/data/user_settings.json
+```
+
+> **Tip:** If your SSH key isn't at the default location, add `-i C:\Users\YourName\.ssh\id_ed25519`
+> to each `scp` command.
+>
+> **Alternative:** If SCP gives you trouble, you can also use [WinSCP](https://winscp.net/)
+> (a free GUI tool) to drag and drop files to the server.
+
+#### Step 4: Fix Ownership and Permissions on the VPS
+
+After transferring, the files will be owned by root. Fix that:
+
+```bash
+# Set correct ownership (pattern user must own these files)
+sudo chown pattern:pattern /opt/pattern/.env
+sudo chown pattern:pattern /opt/pattern/data/pattern.db
+sudo chown pattern:pattern /opt/pattern/data/credentials.toml 2>/dev/null
+sudo chown pattern:pattern /opt/pattern/data/user_settings.json 2>/dev/null
+
+# Lock down sensitive files
+sudo chmod 600 /opt/pattern/.env
+sudo chmod 600 /opt/pattern/data/credentials.toml 2>/dev/null
+```
+
+#### Step 5: Adjust Your .env for the VPS
+
+Your Windows `.env` likely has desktop features enabled that won't work on a headless
+VPS. SSH into the server and edit:
+
+```bash
+sudo nano /opt/pattern/.env
+```
+
+Make these changes:
+
+```bash
+# DISABLE these (no desktop/display on a VPS)
+CLIPBOARD_ENABLED=false
+VISUAL_ENABLED=false
+VISUAL_SCREENSHOT_MODE=disabled
+VISUAL_WEBCAM_MODE=disabled
+```
+
+Everything else — API keys, Telegram tokens, email settings — carries over as-is.
+No paths in `.env` reference Windows-style paths, so no path conversion is needed.
+
+#### Step 6: Verify the Database
+
+Confirm the database transferred correctly:
+
+```bash
+# Check it exists and has content
+ls -lh /opt/pattern/data/pattern.db
+
+# Run an integrity check
+sudo -u pattern sqlite3 /opt/pattern/data/pattern.db "PRAGMA integrity_check;"
+# Should output: ok
+
+# Quick sanity check — count your memories
+sudo -u pattern sqlite3 /opt/pattern/data/pattern.db "SELECT COUNT(*) FROM memories;" 2>/dev/null
+```
+
+If the integrity check passes, your data made it safely.
+
+#### Step 7: Continue with the Guide
+
+Your data is now on the VPS. Continue with [Section 6 (Nginx and SSL)](#6-configure-nginx-and-ssl)
+and the remaining sections to finish the deployment. When you reach
+[Section 8 (Start Everything)](#8-start-everything), Pattern will start up with all
+your existing memories, conversations, and settings intact.
 
 ---
 
