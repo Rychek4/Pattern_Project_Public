@@ -321,6 +321,17 @@ class WebServer:
         self.manager = ConnectionManager()
         self.app = self._create_app()
 
+    # -----------------------------------------------------------------------
+    # Broadcast helpers (delegate to ConnectionManager)
+    # -----------------------------------------------------------------------
+    async def broadcast(self, data: dict):
+        """Broadcast to all clients from async context."""
+        await self.manager.broadcast(data)
+
+    def broadcast_sync(self, data: dict):
+        """Thread-safe broadcast from synchronous/threaded code."""
+        self.manager.broadcast_sync(data)
+
     def set_backend(
         self,
         engine,
@@ -369,7 +380,7 @@ class WebServer:
             return
         msg = _process_event_to_ws(event)
         if msg:
-            self.manager.broadcast_sync(msg)
+            self.broadcast_sync(msg)
 
     # -----------------------------------------------------------------------
     # Engine event listener (called from background threads)
@@ -378,7 +389,7 @@ class WebServer:
         """Bridge engine events to WebSocket broadcasts."""
         msg = _engine_event_to_ws(event)
         if msg:
-            self.manager.broadcast_sync(msg)
+            self.broadcast_sync(msg)
 
         # Track processing state (mirrors GUI._on_engine_event)
         if event.event_type == EngineEventType.PROCESSING_COMPLETE:
@@ -389,6 +400,23 @@ class WebServer:
                 self._pulse_manager.resume()
             if self._telegram_listener:
                 self._telegram_listener.resume()
+
+    # -----------------------------------------------------------------------
+    # Engine task wrapper (safety net for _is_processing flag)
+    # -----------------------------------------------------------------------
+    def _run_engine_task(self, fn, *args):
+        """Run an engine function with a safety net that resets _is_processing
+        if the function raises before emitting PROCESSING_COMPLETE."""
+        try:
+            fn(*args)
+        except Exception as e:
+            log_error(f"Engine task failed: {e}")
+            with self._processing_lock:
+                self._is_processing = False
+            self.broadcast_sync({
+                "type": "processing_error",
+                "error": str(e),
+            })
 
     # -----------------------------------------------------------------------
     # Pulse callbacks (called from PulseManager background thread)
@@ -402,8 +430,8 @@ class WebServer:
             self._is_processing = True
 
         thread = threading.Thread(
-            target=self._engine.process_pulse,
-            args=("reflective",),
+            target=self._run_engine_task,
+            args=(self._engine.process_pulse, "reflective"),
             daemon=True,
         )
         thread.start()
@@ -417,8 +445,8 @@ class WebServer:
             self._is_processing = True
 
         thread = threading.Thread(
-            target=self._engine.process_pulse,
-            args=("action",),
+            target=self._run_engine_task,
+            args=(self._engine.process_pulse, "action"),
             daemon=True,
         )
         thread.start()
@@ -439,8 +467,8 @@ class WebServer:
             self._is_processing = True
 
         thread = threading.Thread(
-            target=self._engine.process_telegram,
-            args=(message.text, getattr(message, "from_user", "")),
+            target=self._run_engine_task,
+            args=(self._engine.process_telegram, message.text, getattr(message, "from_user", "")),
             daemon=True,
         )
         thread.start()
@@ -455,8 +483,8 @@ class WebServer:
             self._is_processing = True
 
         thread = threading.Thread(
-            target=self._engine.process_reminder,
-            args=(triggered_intentions,),
+            target=self._run_engine_task,
+            args=(self._engine.process_reminder, triggered_intentions),
             daemon=True,
         )
         thread.start()
@@ -529,7 +557,7 @@ class WebServer:
         display_text = text
         if image_bytes:
             display_text = f"[Image] {text}" if text else "[Image attached]"
-        self.manager.broadcast_sync({
+        self.broadcast_sync({
             "type": "user_message",
             "text": display_text,
             "timestamp": datetime.now().isoformat(),
@@ -539,6 +567,7 @@ class WebServer:
         loop = asyncio.get_running_loop()
         loop.run_in_executor(
             None,
+            self._run_engine_task,
             self._engine.process_message,
             text,
             image_bytes,
