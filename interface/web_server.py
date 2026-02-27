@@ -480,7 +480,7 @@ class WebServer:
             if self._engine:
                 self._engine.cancel()
         elif msg_type == "set_pulse_interval":
-            self._handle_set_pulse_interval(msg)
+            await self._handle_set_pulse_interval(msg)
         elif msg_type == "pulse_now":
             self._handle_pulse_now(msg)
         elif msg_type == "new_session":
@@ -544,7 +544,7 @@ class WebServer:
             image_bytes,
         )
 
-    def _handle_set_pulse_interval(self, msg: dict):
+    async def _handle_set_pulse_interval(self, msg: dict):
         pulse_type = msg.get("pulse_type", "")
         interval = msg.get("interval_seconds", 0)
         if not self._pulse_manager or not pulse_type or not interval:
@@ -553,6 +553,18 @@ class WebServer:
             self._pulse_manager.set_reflective_interval(float(interval))
         elif pulse_type == "action":
             self._pulse_manager.set_action_interval(float(interval))
+        # Broadcast updated countdown so all clients refresh their display
+        await self.broadcast({
+            "type": "state",
+            "pulse_intervals": {
+                "reflective": self._pulse_manager.reflective_timer.interval,
+                "action": self._pulse_manager.action_timer.interval,
+            },
+            "pulse_remaining": {
+                "reflective": self._pulse_manager.reflective_timer.get_seconds_remaining(),
+                "action": self._pulse_manager.action_timer.get_seconds_remaining(),
+            },
+        })
 
     def _handle_pulse_now(self, msg: dict):
         pulse_type = msg.get("pulse_type", "reflective")

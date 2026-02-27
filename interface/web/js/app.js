@@ -19,6 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const thinkingToggle = document.getElementById('thinking-toggle');
     const reflectiveInterval = document.getElementById('reflective-interval');
     const actionInterval = document.getElementById('action-interval');
+    const pulseTypeSelect = document.getElementById('pulse-type-select');
     const pulseNowBtn = document.getElementById('pulse-now-btn');
     const pulseCountdown = document.getElementById('pulse-countdown');
     const themeToggle = document.getElementById('theme-toggle');
@@ -271,7 +272,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     pulseNowBtn.addEventListener('click', () => {
-        Connection.send({ type: 'pulse_now', pulse_type: 'reflective' });
+        Connection.send({ type: 'pulse_now', pulse_type: pulseTypeSelect.value });
     });
 
     themeToggle.addEventListener('click', toggleTheme);
