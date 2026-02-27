@@ -26,6 +26,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 import config
 from core.logger import log_info, log_error, log_warning
 from engine.events import EngineEvent, EngineEventType
+from interface.process_panel import (
+    ProcessEvent, ProcessEventType, get_process_event_bus
+)
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +155,12 @@ def _engine_event_to_ws(event: EngineEvent) -> Optional[dict]:
     if etype == EngineEventType.PROCESSING_STARTED:
         return {"type": "processing_started", "source": data.get("source", "user")}
 
+    elif etype == EngineEventType.PROMPT_ASSEMBLED:
+        return {"type": "prompt_assembled"}
+
+    elif etype == EngineEventType.MEMORIES_INJECTED:
+        return {"type": "memories_injected"}
+
     elif etype == EngineEventType.STREAM_START:
         return {"type": "stream_start", "timestamp": datetime.now().isoformat()}
 
@@ -250,6 +259,44 @@ def _engine_event_to_ws(event: EngineEvent) -> Optional[dict]:
 
 
 # ---------------------------------------------------------------------------
+# ProcessEventBus → WebSocket message mapper
+# ---------------------------------------------------------------------------
+_FORWARDED_PROCESS_EVENTS = frozenset({
+    ProcessEventType.DELEGATION_START,
+    ProcessEventType.DELEGATION_TOOL,
+    ProcessEventType.DELEGATION_COMPLETE,
+    ProcessEventType.CURIOSITY_SELECTED,
+    ProcessEventType.MEMORY_EXTRACTION,
+})
+
+
+def _process_event_to_ws(event: ProcessEvent) -> Optional[dict]:
+    """Convert a ProcessEvent into a JSON-serialisable dict for WebSocket."""
+    etype = event.event_type
+
+    if etype == ProcessEventType.DELEGATION_START:
+        return {"type": "delegation_start", "detail": event.detail}
+
+    elif etype == ProcessEventType.DELEGATION_TOOL:
+        return {"type": "delegation_tool", "detail": event.detail}
+
+    elif etype == ProcessEventType.DELEGATION_COMPLETE:
+        return {"type": "delegation_complete", "detail": event.detail}
+
+    elif etype == ProcessEventType.CURIOSITY_SELECTED:
+        return {
+            "type": "curiosity_selected",
+            "detail": event.detail,
+            "origin": event.origin,
+        }
+
+    elif etype == ProcessEventType.MEMORY_EXTRACTION:
+        return {"type": "memory_extraction", "detail": event.detail}
+
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Web Server
 # ---------------------------------------------------------------------------
 class WebServer:
@@ -293,6 +340,9 @@ class WebServer:
         if self._engine:
             self._engine.add_listener(self._on_engine_event)
 
+        # Subscribe to ProcessEventBus for delegation/curiosity/memory events
+        get_process_event_bus().add_callback(self._on_process_event)
+
         # Set up pulse callbacks
         if self._pulse_manager:
             self._pulse_manager.set_reflective_callback(self._on_reflective_pulse_fired)
@@ -309,6 +359,17 @@ class WebServer:
         # Start session if not active
         if self._temporal_tracker and not self._temporal_tracker.is_session_active:
             self._temporal_tracker.start_session()
+
+    # -----------------------------------------------------------------------
+    # ProcessEventBus callback (delegation / curiosity / memory extraction)
+    # -----------------------------------------------------------------------
+    def _on_process_event(self, event: ProcessEvent):
+        """Forward relevant ProcessEventBus events to WebSocket clients."""
+        if event.event_type not in _FORWARDED_PROCESS_EVENTS:
+            return
+        msg = _process_event_to_ws(event)
+        if msg:
+            self.manager.broadcast_sync(msg)
 
     # -----------------------------------------------------------------------
     # Engine event listener (called from background threads)

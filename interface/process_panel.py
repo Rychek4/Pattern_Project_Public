@@ -102,9 +102,20 @@ class ProcessEventBus(QObject):
     Components throughout the pipeline emit events here. The process
     panel subscribes and renders them. This keeps the panel completely
     decoupled from the pipeline -- emitters don't know about the panel.
+
+    Supports both PyQt signal subscribers (for the desktop GUI) and
+    plain callbacks (for the web server's WebSocket bridge).
     """
 
     event_emitted = pyqtSignal(object)  # ProcessEvent
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._callbacks: List[Any] = []
+
+    def add_callback(self, callback) -> None:
+        """Register a plain callback for non-Qt subscribers (e.g. web server)."""
+        self._callbacks.append(callback)
 
     def emit_event(self, event_type: ProcessEventType, detail: str = "",
                    round_number: int = 0, is_active: bool = False,
@@ -118,6 +129,11 @@ class ProcessEventBus(QObject):
             origin=origin
         )
         self.event_emitted.emit(event)
+        for cb in self._callbacks:
+            try:
+                cb(event)
+            except Exception:
+                pass
 
 
 # Global instance

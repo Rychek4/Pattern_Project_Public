@@ -16,6 +16,7 @@
     <!-- Header -->
     <header id="header">
         <div class="header-left">
+            <button id="process-panel-expand" class="header-btn hidden" title="Show process panel">&#x25B6;</button>
             <span class="header-title">Pattern</span>
             <span id="session-timer" class="header-chip">0:00</span>
         </div>
@@ -57,10 +58,24 @@
         </div>
     </header>
 
-    <!-- Chat area -->
-    <main id="chat-container">
-        <div id="messages"></div>
-    </main>
+    <!-- Main content: process panel + chat -->
+    <div id="main-content">
+        <!-- Process panel sidebar -->
+        <aside id="process-panel" class="process-panel">
+            <div class="process-panel-header">
+                <span>Isaac</span>
+                <button id="process-panel-toggle" title="Toggle process panel">&#x25C0;</button>
+            </div>
+            <div id="process-panel-content" class="process-panel-content">
+                <!-- Nodes rendered here by process.js -->
+            </div>
+        </aside>
+
+        <!-- Chat area -->
+        <main id="chat-container">
+            <div id="messages"></div>
+        </main>
+    </div>
 
     <!-- Status bar -->
     <div id="status-bar">
@@ -90,6 +105,7 @@
     </footer>
 
     <script src="/static/js/connection.js"></script>
+    <script src="/static/js/process.js"></script>
     <script src="/static/js/chat.js"></script>
     <script src="/static/js/app.js"></script>
 </body>
