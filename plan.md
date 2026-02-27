@@ -193,13 +193,50 @@ Light theme counterparts as well.
 
 ---
 
-## What This Does NOT Include
+## Step 6: Delegation, Curiosity & Memory Extraction Events
 
-- **Delegation events**: The engine doesn't currently emit delegation-specific events (DELEGATION_START/TOOL/COMPLETE) — those are PyQt-only via the separate ProcessEventBus. We can add these later when the delegation system evolves.
-- **Curiosity events**: Same — these are PyQt ProcessEventBus events, not engine events. Future addition.
-- **Memory extraction events**: Not currently an EngineEventType. Can be added later.
+These three event types are currently emitted **only** through the PyQt `ProcessEventBus` (not through `EngineEventType`). To surface them in the web UI, we add a lightweight callback mechanism to `ProcessEventBus` that the web server subscribes to.
 
-These can all be added incrementally by adding new EngineEventType values and forwarding them through the WS bridge.
+### Backend: ProcessEventBus callback bridge
+
+**`interface/process_panel.py`** — Add callback support:
+- Add `_callbacks: list` to `ProcessEventBus.__init__()`
+- Add `add_callback(callback)` method
+- In `emit_event()`, call all callbacks alongside the existing `pyqtSignal` emit
+- Callbacks receive the `ProcessEvent` dataclass directly
+
+**`interface/web_server.py`** — Subscribe to ProcessEventBus:
+- In `set_backend()`, call `get_process_event_bus().add_callback(self._on_process_event)`
+- `_on_process_event()` filters to only these 5 event types and broadcasts via WebSocket:
+
+| ProcessEventType | WS message type | Data |
+|---|---|---|
+| `DELEGATION_START` | `delegation_start` | `detail` |
+| `DELEGATION_TOOL` | `delegation_tool` | `detail` |
+| `DELEGATION_COMPLETE` | `delegation_complete` | `detail` |
+| `CURIOSITY_SELECTED` | `curiosity_selected` | `detail`, `origin` |
+| `MEMORY_EXTRACTION` | `memory_extraction` | `detail` |
+
+No changes needed to `delegate.py`, `curiosity/engine.py`, or `extractor.py` — they already emit to `ProcessEventBus`.
+
+### Frontend: process.js event handlers
+
+| WS Event | Panel Behavior |
+|----------|----------------|
+| `delegation_start` | Add "Asking for help with a task" node (blue dot) inside current round, detail = task summary |
+| `delegation_tool` | Add "Delegate: {tool_name}" node (blue dot) inside current round |
+| `delegation_complete` | Add "Got the help he needed" node (blue dot) inside current round, detail = rounds + duration |
+| `curiosity_selected` | Add "Got curious about something" node (green dot), detail = goal text |
+| `memory_extraction` | Add "Reflecting on what to remember" / "Kept N memories" node (green dot) |
+
+### Why callback bridge instead of dual-emit
+
+The alternative — adding `EngineEventType` values and modifying each emitting module to also emit `EngineEvent` — would require:
+- Passing engine references through delegate/curiosity/extractor call chains
+- 5 new enum values in engine/events.py
+- Modifying 3 additional backend files
+
+The callback approach touches only 2 files (`process_panel.py`, `web_server.py`) and requires zero changes to the emitting code.
 
 ---
 
@@ -207,10 +244,11 @@ These can all be added incrementally by adding new EngineEventType values and fo
 
 | Component | Effort | Risk |
 |-----------|--------|------|
-| WS bridge additions (2 events) | Small | Low — just forwarding existing events |
+| WS bridge additions (2 EngineEvent + 5 ProcessEvent) | Small | Low — additive forwarding |
+| ProcessEventBus callback mechanism | Small | Low — 10 lines, no existing behavior changed |
 | HTML sidebar structure | Small | Low — additive |
 | CSS styling + themes | Medium | Low — isolated, uses existing variable pattern |
 | `process.js` module | Medium | Low — follows established patterns, read-only display |
 | Layout adjustment (flex) | Small | Medium — need to verify no regressions on existing layout |
 
-Total: ~4 files touched, 1 new file created. The process panel is entirely additive — no changes to existing functionality.
+Total: ~5 files touched, 1 new file created. The process panel is entirely additive — no changes to existing functionality.

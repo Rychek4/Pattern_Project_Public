@@ -30,6 +30,22 @@
     --scrollbar-thumb: #334;
     --header-bg: #111328;
     --status-bg: #111328;
+
+    /* Process panel */
+    --process-bg: #1e1e2e;
+    --process-border: #334;
+    --process-dot-active: #d4a574;
+    --process-dot-complete: #7a7770;
+    --process-dot-tool: #c4a7e7;
+    --process-dot-error: #e07a6b;
+    --process-dot-system: #5bb98c;
+    --process-dot-delegation: #6bb5e0;
+    --process-round-bg: #252540;
+    --process-round-border: #3a3a50;
+    --process-border-user: #6bb5e0;
+    --process-border-isaac: #c4a7e7;
+    --process-border-system: #5bb98c;
+    --process-separator: #3a3a50;
 }
 
 [data-theme="light"] {
@@ -57,6 +73,22 @@
     --scrollbar-thumb: #c0c0d0;
     --header-bg: #e8e8f0;
     --status-bg: #e8e8f0;
+
+    /* Process panel */
+    --process-bg: #f0f0f5;
+    --process-border: #d0d0e0;
+    --process-dot-active: #c08040;
+    --process-dot-complete: #999;
+    --process-dot-tool: #8060b0;
+    --process-dot-error: #d03030;
+    --process-dot-system: #308060;
+    --process-dot-delegation: #3080b0;
+    --process-round-bg: #e8e8f0;
+    --process-round-border: #d0d0e0;
+    --process-border-user: #3080b0;
+    --process-border-isaac: #8060b0;
+    --process-border-system: #308060;
+    --process-separator: #d0d0e0;
 }
 
 /* --- Reset & Base --- */
@@ -173,6 +205,148 @@ body {
 .header-btn:hover {
     background: var(--accent);
     color: var(--accent-text);
+}
+
+/* --- Main Content Layout --- */
+#main-content {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+/* --- Process Panel --- */
+.process-panel {
+    width: 240px;
+    flex-shrink: 0;
+    background: var(--process-bg);
+    border-right: 1px solid var(--process-border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: width 0.2s ease;
+}
+
+.process-panel.collapsed {
+    width: 0;
+    border-right: none;
+}
+
+.process-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px 6px 10px;
+    border-bottom: 1px solid var(--process-border);
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    flex-shrink: 0;
+}
+
+.process-panel.collapsed .process-panel-header {
+    display: none;
+}
+
+#process-panel-toggle {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 0.75rem;
+    padding: 2px 4px;
+    border-radius: 3px;
+    line-height: 1;
+}
+#process-panel-toggle:hover {
+    color: var(--text-primary);
+    background: var(--process-round-bg);
+}
+
+.process-panel-content {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 6px 8px 6px 8px;
+}
+
+.process-panel-content::-webkit-scrollbar {
+    width: 5px;
+}
+.process-panel-content::-webkit-scrollbar-thumb {
+    background: var(--process-border);
+    border-radius: 3px;
+}
+
+/* --- Process Panel: Message Groups --- */
+.process-message-group {
+    border-left: 3px solid var(--process-border-user);
+    padding: 2px 0 2px 6px;
+    margin: 0;
+}
+.process-message-group[data-origin="isaac"] {
+    border-left-color: var(--process-border-isaac);
+}
+.process-message-group[data-origin="system"] {
+    border-left-color: var(--process-border-system);
+}
+
+.process-separator {
+    border: none;
+    border-top: 1px solid var(--process-separator);
+    margin: 6px 8px;
+}
+
+/* --- Process Panel: Round Groups --- */
+.process-round {
+    background: var(--process-round-bg);
+    border: 1px solid var(--process-round-border);
+    border-radius: 4px;
+    margin: 2px 0;
+    padding: 0 0 0 8px;
+}
+
+.process-round-header {
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    padding: 3px 0 1px 0;
+}
+
+/* --- Process Panel: Nodes --- */
+.process-node {
+    padding: 2px 4px 2px 0;
+    animation: fadeIn 0.2s ease-out;
+    line-height: 1.3;
+}
+
+.process-dot {
+    font-size: 0.6rem;
+    vertical-align: middle;
+    margin-right: 3px;
+}
+
+.process-label {
+    font-size: 0.82rem;
+    color: var(--text-primary);
+}
+
+.process-time {
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    margin-left: 4px;
+}
+
+.process-detail {
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    padding-left: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Active node pulsing dot */
+.process-node.active .process-dot {
+    animation: pulse-dot 1.5s infinite;
 }
 
 /* --- Chat Container --- */
@@ -531,6 +705,11 @@ body {
 
     #chat-input {
         font-size: 16px; /* Prevent iOS zoom */
+    }
+
+    /* Hide process panel on mobile */
+    .process-panel {
+        display: none;
     }
 }
 
