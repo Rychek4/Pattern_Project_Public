@@ -56,13 +56,24 @@ def _create_session_token() -> str:
     return token
 
 
+_last_session_cleanup = 0.0  # timestamp of last cleanup run
+
+
 def _validate_session(token: str) -> bool:
+    global _last_session_cleanup
     if not token:
         return False
+
+    # Periodically purge expired tokens (at most once per hour)
+    now = time.time()
+    if now - _last_session_cleanup > 3600:
+        _cleanup_expired_sessions()
+        _last_session_cleanup = now
+
     expiry = _active_sessions.get(token)
     if expiry is None:
         return False
-    if time.time() > expiry:
+    if now > expiry:
         _active_sessions.pop(token, None)
         return False
     return True
@@ -71,6 +82,14 @@ def _validate_session(token: str) -> bool:
 def _auth_required() -> bool:
     """Return True if authentication is configured."""
     return bool(_get_auth_password())
+
+
+def _cleanup_expired_sessions():
+    """Remove expired session tokens to prevent unbounded dict growth."""
+    now = time.time()
+    expired = [t for t, exp in _active_sessions.items() if now > exp]
+    for t in expired:
+        _active_sessions.pop(t, None)
 
 
 # ---------------------------------------------------------------------------
@@ -127,8 +146,9 @@ class ConnectionManager:
     async def _send_json(self, ws: WebSocket, data: dict):
         try:
             await ws.send_json(data)
-        except Exception:
+        except Exception as exc:
             self._connections.discard(ws)
+            log_info(f"WebSocket send failed, client removed: {exc.__class__.__name__}", prefix="🌐")
 
     async def broadcast(self, data: dict):
         """Send a message to all connected clients."""
@@ -626,6 +646,35 @@ class WebServer:
         from core.user_settings import get_user_settings
         get_user_settings().thinking_enabled = enabled
 
+    async def _poll_voice_events(self):
+        """Background task: poll for ESP32 voice transcripts (mirrors GUI._poll_voice_events)."""
+        while True:
+            try:
+                from voice.api import voice_event_queue
+            except ImportError:
+                return  # Voice module not available, stop polling
+            try:
+                while not voice_event_queue.empty():
+                    event = voice_event_queue.get_nowait()
+                    user_text = event.get("user_text", "")
+                    isaac_text = event.get("isaac_text", "")
+                    ts = event.get("timestamp")
+                    if user_text:
+                        await self.manager.broadcast({
+                            "type": "user_message",
+                            "text": f"\U0001f399 {user_text}",
+                            "timestamp": ts,
+                        })
+                    if isaac_text:
+                        await self.manager.broadcast({
+                            "type": "response_complete",
+                            "text": isaac_text,
+                            "source": "user",
+                        })
+            except Exception:
+                pass  # Queue empty or other transient error
+            await asyncio.sleep(0.5)
+
     async def _send_state(self, ws: WebSocket):
         """Send current system state to a single client."""
         from core.user_settings import get_user_settings
@@ -650,6 +699,12 @@ class WebServer:
             state["pulse_paused"] = self._pulse_manager.is_paused()
 
         state["is_processing"] = self._is_processing
+
+        # Include session start time so the browser timer survives page refresh
+        if self._temporal_tracker and self._temporal_tracker.is_session_active:
+            ctx = self._temporal_tracker.get_context()
+            if ctx and ctx.session_started_at:
+                state["session_start_iso"] = ctx.session_started_at.isoformat()
 
         await ws.send_json(state)
 
@@ -716,6 +771,11 @@ class WebServer:
             return HTMLResponse("<h1>Pattern Project</h1><p>Web UI files not found.</p>")
 
         # --- Health ---
+
+        @app.on_event("startup")
+        async def startup_background_tasks():
+            """Start background tasks like voice event polling."""
+            asyncio.ensure_future(server._poll_voice_events())
 
         @app.get("/health")
         async def health():

@@ -311,12 +311,18 @@ Pattern uses Claude's native tool use API. Tools are conditionally registered ba
 - `HTTP_HOST`: 127.0.0.1
 - `HTTP_PORT`: 5000
 
-### 7.3 GUI Interface (PyQt5)
+### 7.3 Web Interface (Recommended)
+- **Features**: Browser-based chat, streaming, image upload, process panel
+- **Server**: FastAPI + WebSocket (`python main.py --web`)
+- **Auth**: Optional password via `WEB_AUTH_PASSWORD`
+- **Config**: `WEB_HOST` (0.0.0.0), `WEB_PORT` (8080)
+
+### 7.4 GUI Interface (PyQt5) — Desktop only
 - **Features**: Rich chat display, streaming, overlays
 - **TTS Integration**: ElevenLabs voice output
-- **Dependency**: Requires PyQt5 installation
+- **Dependency**: Requires PyQt5 installation (not needed for web/CLI)
 
-### 7.4 Dev Window
+### 7.5 Dev Window
 Debug interface showing internal operations:
 - Prompt assembly and context blocks
 - Tool execution and results
@@ -426,7 +432,8 @@ Each prompt is built fresh from registered sources, sorted by priority, producin
 | TTS | ⚙️ Configurable | Requires ElevenLabs key |
 | Clipboard | ✅ Enabled | `CLIPBOARD_ENABLED` |
 | Clarification | ✅ Enabled | `CLARIFICATION_ENABLED` |
-| GUI | ⚠️ Optional | Requires PyQt5 |
+| Web UI | ✅ Recommended | `--web` flag, `WEB_AUTH_PASSWORD` |
+| GUI | ⚠️ Optional | Requires PyQt5 (desktop only) |
 | HTTP API | ⚙️ Configurable | `HTTP_ENABLED` |
 
 ---
