@@ -418,8 +418,11 @@ class ChatEngine:
                        tokens_out=final_state.output_tokens,
                        stop_reason=final_state.stop_reason or "")
 
-            # Emit server-side tool calls (web_search, web_fetch)
-            if final_state.server_tool_details:
+            # Emit server-side tool calls (web_search, web_fetch) via engine
+            # events.  Only when there are NO client tool calls -- if there are,
+            # process_with_tools() will emit TOOL_INVOKED for all tools
+            # (including server tools) via ProcessEventBus, avoiding duplicates.
+            if final_state.server_tool_details and not final_state.has_tool_calls():
                 from agency.tools.response_helper import _build_tool_detail
                 for st in final_state.server_tool_details:
                     tool_detail = _build_tool_detail(st.get("name", ""), st.get("input", {}))
@@ -579,6 +582,9 @@ class ChatEngine:
 
             tools = get_tool_definitions(is_pulse=True)
 
+            # Signal round start so the web process panel creates a round group
+            self._emit(EngineEventType.STREAM_START)
+
             # LLM call (non-streaming for pulses)
             response = self._llm_router.chat(
                 messages=history,
@@ -703,6 +709,9 @@ class ChatEngine:
             history.append({"role": "user", "content": reminder_prompt})
 
             tools = get_tool_definitions()
+
+            # Signal round start so the web process panel creates a round group
+            self._emit(EngineEventType.STREAM_START)
 
             # LLM call
             response = self._llm_router.chat(
