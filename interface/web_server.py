@@ -551,9 +551,11 @@ class WebServer:
 
         # Decode image if present
         image_bytes = None
+        image_media_type = None
         if msg.get("image"):
             try:
                 image_bytes = base64.b64decode(msg["image"])
+                image_media_type = msg.get("image_media_type")
             except Exception as e:
                 log_error(f"Failed to decode image: {e}")
 
@@ -575,6 +577,7 @@ class WebServer:
             self._engine.process_message,
             text,
             image_bytes,
+            image_media_type,
         )
 
     async def _handle_set_pulse_interval(self, msg: dict):

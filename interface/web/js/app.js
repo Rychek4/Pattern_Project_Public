@@ -34,6 +34,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let isProcessing = false;
     let sessionStart = Date.now();
     let pendingImage = null;   // base64 string (no prefix)
+    let pendingImageType = null;  // MIME type (e.g. "image/png")
     let pulseState = { reflective: 0, action: 0, paused: false };
     let pulseLastSync = Date.now();   // timestamp of last server state sync
     let pulseCountdownTimer = null;
@@ -193,6 +194,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const msg = { type: 'chat', text: text };
         if (pendingImage) {
             msg.image = pendingImage;
+            if (pendingImageType) {
+                msg.image_media_type = pendingImageType;
+            }
         }
 
         Connection.send(msg);
@@ -243,6 +247,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Strip the data:image/...;base64, prefix
             const base64 = reader.result.split(',')[1];
             pendingImage = base64;
+            pendingImageType = file.type || null;
             imagePreviewText.textContent = `Image attached (${(file.size / 1024).toFixed(0)} KB)`;
             imagePreview.classList.remove('hidden');
         };
@@ -251,6 +256,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function clearPendingImage() {
         pendingImage = null;
+        pendingImageType = null;
         imagePreview.classList.add('hidden');
         imagePreviewText.textContent = '';
     }

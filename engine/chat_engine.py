@@ -216,12 +216,35 @@ class ChatEngine:
             log_error(f"Visual capture error, falling back to text-only: {e}")
             return {"role": "user", "content": text_content}
 
-    def _build_image_message(self, text: str, image_data: bytes) -> dict:
-        """Build a multimodal message from raw JPEG image bytes.
+    @staticmethod
+    def _detect_image_media_type(image_data: bytes) -> str:
+        """Detect image MIME type from magic bytes.
+
+        Args:
+            image_data: Raw image bytes
+
+        Returns:
+            Detected MIME type string, defaults to "image/jpeg" if unknown
+        """
+        if image_data[:8] == b'\x89PNG\r\n\x1a\n':
+            return "image/png"
+        if image_data[:2] == b'\xff\xd8':
+            return "image/jpeg"
+        if image_data[:4] == b'GIF8':
+            return "image/gif"
+        if image_data[:4] == b'RIFF' and image_data[8:12] == b'WEBP':
+            return "image/webp"
+        return "image/jpeg"
+
+    def _build_image_message(self, text: str, image_data: bytes,
+                             media_type: Optional[str] = None) -> dict:
+        """Build a multimodal message from raw image bytes.
 
         Args:
             text: The message text
-            image_data: JPEG-encoded image bytes
+            image_data: Raw image bytes (any supported format)
+            media_type: Optional MIME type hint from the client.
+                        If not provided, detected from magic bytes.
 
         Returns:
             Message dict with multimodal content array
@@ -230,14 +253,17 @@ class ChatEngine:
             import base64
             from agency.visual_capture import ImageContent, build_multimodal_content
 
+            if not media_type:
+                media_type = self._detect_image_media_type(image_data)
+
             base64_data = base64.standard_b64encode(image_data).decode("utf-8")
             img_content = ImageContent(
                 data=base64_data,
-                media_type="image/jpeg",
+                media_type=media_type,
                 source_type="clipboard"
             )
             content_array = build_multimodal_content(text, [img_content])
-            log_info("Built multimodal message from image bytes", prefix="📋")
+            log_info(f"Built multimodal message from image bytes (media_type={media_type})", prefix="📋")
             return {"role": "user", "content": content_array}
 
         except Exception as e:
@@ -266,7 +292,8 @@ class ChatEngine:
     # Primary entry point: user chat message (streaming)
     # ------------------------------------------------------------------
 
-    def process_message(self, user_input: str, image_data: Optional[bytes] = None):
+    def process_message(self, user_input: str, image_data: Optional[bytes] = None,
+                        image_media_type: Optional[str] = None):
         """Process a user chat message with streaming.
 
         This is the main entry point. Handles prompt building, conversation
@@ -277,7 +304,9 @@ class ChatEngine:
 
         Args:
             user_input: The user's message text
-            image_data: Optional JPEG-encoded image bytes (from clipboard paste)
+            image_data: Optional raw image bytes (from clipboard paste)
+            image_media_type: Optional MIME type of the image (e.g. "image/png").
+                              If not provided, detected from magic bytes.
         """
         log_info("=== ChatEngine.process_message START ===", prefix="📨")
         log_info(f"Input length: {len(user_input)} chars", prefix="📨")
@@ -331,7 +360,7 @@ class ChatEngine:
             # Build user message (with visuals if applicable)
             log_info("Building user message...", prefix="📨")
             if image_data:
-                user_message = self._build_image_message(user_input, image_data)
+                user_message = self._build_image_message(user_input, image_data, image_media_type)
                 log_info("Built message with image", prefix="📨")
             else:
                 user_message = self._capture_visuals_for_message(user_input)
