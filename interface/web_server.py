@@ -472,7 +472,7 @@ class WebServer:
 
         thread = threading.Thread(
             target=self._run_engine_task,
-            args=(self._engine.process_telegram, message.text, getattr(message, "from_user", "")),
+            args=(self._engine.process_telegram, message),
             daemon=True,
         )
         thread.start()
