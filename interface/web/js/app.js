@@ -361,6 +361,12 @@ document.addEventListener('DOMContentLoaded', () => {
             pulseState.paused = msg.pulse_paused;
         }
 
+        // Sync session timer from server so it survives page refresh
+        if (msg.session_start_iso) {
+            sessionStart = new Date(msg.session_start_iso).getTime();
+            updateSessionTimer();
+        }
+
         // Sync processing state
         if (msg.is_processing) {
             setProcessing(true);
@@ -479,10 +485,14 @@ document.addEventListener('DOMContentLoaded', () => {
         setStatus(msg.text, msg.status_type);
     });
 
-    // Notifications
+    // Notifications (level-aware: info, success, warning, error)
     Connection.on('notification', (msg) => {
-        // Show as a system message
-        Chat.addSystemMessage(msg.message);
+        const level = msg.level || 'info';
+        let prefix = '';
+        if (level === 'warning') prefix = '\u26a0\ufe0f ';
+        else if (level === 'error') prefix = '\u274c ';
+        else if (level === 'success') prefix = '\u2705 ';
+        Chat.addSystemMessage(prefix + msg.message);
     });
 
     // Telegram

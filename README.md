@@ -119,10 +119,20 @@ Extracted conversations become searchable memories that resurface when semantica
 
 ## Interfaces
 
+### Web UI (Recommended)
+```bash
+python main.py --web   # Start web interface on port 8080
+```
+Browser-based interface using FastAPI + WebSocket. Supports streaming,
+image paste/upload, real-time process panel, pulse controls, and theme
+switching. Recommended for VPS/cloud deployments and general use.
+
+Set `WEB_AUTH_PASSWORD` in `.env` to require login (empty = no auth for local dev).
+
 ### CLI (Rich Terminal)
 ```bash
-python main.py        # Start CLI
-python main.py --dev  # With debug window
+python main.py --cli   # Start CLI
+python main.py --dev   # With debug window (GUI only)
 ```
 
 **Commands:**
@@ -148,8 +158,9 @@ python main.py --dev  # With debug window
 - `/stats` — System statistics
 - `/session/new`, `/session/end` — Session control
 
-### GUI (PyQt5)
+### GUI (PyQt5) — Desktop only
 Rich graphical interface with streaming, overlays, and TTS integration.
+Requires PyQt5 (not needed for web or CLI modes).
 
 ---
 
@@ -162,15 +173,14 @@ pip install -r requirements.txt
 ```
 
 Core dependencies:
-- `anthropic>=0.18.0` — Claude API
+- `anthropic>=0.78.0` — Claude API
 - `sentence-transformers>=2.2.0` — Embeddings
 - `rich>=13.0.0` — Terminal formatting
-- `flask>=3.0.0` — HTTP API
+- `fastapi>=0.115.0` + `uvicorn>=0.32.0` — Web UI server
 - `python-dotenv>=1.0.0` — Environment loading
 
 Optional:
-- `PyQt5>=5.15.0` — GUI interface
-- `elevenlabs>=1.0.0` — Text-to-speech
+- `PyQt5>=5.15.0` — Desktop GUI interface (not needed for web or CLI)
 - `python-telegram-bot>=21.0` — Telegram integration
 - `opencv-python` — Webcam capture
 - `pillow` — Screenshot capture

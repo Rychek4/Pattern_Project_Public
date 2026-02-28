@@ -104,7 +104,7 @@ const Connection = (() => {
      */
     function send(data) {
         if (!_ws || _ws.readyState !== WebSocket.OPEN) {
-            console.warn('WebSocket not connected, cannot send:', data);
+            console.warn('WebSocket not connected, cannot send message of type:', data && data.type);
             return false;
         }
         _ws.send(JSON.stringify(data));
