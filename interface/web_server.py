@@ -192,13 +192,6 @@ def _engine_event_to_ws(event: EngineEvent) -> Optional[dict]:
             "error_type": data.get("error_type"),
         }
 
-    elif etype == EngineEventType.TOOL_INVOKED:
-        return {
-            "type": "tool_invoked",
-            "tool_name": data.get("tool_name", ""),
-            "detail": data.get("detail", ""),
-        }
-
     elif etype == EngineEventType.SERVER_TOOL_INVOKED:
         return {
             "type": "tool_invoked",
@@ -267,6 +260,7 @@ _FORWARDED_PROCESS_EVENTS = frozenset({
     ProcessEventType.DELEGATION_COMPLETE,
     ProcessEventType.CURIOSITY_SELECTED,
     ProcessEventType.MEMORY_EXTRACTION,
+    ProcessEventType.TOOL_INVOKED,
 })
 
 
@@ -292,6 +286,16 @@ def _process_event_to_ws(event: ProcessEvent) -> Optional[dict]:
 
     elif etype == ProcessEventType.MEMORY_EXTRACTION:
         return {"type": "memory_extraction", "detail": event.detail}
+
+    elif etype == ProcessEventType.TOOL_INVOKED:
+        detail = event.detail or ""
+        # _build_tool_detail() formats as "tool_name: description"
+        tool_name = detail.split(":")[0].strip() if ":" in detail else detail
+        return {
+            "type": "tool_invoked",
+            "tool_name": tool_name,
+            "detail": detail,
+        }
 
     return None
 
