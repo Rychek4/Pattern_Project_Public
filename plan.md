@@ -1,254 +1,155 @@
-# Plan: Add Process Panel to Web UI
+# Plan: Fix Tool Use Display in Web Process Panel
 
-## Overview
+## Context
 
-Port the PyQt5 process panel (`interface/process_panel.py`) to the web UI. The process panel is a real-time sidebar that visualizes the AI's internal processing pipeline — message receipt, prompt assembly, streaming, tool calls, continuation rounds, memory extraction, and system activity.
-
----
-
-## Architecture
-
-The web UI already receives most pipeline events over WebSocket. The process panel will be a new left sidebar (collapsible) with a dedicated JavaScript module that subscribes to these events and renders them as a vertical node tree — matching the PyQt5 panel's visual structure: **message groups → round groups → individual nodes**.
-
-### Files to create/modify
-
-| File | Action | Purpose |
-|------|--------|---------|
-| `interface/web/js/process.js` | **Create** | New JS module — state management, event handling, DOM rendering |
-| `interface/web/index.html` | **Edit** | Add process panel sidebar HTML + load `process.js` |
-| `interface/web/css/style.css` | **Edit** | Add process panel styles (dark/light themes) |
-| `interface/web_server.py` | **Edit** | Forward 2-3 additional engine events not currently sent to WS |
-
-No new backend dependencies. No changes to the engine or event system.
+The process panel does not show tool invocations during reminder, reflective,
+or action pulses. With the GUI being deprecated and the web UI becoming the
+standard, this plan targets the web event pipeline exclusively. Desktop-only
+code paths (`gui.py`'s `_process_typed_pulse`, `_on_engine_event` bridge) are
+treated as legacy and left untouched.
 
 ---
 
-## Step 1: Extend WebSocket Event Bridge (Python)
+## Root Cause Summary
 
-Currently, `_engine_event_to_ws()` in `web_server.py` skips a few events that the process panel needs. Add forwarding for:
+Three gaps prevent tool calls from reaching the web process panel:
 
-- **`PROMPT_ASSEMBLED`** → `{"type": "prompt_assembled"}` — signals prompt has been built
-- **`MEMORIES_INJECTED`** → `{"type": "memories_injected"}` — signals memory recall complete
-
-These already exist as `EngineEventType` values and are already emitted by the engine — they're just filtered out in the WebSocket bridge today.
-
-### Events already available (no backend changes needed)
-
-| WebSocket message | Process panel use |
-|---|---|
-| `processing_started` | Start new message group (with source: user/pulse/reminder/telegram/retry) |
-| `stream_start` | "Thinking..." active node |
-| `stream_chunk` | Live token count update on streaming node |
-| `stream_complete` | Mark stream node as "Responded" with token stats |
-| `tool_invoked` | Tool node (purple dot) with tool name + detail |
-| `processing_complete` | Terminal "Settled" node, mark all active nodes complete |
-| `processing_error` | Error node (red dot) |
-| `pulse_fired` | Start new message group (origin: isaac) |
-| `reminder_fired` | Start new message group (origin: isaac) |
-| `telegram_received` | Start new message group (origin: user) |
-| `retry_scheduled` | Retry node |
-
-### Continuation rounds
-
-The PyQt5 panel tracks continuation rounds (multi-round tool use). In the web, we can infer this: when a `stream_start` arrives *after* a `tool_invoked` within the same processing group, that's a new round. No new backend event needed — the JS module tracks round state locally.
+| # | Gap | Location | Impact |
+|---|-----|----------|--------|
+| 1 | `ProcessEventType.TOOL_INVOKED` not in `_FORWARDED_PROCESS_EVENTS` | `web_server.py:264-270` | Tool calls from ALL sources (user, pulse, reminder, telegram) are silently dropped before reaching WebSocket clients |
+| 2 | `EngineEventType.TOOL_INVOKED` is consumed but never produced | `web_server.py:195` handler exists; no emitter anywhere | Phantom handler — dead code |
+| 3 | `process_pulse()` and `process_reminder()` skip `STREAM_START` and `SERVER_TOOL_INVOKED` | `chat_engine.py` | No round group created for non-user sources; server-side tools invisible |
 
 ---
 
-## Step 2: HTML Structure
+## Proposed Changes
 
-Add a `<aside>` element before `#chat-container` with a toggle button:
+### Step 1 — Forward `TOOL_INVOKED` from ProcessEventBus to WebSocket clients
 
-```
-<aside id="process-panel" class="process-panel">
-    <div class="process-panel-header">
-        <span>Isaac</span>
-        <button id="process-panel-toggle" title="Toggle process panel">◀</button>
-    </div>
-    <div id="process-panel-content" class="process-panel-content">
-        <!-- Nodes rendered here by process.js -->
-    </div>
-</aside>
-```
+**File:** `interface/web_server.py`
 
-The main layout becomes: `[process-panel] [chat-container]` using CSS flexbox on the body (or a wrapper).
+- Add `ProcessEventType.TOOL_INVOKED` to `_FORWARDED_PROCESS_EVENTS` (line ~264)
+- Add a mapping case in `_process_event_to_ws()` (after line ~294):
+  ```
+  ProcessEventType.TOOL_INVOKED →
+      {"type": "tool_invoked", "tool_name": <parsed>, "detail": <parsed>}
+  ```
+  The `ProcessEvent.detail` field contains the formatted string from
+  `response_helper._build_tool_detail()` (e.g. `"search_memories: query='weather'"`).
+  We split on the first `:` to extract `tool_name` and `detail` separately,
+  matching the shape `process.js:_onToolInvoked()` already expects.
 
-A small toggle button in the header (or on the panel edge) collapses/expands the panel. State persisted in `localStorage`.
+**Why this is the highest-impact change:** It unblocks tool display for
+*every* source (user, pulse, reminder, telegram) in one shot, because
+`response_helper.py` emits `ProcessEventType.TOOL_INVOKED` uniformly for
+all code paths through `process_with_tools()`.
 
----
-
-## Step 3: JavaScript Module — `process.js`
-
-Follows the existing IIFE pattern (`const Process = (() => { ... })()`). Key internals:
-
-### State
-- `messageGroups[]` — array of message processing groups
-- `currentGroup` — active message group being built
-- `currentRound` — current round number within the group
-- `streamingNode` — reference to the active streaming node (for live updates)
-- `tokenCount` — running token count for the streaming node
-
-### Event → Node Mapping
-
-| WS Event | Panel Behavior |
-|----------|----------------|
-| `processing_started` | Start new message group. Origin from `source` field (user→blue, pulse/reminder→purple, system→green) |
-| `prompt_assembled` | Add "Gathering thoughts" node |
-| `memories_injected` | Add "Recalling past conversations" node |
-| `stream_start` | If round > 1: start new round group + "Thinking further..." node. Else: start round 1 + "Thinking..." active node |
-| `stream_chunk` | Increment token counter on streaming node detail |
-| `stream_complete` | Mark streaming node as "Responded" with token info |
-| `tool_invoked` | Add tool node inside current round (purple dot, shows tool name) |
-| `processing_complete` | Add "Settled" terminal node, mark all active as complete |
-| `processing_error` | Add error node (red dot), mark all active as complete |
-| `pulse_fired` | Start new message group (origin: isaac), "Checking in" node |
-| `reminder_fired` | Start new message group (origin: isaac), "Remembered something" node |
-| `telegram_received` | Start new message group (origin: user), "Telegram received" node |
-| `retry_scheduled` | Add "Retry scheduled" node |
-
-### DOM Rendering
-
-Each node is a small DOM element:
-```
-<div class="process-node">
-    <span class="process-dot" style="color: {dotColor}">●</span>
-    <span class="process-label">{label}</span>
-    <span class="process-time">{HH:MM:SS}</span>
-    <div class="process-detail">{detail text}</div>  <!-- optional -->
-</div>
-```
-
-Round groups wrap nodes:
-```
-<div class="process-round">
-    <div class="process-round-header">Round 2</div>
-    <!-- nodes -->
-</div>
-```
-
-Message groups wrap rounds and have a colored left border:
-```
-<div class="process-message-group" data-origin="user|isaac|system">
-    <!-- round groups and standalone nodes -->
-</div>
-```
-
-Separators between message groups: a thin `<hr>`.
-
-### Auto-scroll
-Mirror the existing chat auto-scroll pattern: track whether user has scrolled up from bottom; if at bottom, auto-scroll on new content.
-
-### Registration
-Register handlers via `Connection.on(type, handler)` for each relevant event type.
+**Risk:** Low. `process.js` already has `_onToolInvoked()` wired up at
+line 516 and renders them with the purple tool dot. No JS changes needed.
 
 ---
 
-## Step 4: CSS Styling
+### Step 2 — Emit `STREAM_START` in `process_pulse()` and `process_reminder()`
 
-### Panel layout
-- Fixed width: `240px` (matches PyQt5)
-- Full height between header and status bar
-- Scrollable content area
-- Collapsible with smooth transition (`width: 0` + `overflow: hidden`)
+**File:** `engine/chat_engine.py`
 
-### Color scheme (using CSS variables for theme support)
-Add new CSS variables for the process panel:
+- In `process_pulse()` (~line 572, before the `self._llm_router.chat()` call):
+  add `self._emit(EngineEventType.STREAM_START)`
+- In `process_reminder()` (~line 707, before the `self._llm_router.chat()` call):
+  add `self._emit(EngineEventType.STREAM_START)`
 
-```css
-/* Dark theme */
---process-bg: #1e1e2e;
---process-border: #334;
---process-dot-active: #d4a574;      /* amber */
---process-dot-complete: #7a7770;    /* muted */
---process-dot-tool: #c4a7e7;        /* purple */
---process-dot-error: #e07a6b;       /* red */
---process-dot-system: #5bb98c;      /* green */
---process-dot-delegation: #6bb5e0;  /* blue */
---process-round-bg: #252540;
---process-round-border: #3a3a50;
---process-border-user: #6bb5e0;     /* blue left bar */
---process-border-isaac: #c4a7e7;    /* purple left bar */
---process-border-system: #5bb98c;   /* green left bar */
+**Why:** Without `STREAM_START`, the web process panel never creates a
+round group for pulses/reminders. Tool nodes still render (Step 1 fixes
+that), but the "Thinking..." streaming node and round structure are
+missing, making the timeline feel incomplete compared to user messages.
+
+**Risk:** Low. The web server already maps `EngineEventType.STREAM_START` →
+`{"type": "stream_start"}` (line 164), and `process.js` already handles it
+via `_onStreamStart`. No new JS code needed.
+
+---
+
+### Step 3 — Add missing `STREAM_COMPLETE` in `process_reminder()`
+
+**File:** `engine/chat_engine.py`
+
+- In `process_reminder()`, after the successful LLM call (~line 715, before
+  `process_with_tools()`), emit:
+  ```python
+  self._emit(EngineEventType.STREAM_COMPLETE,
+             text=response.text,
+             tokens_in=getattr(response, 'tokens_in', 0),
+             tokens_out=getattr(response, 'tokens_out', 0),
+             stop_reason=getattr(response, 'stop_reason', ''))
+  ```
+  (`process_pulse()` already emits this at line ~595 — only `process_reminder()`
+  is missing it.)
+
+**Why:** Without `STREAM_COMPLETE`, the streaming node created by Step 2
+would stay in the "active" amber state forever. This pairs with Step 2
+to give reminders a complete lifecycle: `STREAM_START` → `STREAM_COMPLETE`.
+
+**Risk:** Low. Same existing event mapping and handler.
+
+---
+
+### Step 4 — Remove phantom `EngineEventType.TOOL_INVOKED` handler
+
+**File:** `interface/web_server.py`
+
+- Remove the `EngineEventType.TOOL_INVOKED` handler block at lines 195-200.
+
+**Why:** Nothing in the engine emits `EngineEventType.TOOL_INVOKED` — it's
+dead code. With Step 1 routing tool calls through the ProcessEventBus
+bridge instead, keeping this handler is misleading. Removing it makes the
+event flow clear: tool invocations arrive via ProcessEventBus, not engine
+events.
+
+**Risk:** None. Dead code removal.
+
+---
+
+## Files Modified (Summary)
+
+| File | Changes | Lines |
+|------|---------|-------|
+| `interface/web_server.py` | Add TOOL_INVOKED to forwarded set + mapping; remove phantom handler | ~15 |
+| `engine/chat_engine.py` | Add STREAM_START to pulse + reminder; add STREAM_COMPLETE to reminder | ~6 |
+
+**Total: 2 files, ~20 lines of changes.**
+
+No changes to `process.js`, `process_panel.py`, `response_helper.py`, or
+`gui.py`. The web frontend already has the rendering code ready — it just
+isn't receiving the messages.
+
+---
+
+## What This Does NOT Change
+
+- **Desktop GUI (`gui.py`, `process_panel.py`):** Left as-is. The desktop
+  panel already receives tool events via its unfiltered ProcessEventBus
+  subscription. Since the GUI is being deprecated, no investment here.
+- **`response_helper.py`:** The emission source is correct and uniform
+  across all code paths. No changes needed.
+- **`_process_typed_pulse()` in `gui.py`:** Dead code (unused — actual
+  callbacks delegate to `self._engine.process_pulse()`). Not cleaning up
+  since GUI is being deprecated.
+- **`process.js`:** Already has `_onToolInvoked()` wired up. No changes.
+
+---
+
+## Verification
+
+After the changes, the web process panel should show this structure for a
+reminder pulse that uses tools:
+
+```
+● Remembered something he promised
+  └─ Round 1
+       ● Thinking...  →  ● Responded (142 tokens)
+       ● Tool: search_memories   query='...'
+       ● Tool: read_file         path='...'
+  ● Settled
 ```
 
-Light theme counterparts as well.
-
-### Typography
-- Node labels: 0.82rem, primary text color
-- Timestamps: 0.7rem, dim text
-- Details: 0.75rem, secondary text
-- Round headers: 0.7rem, dim text
-
-### Mobile
-- Panel hidden by default on screens < 768px
-- Toggle button still accessible in header area
-
----
-
-## Step 5: Integration & Polish
-
-- **Load order**: `process.js` loaded after `connection.js` but before `app.js` in `index.html`
-- **Panel toggle state**: Persist in `localStorage` under `pattern-process-panel`
-- **Panel toggle**: Small button in the header-left area (next to "Pattern" title) or on the panel edge
-- **Animations**: Fade-in on new nodes (matches existing `fadeIn` keyframe), smooth collapse/expand
-
----
-
-## Step 6: Delegation, Curiosity & Memory Extraction Events
-
-These three event types are currently emitted **only** through the PyQt `ProcessEventBus` (not through `EngineEventType`). To surface them in the web UI, we add a lightweight callback mechanism to `ProcessEventBus` that the web server subscribes to.
-
-### Backend: ProcessEventBus callback bridge
-
-**`interface/process_panel.py`** — Add callback support:
-- Add `_callbacks: list` to `ProcessEventBus.__init__()`
-- Add `add_callback(callback)` method
-- In `emit_event()`, call all callbacks alongside the existing `pyqtSignal` emit
-- Callbacks receive the `ProcessEvent` dataclass directly
-
-**`interface/web_server.py`** — Subscribe to ProcessEventBus:
-- In `set_backend()`, call `get_process_event_bus().add_callback(self._on_process_event)`
-- `_on_process_event()` filters to only these 5 event types and broadcasts via WebSocket:
-
-| ProcessEventType | WS message type | Data |
-|---|---|---|
-| `DELEGATION_START` | `delegation_start` | `detail` |
-| `DELEGATION_TOOL` | `delegation_tool` | `detail` |
-| `DELEGATION_COMPLETE` | `delegation_complete` | `detail` |
-| `CURIOSITY_SELECTED` | `curiosity_selected` | `detail`, `origin` |
-| `MEMORY_EXTRACTION` | `memory_extraction` | `detail` |
-
-No changes needed to `delegate.py`, `curiosity/engine.py`, or `extractor.py` — they already emit to `ProcessEventBus`.
-
-### Frontend: process.js event handlers
-
-| WS Event | Panel Behavior |
-|----------|----------------|
-| `delegation_start` | Add "Asking for help with a task" node (blue dot) inside current round, detail = task summary |
-| `delegation_tool` | Add "Delegate: {tool_name}" node (blue dot) inside current round |
-| `delegation_complete` | Add "Got the help he needed" node (blue dot) inside current round, detail = rounds + duration |
-| `curiosity_selected` | Add "Got curious about something" node (green dot), detail = goal text |
-| `memory_extraction` | Add "Reflecting on what to remember" / "Kept N memories" node (green dot) |
-
-### Why callback bridge instead of dual-emit
-
-The alternative — adding `EngineEventType` values and modifying each emitting module to also emit `EngineEvent` — would require:
-- Passing engine references through delegate/curiosity/extractor call chains
-- 5 new enum values in engine/events.py
-- Modifying 3 additional backend files
-
-The callback approach touches only 2 files (`process_panel.py`, `web_server.py`) and requires zero changes to the emitting code.
-
----
-
-## Summary
-
-| Component | Effort | Risk |
-|-----------|--------|------|
-| WS bridge additions (2 EngineEvent + 5 ProcessEvent) | Small | Low — additive forwarding |
-| ProcessEventBus callback mechanism | Small | Low — 10 lines, no existing behavior changed |
-| HTML sidebar structure | Small | Low — additive |
-| CSS styling + themes | Medium | Low — isolated, uses existing variable pattern |
-| `process.js` module | Medium | Low — follows established patterns, read-only display |
-| Layout adjustment (flex) | Small | Medium — need to verify no regressions on existing layout |
-
-Total: ~5 files touched, 1 new file created. The process panel is entirely additive — no changes to existing functionality.
+This matches the existing structure for user messages.
