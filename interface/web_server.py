@@ -395,6 +395,10 @@ class WebServer:
         if self._temporal_tracker and not self._temporal_tracker.is_session_active:
             self._temporal_tracker.start_session()
 
+        # Check for overdue reminders that may have been missed while offline
+        if self._reminder_scheduler and self._engine:
+            self._check_overdue_reminders()
+
     # -----------------------------------------------------------------------
     # ProcessEventBus callback (delegation / curiosity / memory extraction)
     # -----------------------------------------------------------------------
@@ -496,6 +500,38 @@ class WebServer:
             daemon=True,
         )
         thread.start()
+
+    # -----------------------------------------------------------------------
+    # Boot-time overdue reminder check
+    # -----------------------------------------------------------------------
+    def _check_overdue_reminders(self):
+        """Fire reminders that became due while the app was offline.
+
+        The scheduler thread may have already flipped overdue intentions from
+        PENDING → TRIGGERED before the callback was wired.  This one-time
+        boot check picks up those (and any still-PENDING) so the AI can
+        address them immediately.
+        """
+        try:
+            from agency.intentions.trigger_engine import get_trigger_engine
+
+            engine = get_trigger_engine()
+            # Trigger any PENDING reminders that are past due
+            engine.check_and_trigger(datetime.now(), is_session_start=False)
+
+            # Collect all TRIGGERED reminders (includes ones just triggered
+            # above AND ones the scheduler already flipped before callback existed)
+            from agency.intentions.manager import get_intention_manager
+            overdue = get_intention_manager().get_triggered_intentions()
+
+            if overdue:
+                log_info(
+                    f"Boot check: {len(overdue)} overdue reminder(s) found",
+                    prefix="⏰",
+                )
+                self._on_reminder_fired(overdue)
+        except Exception as e:
+            log_error(f"Boot overdue-reminder check failed: {e}")
 
     # -----------------------------------------------------------------------
     # Reminder callback (called from ReminderScheduler background thread)
