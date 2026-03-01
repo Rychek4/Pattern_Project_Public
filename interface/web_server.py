@@ -431,6 +431,26 @@ class WebServer:
 
         return _forward
 
+    async def _send_initial_dev_state(self, ws: WebSocket):
+        """Send current thoughts/curiosity/intentions state to a newly-connected dev client."""
+        from interface.dev_events import (
+            get_initial_active_thoughts_data,
+            get_initial_curiosity_data,
+            get_initial_intentions_data,
+            _serialize,
+        )
+
+        for event_type, getter in [
+            ("active_thoughts", get_initial_active_thoughts_data),
+            ("curiosity", get_initial_curiosity_data),
+            ("intentions", get_initial_intentions_data),
+        ]:
+            data = getter()
+            if data is not None:
+                msg = _serialize(data)
+                msg["type"] = f"dev_{event_type}"
+                await ws.send_json(msg)
+
     def _forward_dev_engine_event(self, event: EngineEvent):
         """Forward dev-relevant engine events to the DevEventBus emit functions."""
         from interface.dev_events import emit_prompt_assembly, emit_response_pass, emit_command_executed
@@ -912,6 +932,7 @@ class WebServer:
                     return
 
             await server.dev_manager.accept(ws)
+            await server._send_initial_dev_state(ws)
             try:
                 while True:
                     await ws.receive_text()  # Keep alive; no client→server msgs
