@@ -37,6 +37,8 @@ from config import (
     MEMORY_DEDUP_ENABLED,
     MEMORY_DEDUP_THRESHOLD,
     MEMORY_OVERFETCH_MULTIPLIER,
+    MEMORY_CHUNK_MIN_WORDS,
+    MEMORY_TOPIC_SHIFT_MARKERS,
     WARMTH_RETRIEVAL_INITIAL,
     WARMTH_RETRIEVAL_DECAY,
     WARMTH_TOPIC_INITIAL,
@@ -46,6 +48,7 @@ from config import (
     WARMTH_TOPIC_MAX_EXPANSION
 )
 from core.embeddings import cosine_similarity, cosine_similarity_batch
+import re
 import numpy as np
 
 
@@ -287,11 +290,14 @@ class SemanticMemorySource(ContextSource):
 
         Pipeline:
         1. Decay all warmth scores (per-turn decay)
+        1b. Split input into topic chunks (paragraphs + topic-shift markers)
+            - Single chunk: standard retrieval (steps 2-8 unchanged)
+            - Multiple chunks: per-chunk retrieval with scaled 5+5 budget
         2. Over-fetch memories (2.4x limit) from both categories (no floor — applied later)
         3. Apply warmth boosts (multiplicative) and re-rank by adjusted scores
         4. Filter by min_score on ADJUSTED score (warmth can rescue borderline memories)
         5. Deduplicate (using adjusted scores to preserve warmth ranking)
-        6. Take top N per category
+        6. Take top N per category (scaled for multi-topic)
         7. Update retrieval warmth for returned memories
         8. Expand topic warmth to associated memories
         """
@@ -301,26 +307,70 @@ class SemanticMemorySource(ContextSource):
         # Step 1: Decay warmth from previous turn
         self._warmth_cache.decay_all()
 
-        # Calculate over-fetch limits
+        # Calculate over-fetch limits (per-query, used for both paths)
         overfetch_episodic = int(self.max_episodic * MEMORY_OVERFETCH_MULTIPLIER)
         overfetch_factual = int(self.max_factual * MEMORY_OVERFETCH_MULTIPLIER)
 
-        # Step 2: Over-fetch from both categories with NO floor.
-        # The relevance floor is applied AFTER warmth boosting (step 4) so that
-        # warm memories with base scores slightly below the floor can survive.
-        episodic_results = vector_store.search(
-            query=user_input,
-            limit=overfetch_episodic,
-            memory_category="episodic",
-            min_score=0.0
-        )
+        # Step 1b: Split input into topic chunks for multi-topic retrieval
+        chunks = self._split_into_topic_chunks(user_input)
+        is_multi_topic = len(chunks) > 1
 
-        factual_results = vector_store.search(
-            query=user_input,
-            limit=overfetch_factual,
-            memory_category="factual",
-            min_score=0.0
-        )
+        if is_multi_topic:
+            # Step 2 (multi-topic): Retrieve per chunk, merge by memory ID.
+            # Each chunk gets its own retrieval pass. When the same memory
+            # appears across chunks, keep the version with the highest score.
+            episodic_by_id: Dict[int, MemorySearchResult] = {}
+            factual_by_id: Dict[int, MemorySearchResult] = {}
+
+            for chunk in chunks:
+                chunk_episodic = vector_store.search(
+                    query=chunk,
+                    limit=overfetch_episodic,
+                    memory_category="episodic",
+                    min_score=0.0
+                )
+                chunk_factual = vector_store.search(
+                    query=chunk,
+                    limit=overfetch_factual,
+                    memory_category="factual",
+                    min_score=0.0
+                )
+
+                for r in chunk_episodic:
+                    existing = episodic_by_id.get(r.memory.id)
+                    if existing is None or r.combined_score > existing.combined_score:
+                        episodic_by_id[r.memory.id] = r
+
+                for r in chunk_factual:
+                    existing = factual_by_id.get(r.memory.id)
+                    if existing is None or r.combined_score > existing.combined_score:
+                        factual_by_id[r.memory.id] = r
+
+            episodic_results = list(episodic_by_id.values())
+            factual_results = list(factual_by_id.values())
+
+            # Budget scales with chunk count: 5+5 per topic chunk
+            effective_max_episodic = self.max_episodic * len(chunks)
+            effective_max_factual = self.max_factual * len(chunks)
+        else:
+            # Step 2 (single-topic): Existing behavior, unchanged.
+            # Over-fetch from both categories with NO floor.
+            # The relevance floor is applied AFTER warmth boosting (step 4) so
+            # that warm memories with base scores slightly below floor survive.
+            episodic_results = vector_store.search(
+                query=user_input,
+                limit=overfetch_episodic,
+                memory_category="episodic",
+                min_score=0.0
+            )
+            factual_results = vector_store.search(
+                query=user_input,
+                limit=overfetch_factual,
+                memory_category="factual",
+                min_score=0.0
+            )
+            effective_max_episodic = self.max_episodic
+            effective_max_factual = self.max_factual
 
         # Step 3: Apply multiplicative warmth boosts and re-rank
         # Returns 4-tuples: (result, warmth, entry, adjusted_score)
@@ -340,9 +390,9 @@ class SemanticMemorySource(ContextSource):
             episodic_with_warmth = self._deduplicate_results(episodic_with_warmth)
             factual_with_warmth = self._deduplicate_results(factual_with_warmth)
 
-        # Step 6: Take top N after warmth-based re-ranking
-        episodic_final = episodic_with_warmth[:self.max_episodic]
-        factual_final = factual_with_warmth[:self.max_factual]
+        # Step 6: Take top N after warmth-based re-ranking (scaled for multi-topic)
+        episodic_final = episodic_with_warmth[:effective_max_episodic]
+        factual_final = factual_with_warmth[:effective_max_factual]
 
         # Extract just the results for formatting
         episodic_results = [r for r, _, _, _ in episodic_final]
@@ -440,7 +490,8 @@ class SemanticMemorySource(ContextSource):
             "promotion_candidates": len(promotion_candidates),
             "top_score": max((r.combined_score for r in all_results), default=0),
             "warmth_cache_size": self._warmth_cache.get_stats()["total_entries"],
-            "topic_warmed_count": topic_warmed_count
+            "topic_warmed_count": topic_warmed_count,
+            "topic_chunks": len(chunks)
         }
 
         # Return None - memories are injected into user message, not system prompt
@@ -553,6 +604,75 @@ class SemanticMemorySource(ContextSource):
                 kept.append(item)
 
         return kept
+
+    def _split_into_topic_chunks(self, user_input: str) -> List[str]:
+        """
+        Split user input into topic-aligned chunks for multi-query retrieval.
+
+        Splitting strategy:
+        1. Split on paragraph boundaries (double newlines)
+        2. Within each paragraph, split on topic-shift markers preceded by punctuation
+        3. Merge runt chunks (below MEMORY_CHUNK_MIN_WORDS) into their neighbor
+
+        Returns the original input as a single-item list if no meaningful splits
+        are found, preserving the existing single-topic retrieval path.
+        """
+        # Step 1: Split on paragraph boundaries
+        paragraphs = [p.strip() for p in user_input.split('\n\n') if p.strip()]
+        if not paragraphs:
+            return [user_input]
+
+        # Step 2: Within each paragraph, split on topic-shift markers
+        chunks = []
+        if MEMORY_TOPIC_SHIFT_MARKERS:
+            # Sort markers longest-first so "on another note" matches before "on"
+            sorted_markers = sorted(MEMORY_TOPIC_SHIFT_MARKERS, key=len, reverse=True)
+            marker_pattern = '|'.join(re.escape(m) for m in sorted_markers)
+            # Split at whitespace between punctuation and a topic-shift marker.
+            # Lookbehind ensures the marker follows sentence-ending punctuation
+            # or a comma, avoiding false positives like "I also like gardening".
+            shift_pattern = re.compile(
+                r'(?<=[.!?,;])\s+(?=(?:' + marker_pattern + r')\b)',
+                re.IGNORECASE
+            )
+            for paragraph in paragraphs:
+                parts = shift_pattern.split(paragraph)
+                chunks.extend(p.strip() for p in parts if p.strip())
+        else:
+            chunks = paragraphs
+
+        # Step 3: Merge runt chunks below minimum word count
+        if len(chunks) > 1:
+            chunks = self._merge_runt_chunks(chunks)
+
+        # If splitting produced only 1 chunk, return original input
+        return chunks if len(chunks) > 1 else [user_input]
+
+    @staticmethod
+    def _merge_runt_chunks(chunks: List[str]) -> List[str]:
+        """
+        Merge chunks below MEMORY_CHUNK_MIN_WORDS into their neighbor.
+
+        Short fragments produce poor embeddings. This merges them into the
+        adjacent chunk to maintain embedding quality.
+        """
+        if len(chunks) <= 1:
+            return chunks
+
+        merged = []
+        for chunk in chunks:
+            if len(chunk.split()) < MEMORY_CHUNK_MIN_WORDS and merged:
+                # Too short — merge into previous chunk
+                merged[-1] = merged[-1] + " " + chunk
+            else:
+                merged.append(chunk)
+
+        # If the last chunk is also a runt, merge it backward
+        if len(merged) > 1 and len(merged[-1].split()) < MEMORY_CHUNK_MIN_WORDS:
+            merged[-2] = merged[-2] + " " + merged[-1]
+            merged.pop()
+
+        return merged
 
     def _get_type_indicator(self, memory_type: Optional[str]) -> str:
         """Get emoji indicator for memory type."""
