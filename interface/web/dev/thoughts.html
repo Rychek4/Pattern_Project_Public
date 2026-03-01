@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Active Thoughts - Dev Tools</title>
+    <link rel="stylesheet" href="/static/dev/dev-common.css">
+    <style>
+        .thought-card {
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+        }
+        .rank-badge {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+        .rank-high { background: rgba(74, 222, 128, 0.2); color: var(--success); }
+        .rank-mid { background: rgba(245, 158, 11, 0.2); color: var(--warning); }
+        .rank-low { background: rgba(136, 136, 136, 0.15); color: var(--text-dim); }
+        .thought-body { flex: 1; min-width: 0; }
+        .thought-slug {
+            font-family: monospace;
+            font-size: 11px;
+            color: var(--purple);
+            margin-bottom: 2px;
+        }
+        .thought-topic {
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        .thought-elaboration {
+            font-size: 12px;
+            color: var(--text-dim);
+            line-height: 1.4;
+        }
+    </style>
+</head>
+<body>
+    <div class="dev-header">
+        <a href="/dev" class="back-link">&larr; Dev Tools</a>
+        <h1>Active Thoughts</h1>
+        <span class="subtitle">Current ranked thought list</span>
+        <div class="spacer"></div>
+        <span class="stat-value" id="thought-count">0</span>
+        <span class="stat-label">thoughts</span>
+        <span class="timestamp" id="last-update" style="margin-left:12px"></span>
+        <div class="status-dot"></div>
+    </div>
+    <div class="dev-content">
+        <div id="thoughts" class="scroll-container">
+            <div class="empty-state">Waiting for active thoughts...</div>
+        </div>
+    </div>
+
+    <script src="/static/dev/dev-common.js"></script>
+    <script>
+    function rankClass(rank) {
+        if (rank <= 3) return 'rank-high';
+        if (rank <= 6) return 'rank-mid';
+        return 'rank-low';
+    }
+
+    DevConnection.on('dev_active_thoughts', (msg) => {
+        const thoughts = msg.thoughts || [];
+        const timestamp = msg.timestamp || '';
+
+        document.getElementById('thought-count').textContent = thoughts.length;
+        document.getElementById('last-update').textContent = DevUtils.formatTime(timestamp);
+
+        const container = document.getElementById('thoughts');
+        container.innerHTML = '';
+
+        if (thoughts.length === 0) {
+            container.innerHTML = '<div class="empty-state">No active thoughts</div>';
+            return;
+        }
+
+        thoughts.forEach(t => {
+            const card = document.createElement('div');
+            card.className = 'card';
+
+            const inner = document.createElement('div');
+            inner.className = 'thought-card';
+
+            // Rank badge
+            const rankEl = document.createElement('div');
+            rankEl.className = `rank-badge ${rankClass(t.rank || 99)}`;
+            rankEl.textContent = t.rank || '?';
+            inner.appendChild(rankEl);
+
+            // Body
+            const body = document.createElement('div');
+            body.className = 'thought-body';
+
+            if (t.slug) {
+                const slug = document.createElement('div');
+                slug.className = 'thought-slug';
+                slug.textContent = t.slug;
+                body.appendChild(slug);
+            }
+
+            const topic = document.createElement('div');
+            topic.className = 'thought-topic';
+            topic.textContent = t.topic || 'Untitled';
+            body.appendChild(topic);
+
+            if (t.elaboration) {
+                const elab = document.createElement('div');
+                elab.className = 'thought-elaboration';
+                elab.textContent = t.elaboration;
+                body.appendChild(elab);
+            }
+
+            inner.appendChild(body);
+            card.appendChild(inner);
+            container.appendChild(card);
+        });
+    });
+    </script>
+</body>
+</html>

@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Response Pipeline - Dev Tools</title>
+    <link rel="stylesheet" href="/static/dev/dev-common.css">
+</head>
+<body>
+    <div class="dev-header">
+        <a href="/dev" class="back-link">&larr; Dev Tools</a>
+        <h1>Response Pipeline</h1>
+        <span class="subtitle">Multi-pass response processing</span>
+        <div class="spacer"></div>
+        <span class="stat-value" id="pass-count">0</span>
+        <span class="stat-label">passes</span>
+        <div class="status-dot"></div>
+    </div>
+    <div class="dev-content">
+        <div class="stats-bar" id="totals">
+            <div class="stat-item">
+                <span class="stat-label">Total in:</span>
+                <span class="stat-value" id="total-in">0</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Total out:</span>
+                <span class="stat-value" id="total-out">0</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Total time:</span>
+                <span class="stat-value" id="total-time">0ms</span>
+            </div>
+        </div>
+        <div id="passes" class="scroll-container">
+            <div class="empty-state">Waiting for response passes...</div>
+        </div>
+    </div>
+
+    <script src="/static/dev/dev-common.js"></script>
+    <script>
+    let passCount = 0;
+    let totalIn = 0;
+    let totalOut = 0;
+    let totalTime = 0;
+
+    DevConnection.on('dev_response_pass', (msg) => {
+        const container = document.getElementById('passes');
+        if (passCount === 0) container.innerHTML = '';
+        passCount++;
+        totalIn += msg.tokens_in || 0;
+        totalOut += msg.tokens_out || 0;
+        totalTime += msg.duration_ms || 0;
+
+        document.getElementById('pass-count').textContent = passCount;
+        document.getElementById('total-in').textContent = totalIn.toLocaleString();
+        document.getElementById('total-out').textContent = totalOut.toLocaleString();
+        document.getElementById('total-time').textContent = `${Math.round(totalTime)}ms`;
+
+        const card = document.createElement('div');
+        card.className = 'card';
+
+        // Header
+        const header = document.createElement('div');
+        header.className = 'card-header';
+
+        header.appendChild(DevUtils.badge(`Pass ${msg.pass_number || passCount}`, 'badge-purple'));
+
+        const provider = document.createElement('h3');
+        provider.textContent = msg.provider || 'unknown';
+        header.appendChild(provider);
+
+        const ts = document.createElement('span');
+        ts.className = 'timestamp';
+        ts.textContent = DevUtils.formatTime(msg.timestamp);
+        header.appendChild(ts);
+
+        card.appendChild(header);
+
+        // Stats
+        const statsHtml = [];
+        if (msg.tokens_in) statsHtml.push(`<span class="label">In:</span> <span class="value">${msg.tokens_in.toLocaleString()}</span>`);
+        if (msg.tokens_out) statsHtml.push(`<span class="label">Out:</span> <span class="value">${msg.tokens_out.toLocaleString()}</span>`);
+        if (msg.duration_ms) statsHtml.push(`<span class="label">Time:</span> <span class="value">${Math.round(msg.duration_ms)}ms</span>`);
+
+        if (statsHtml.length > 0) {
+            const statsRow = document.createElement('div');
+            statsRow.className = 'stats-bar';
+            statsRow.innerHTML = statsHtml.map(s => `<div class="stat-item">${s}</div>`).join('');
+            card.appendChild(statsRow);
+        }
+
+        // Commands detected
+        const cmds = msg.commands_detected || [];
+        if (cmds.length > 0) {
+            const cmdRow = document.createElement('div');
+            cmdRow.style.marginBottom = '6px';
+            cmds.forEach(cmd => {
+                cmdRow.appendChild(DevUtils.badge(cmd, 'badge-blue'));
+                cmdRow.appendChild(document.createTextNode(' '));
+            });
+            card.appendChild(cmdRow);
+        }
+
+        // Web searches
+        if (msg.web_searches_used > 0) {
+            const webRow = document.createElement('div');
+            webRow.className = 'detail-row';
+            webRow.innerHTML = `<span class="label">Web searches:</span> <span class="value">${msg.web_searches_used}</span>`;
+            card.appendChild(webRow);
+        }
+
+        // Citations
+        const citations = msg.citations || [];
+        if (citations.length > 0) {
+            const citDiv = document.createElement('div');
+            citDiv.style.marginTop = '6px';
+            citations.forEach(cit => {
+                const citCard = document.createElement('div');
+                citCard.style.cssText = 'padding:6px;margin:4px 0;background:var(--surface-alt);border-radius:4px;font-size:11px';
+                let html = '';
+                if (cit.title) html += `<strong>${DevUtils.escapeHtml(cit.title)}</strong>`;
+                if (cit.url) html += ` <a href="${DevUtils.escapeHtml(cit.url)}" target="_blank" style="color:var(--info)">[link]</a>`;
+                if (cit.cited_text) html += `<div style="color:var(--text-dim);margin-top:2px">${DevUtils.escapeHtml(DevUtils.truncate(cit.cited_text, 150))}</div>`;
+                citCard.innerHTML = html;
+                citDiv.appendChild(citCard);
+            });
+            card.appendChild(DevUtils.collapsible(`${citations.length} citation(s)`, citDiv));
+        }
+
+        // Response text collapsible
+        if (msg.response_text) {
+            card.appendChild(DevUtils.collapsible(
+                'Show response text',
+                msg.response_text.substring(0, 2000) + (msg.response_text.length > 2000 ? '\n... (truncated)' : '')
+            ));
+        }
+
+        container.appendChild(card);
+        DevUtils.autoScroll(container);
+    });
+    </script>
+</body>
+</html>

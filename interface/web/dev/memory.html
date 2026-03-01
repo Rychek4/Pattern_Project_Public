@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Memory Recall - Dev Tools</title>
+    <link rel="stylesheet" href="/static/dev/dev-common.css">
+    <style>
+        .score-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+            margin-top: 8px;
+            font-size: 11px;
+        }
+        .score-cell {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .score-cell .score-label {
+            color: var(--text-dim);
+            font-size: 10px;
+        }
+        .memory-content {
+            color: var(--text);
+            font-size: 12px;
+            line-height: 1.4;
+            margin: 6px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="dev-header">
+        <a href="/dev" class="back-link">&larr; Dev Tools</a>
+        <h1>Memory Recall</h1>
+        <span class="subtitle">Semantic memory search results</span>
+        <div class="spacer"></div>
+        <span class="timestamp" id="last-update"></span>
+        <div class="status-dot"></div>
+    </div>
+    <div class="dev-content">
+        <div class="stats-bar" id="stats">
+            <div class="stat-item">
+                <span class="stat-label">Query:</span>
+                <span class="stat-value" id="query-text" style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">-</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Results:</span>
+                <span class="stat-value" id="result-count">0</span>
+            </div>
+        </div>
+        <div id="results" class="scroll-container">
+            <div class="empty-state">Waiting for memory recall...</div>
+        </div>
+    </div>
+
+    <script src="/static/dev/dev-common.js"></script>
+    <script>
+    function scoreColor(score) {
+        if (score >= 0.7) return 'var(--success)';
+        if (score >= 0.4) return 'var(--warning)';
+        return 'var(--text-dim)';
+    }
+
+    function renderScoreBar(value, max = 1.0) {
+        const pct = Math.min(100, Math.max(0, (value / max) * 100));
+        return `<div class="score-bar"><div class="score-bar-fill" style="width:${pct}%;background:${scoreColor(value)}"></div></div>`;
+    }
+
+    DevConnection.on('dev_memory_recall', (msg) => {
+        const results = msg.results || [];
+        const query = msg.query || '';
+        const timestamp = msg.timestamp || '';
+
+        document.getElementById('query-text').textContent = query;
+        document.getElementById('query-text').title = query;
+        document.getElementById('result-count').textContent = results.length;
+        document.getElementById('last-update').textContent = DevUtils.formatTime(timestamp);
+
+        const container = document.getElementById('results');
+        container.innerHTML = '';
+
+        if (results.length === 0) {
+            container.innerHTML = '<div class="empty-state">No results found</div>';
+            return;
+        }
+
+        results.forEach((r, i) => {
+            const card = document.createElement('div');
+            card.className = 'card';
+
+            // Header
+            const header = document.createElement('div');
+            header.className = 'card-header';
+
+            header.appendChild(DevUtils.badge(`#${i + 1}`, 'badge-purple'));
+
+            const adjusted = r.adjusted_score ?? r.combined_score ?? r.semantic_score ?? 0;
+            const scoreEl = document.createElement('span');
+            scoreEl.className = 'stat-value';
+            scoreEl.style.color = scoreColor(adjusted);
+            scoreEl.textContent = adjusted.toFixed(3);
+            header.appendChild(scoreEl);
+
+            if (r.memory_type) {
+                header.appendChild(DevUtils.badge(r.memory_type, 'badge-blue'));
+            }
+
+            card.appendChild(header);
+
+            // Content
+            const content = document.createElement('div');
+            content.className = 'memory-content';
+            content.textContent = DevUtils.truncate(r.content || r.text || '', 300);
+            card.appendChild(content);
+
+            // Scores grid
+            const grid = document.createElement('div');
+            grid.className = 'score-grid';
+
+            const scores = [
+                ['Semantic', r.semantic_score],
+                ['Importance', r.importance_score ?? r.importance],
+                ['Freshness', r.freshness_score],
+                ['Combined', r.combined_score],
+                ['Retrieval Warmth', r.retrieval_warmth],
+                ['Topic Warmth', r.topic_warmth],
+                ['Warmth Boost', r.warmth_boost],
+                ['Adjusted', r.adjusted_score],
+            ];
+
+            scores.forEach(([label, val]) => {
+                if (val === undefined || val === null) return;
+                const cell = document.createElement('div');
+                cell.className = 'score-cell';
+                cell.innerHTML = `
+                    <span class="score-label">${label}: ${Number(val).toFixed(3)}</span>
+                    ${renderScoreBar(Number(val))}
+                `;
+                grid.appendChild(cell);
+            });
+
+            card.appendChild(grid);
+
+            // Full data collapsible
+            card.appendChild(DevUtils.collapsible('Show raw data', DevUtils.stringify(r)));
+
+            container.appendChild(card);
+        });
+    });
+    </script>
+</body>
+</html>

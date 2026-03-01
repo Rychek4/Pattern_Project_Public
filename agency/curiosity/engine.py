@@ -182,13 +182,7 @@ class CuriosityEngine:
             return
 
         try:
-            from interface.dev_window import emit_curiosity_update, get_dev_window
-
-            # Check if dev window is initialized
-            dev_window = get_dev_window()
-            if not dev_window:
-                log_info(f"Curiosity emit skipped: dev window not initialized (event={event})", prefix="🔍")
-                return
+            from interface.dev_events import emit_curiosity_update
 
             # Build goal dict
             goal_dict = {

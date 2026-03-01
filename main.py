@@ -526,6 +526,18 @@ def run_web_mode() -> int:
             temporal_tracker=get_temporal_tracker(),
         )
 
+        # Load initial dev state if dev mode is enabled
+        if config.DEV_MODE_ENABLED:
+            from interface.dev_events import (
+                load_initial_active_thoughts,
+                load_initial_curiosity,
+                load_initial_intentions,
+            )
+            load_initial_active_thoughts()
+            load_initial_curiosity()
+            load_initial_intentions()
+            log_info("Dev mode: initial state loaded for dev tools", prefix="🔧")
+
         # Print ready message
         web_host = getattr(config, "WEB_HOST", "0.0.0.0")
         web_port = getattr(config, "WEB_PORT", 8080)
@@ -540,6 +552,7 @@ def run_web_mode() -> int:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         web_server.manager.set_loop(loop)
+        web_server.dev_manager.set_loop(loop)
 
         uvi_config = uvicorn.Config(
             app=web_server.app,

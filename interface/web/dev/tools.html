@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Tool Execution - Dev Tools</title>
+    <link rel="stylesheet" href="/static/dev/dev-common.css">
+</head>
+<body>
+    <div class="dev-header">
+        <a href="/dev" class="back-link">&larr; Dev Tools</a>
+        <h1>Tool Execution</h1>
+        <span class="subtitle">Command/tool invocations</span>
+        <div class="spacer"></div>
+        <span class="stat-value" id="exec-count">0</span>
+        <span class="stat-label">executed</span>
+        <div class="status-dot"></div>
+    </div>
+    <div class="dev-content">
+        <div id="log" class="scroll-container">
+            <div class="empty-state">Waiting for tool executions...</div>
+        </div>
+    </div>
+
+    <script src="/static/dev/dev-common.js"></script>
+    <script>
+    let execCount = 0;
+
+    DevConnection.on('dev_command_executed', (msg) => {
+        const container = document.getElementById('log');
+
+        // Remove empty state on first event
+        if (execCount === 0) container.innerHTML = '';
+        execCount++;
+        document.getElementById('exec-count').textContent = execCount;
+
+        const card = document.createElement('div');
+        card.className = 'card';
+
+        // Header
+        const header = document.createElement('div');
+        header.className = 'card-header';
+
+        const name = document.createElement('h3');
+        name.textContent = msg.command_name || 'unknown';
+        header.appendChild(name);
+
+        const ts = document.createElement('span');
+        ts.className = 'timestamp';
+        ts.textContent = DevUtils.formatTime(msg.timestamp);
+        header.appendChild(ts);
+
+        if (msg.error) {
+            header.appendChild(DevUtils.badge('ERROR', 'badge-red'));
+        }
+        if (msg.needs_continuation) {
+            header.appendChild(DevUtils.badge('CONTINUES', 'badge-amber'));
+        }
+
+        card.appendChild(header);
+
+        // Query
+        if (msg.query) {
+            const queryRow = document.createElement('div');
+            queryRow.className = 'detail-row';
+            queryRow.innerHTML = `<span class="label">Query:</span>
+                                  <span class="value">${DevUtils.escapeHtml(DevUtils.truncate(msg.query, 100))}</span>`;
+            card.appendChild(queryRow);
+        }
+
+        // Result / Error collapsible
+        const resultText = msg.error || DevUtils.stringify(msg.result_data);
+        if (resultText) {
+            card.appendChild(DevUtils.collapsible(
+                msg.error ? 'Show error' : 'Show result',
+                resultText.substring(0, 3000) + (resultText.length > 3000 ? '\n... (truncated)' : '')
+            ));
+        }
+
+        container.appendChild(card);
+        DevUtils.autoScroll(container);
+    });
+    </script>
+</body>
+</html>

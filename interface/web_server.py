@@ -35,6 +35,7 @@ from interface.process_panel import (
 # Constants
 # ---------------------------------------------------------------------------
 WEB_DIR = Path(__file__).parent / "web"
+DEV_DIR = WEB_DIR / "dev"
 AUTH_COOKIE_NAME = "pattern_session"
 AUTH_COOKIE_MAX_AGE = 7 * 24 * 3600  # 7 days
 
@@ -343,6 +344,7 @@ class WebServer:
         self._processing_lock = threading.Lock()
 
         self.manager = ConnectionManager()
+        self.dev_manager = ConnectionManager()  # Separate WS pool for /ws/dev
         self.app = self._create_app()
 
     # -----------------------------------------------------------------------
@@ -399,6 +401,54 @@ class WebServer:
         if self._reminder_scheduler and self._engine:
             self._check_overdue_reminders()
 
+        # Subscribe to DevEventBus for dev tool pages
+        if config.DEV_MODE_ENABLED:
+            self._wire_dev_event_bus()
+
+    # -----------------------------------------------------------------------
+    # DevEventBus → /ws/dev bridge
+    # -----------------------------------------------------------------------
+    def _wire_dev_event_bus(self):
+        """Subscribe to DevEventBus and forward events to /ws/dev clients."""
+        from interface.dev_events import get_dev_event_bus, _serialize
+
+        bus = get_dev_event_bus()
+        event_types = [
+            "prompt_assembly", "command_executed", "response_pass",
+            "memory_recall", "active_thoughts", "curiosity", "intentions",
+        ]
+        for etype in event_types:
+            bus.add_callback(etype, self._make_dev_forwarder(etype))
+
+    def _make_dev_forwarder(self, event_type: str):
+        """Return a callback that serializes a dev dataclass and broadcasts."""
+        from interface.dev_events import _serialize
+
+        def _forward(data):
+            msg = _serialize(data)
+            msg["type"] = f"dev_{event_type}"
+            self.dev_manager.broadcast_sync(msg)
+
+        return _forward
+
+    def _forward_dev_engine_event(self, event: EngineEvent):
+        """Forward dev-relevant engine events to the DevEventBus emit functions."""
+        from interface.dev_events import emit_prompt_assembly, emit_response_pass, emit_command_executed
+
+        etype = event.event_type
+        data = event.data
+
+        if etype == EngineEventType.PROMPT_ASSEMBLED:
+            blocks = data.get("blocks", [])
+            token_estimate = data.get("token_estimate", 0)
+            emit_prompt_assembly(blocks, token_estimate)
+
+        elif etype == EngineEventType.DEV_RESPONSE_PASS:
+            emit_response_pass(**data)
+
+        elif etype == EngineEventType.DEV_COMMAND_EXECUTED:
+            emit_command_executed(**data)
+
     # -----------------------------------------------------------------------
     # ProcessEventBus callback (delegation / curiosity / memory extraction)
     # -----------------------------------------------------------------------
@@ -418,6 +468,10 @@ class WebServer:
         msg = _engine_event_to_ws(event)
         if msg:
             self.broadcast_sync(msg)
+
+        # Forward dev-relevant engine events to DevEventBus
+        if config.DEV_MODE_ENABLED:
+            self._forward_dev_engine_event(event)
 
         # Track processing state (mirrors GUI._on_engine_event)
         if event.event_type == EngineEventType.PROCESSING_COMPLETE:
@@ -842,6 +896,55 @@ class WebServer:
             except Exception as e:
                 log_error(f"WebSocket error: {e}")
                 server.manager.disconnect(ws)
+
+        # --- Dev tools WebSocket + pages ---
+
+        @app.websocket("/ws/dev")
+        async def dev_websocket_endpoint(ws: WebSocket):
+            if not config.DEV_MODE_ENABLED:
+                await ws.close(code=4003, reason="Dev mode not enabled")
+                return
+            # Auth check
+            if _auth_required():
+                token = ws.cookies.get(AUTH_COOKIE_NAME, "")
+                if not _validate_session(token):
+                    await ws.close(code=4001, reason="Unauthorized")
+                    return
+
+            await server.dev_manager.accept(ws)
+            try:
+                while True:
+                    await ws.receive_text()  # Keep alive; no client→server msgs
+            except WebSocketDisconnect:
+                server.dev_manager.disconnect(ws)
+            except Exception as e:
+                log_error(f"Dev WebSocket error: {e}")
+                server.dev_manager.disconnect(ws)
+
+        @app.get("/dev", response_class=HTMLResponse)
+        async def dev_index():
+            if not config.DEV_MODE_ENABLED:
+                raise HTTPException(404, "Dev mode not enabled")
+            html = DEV_DIR / "index.html"
+            if html.exists():
+                return HTMLResponse(html.read_text())
+            raise HTTPException(404, "Dev index page not found")
+
+        _DEV_PAGES = ["prompt", "tools", "pipeline", "memory", "thoughts", "curiosity", "intentions"]
+
+        @app.get("/dev/{page}", response_class=HTMLResponse)
+        async def dev_page(page: str):
+            if not config.DEV_MODE_ENABLED:
+                raise HTTPException(404, "Dev mode not enabled")
+            if page not in _DEV_PAGES:
+                raise HTTPException(404, f"Unknown dev page: {page}")
+            html = DEV_DIR / f"{page}.html"
+            if html.exists():
+                return HTMLResponse(html.read_text())
+            raise HTTPException(404, f"Dev page not found: {page}")
+
+        # Dev static files (CSS/JS) are served via the existing /static mount
+        # since dev/ is a subdirectory of web/ → /static/dev/dev-common.js etc.
 
         # --- REST API (ported from http_api.py) ---
 
