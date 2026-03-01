@@ -412,7 +412,7 @@ class SemanticMemorySource(ContextSource):
 
         # Emit memory recall to dev window with warmth info
         if config.DEV_MODE_ENABLED and all_results:
-            from interface.dev_window import emit_memory_recall
+            from interface.dev_events import emit_memory_recall
             warmth_stats = self._warmth_cache.get_stats()
             recall_data = []
             for r in all_results:

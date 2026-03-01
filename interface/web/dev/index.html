@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Dev Tools - Pattern Project</title>
+    <link rel="stylesheet" href="/static/dev/dev-common.css">
+</head>
+<body>
+    <div class="dev-header">
+        <h1>Dev Tools</h1>
+        <span class="subtitle">Internal debugging panels</span>
+        <div class="spacer"></div>
+        <div class="status-dot"></div>
+    </div>
+    <div class="dev-content">
+        <div class="dev-grid">
+            <a class="card" href="/dev/prompt" target="_blank">
+                <h3>Prompt Assembly</h3>
+                <p>Context blocks assembled for each prompt, with source names, priorities, and token estimates.</p>
+            </a>
+            <a class="card" href="/dev/tools" target="_blank">
+                <h3>Tool Execution</h3>
+                <p>Tool/command invocations with input queries, results, errors, and continuation flags.</p>
+            </a>
+            <a class="card" href="/dev/pipeline" target="_blank">
+                <h3>Response Pipeline</h3>
+                <p>Multi-pass response processing with token counts, durations, web searches, and citations.</p>
+            </a>
+            <a class="card" href="/dev/memory" target="_blank">
+                <h3>Memory Recall</h3>
+                <p>Semantic memory search results with scores, warmth boosts, and relevance breakdowns.</p>
+            </a>
+            <a class="card" href="/dev/thoughts" target="_blank">
+                <h3>Active Thoughts</h3>
+                <p>Current ranked active thoughts with slugs, topics, and elaboration text.</p>
+            </a>
+            <a class="card" href="/dev/curiosity" target="_blank">
+                <h3>Curiosity Engine</h3>
+                <p>Current goal, goal history, cooldowns, and curiosity event tracking.</p>
+            </a>
+            <a class="card" href="/dev/intentions" target="_blank">
+                <h3>Intentions</h3>
+                <p>Active reminders and goals with trigger info, status, priority, and timestamps.</p>
+            </a>
+        </div>
+    </div>
+    <script src="/static/dev/dev-common.js"></script>
+</body>
+</html>

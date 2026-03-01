@@ -114,7 +114,7 @@ class SetThoughtsHandler(CommandHandler):
     def _emit_to_dev_window(self, thoughts: list) -> None:
         """Emit update to dev window if active."""
         try:
-            from interface.dev_window import emit_active_thoughts_update
+            from interface.dev_events import emit_active_thoughts_update
             emit_active_thoughts_update(thoughts)
         except ImportError:
             # Dev window not available (e.g., CLI mode)

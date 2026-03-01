@@ -915,7 +915,7 @@ class ChatWindow(QMainWindow):
             get_process_event_bus().emit_event(ProcessEventType.PROMPT_ASSEMBLED)
             # Forward to dev window if enabled
             if config.DEV_MODE_ENABLED:
-                from interface.dev_window import emit_prompt_assembly
+                from interface.dev_events import emit_prompt_assembly
                 blocks_data = data.get("blocks", [])
                 total_tokens = data.get("token_estimate", 0)
                 emit_prompt_assembly(blocks_data, total_tokens)
@@ -1909,7 +1909,7 @@ class ChatWindow(QMainWindow):
 
             # Emit prompt assembly to dev window
             if config.DEV_MODE_ENABLED:
-                from interface.dev_window import emit_prompt_assembly
+                from interface.dev_events import emit_prompt_assembly
                 blocks_data = [
                     {
                         "source_name": block.source_name,
@@ -2115,7 +2115,7 @@ class ChatWindow(QMainWindow):
                 # Set up dev callbacks
                 dev_callbacks = None
                 if config.DEV_MODE_ENABLED:
-                    from interface.dev_window import emit_response_pass, emit_command_executed
+                    from interface.dev_events import emit_response_pass, emit_command_executed
                     dev_callbacks = {
                         "emit_response_pass": emit_response_pass,
                         "emit_command_executed": emit_command_executed
@@ -2225,7 +2225,7 @@ class ChatWindow(QMainWindow):
 
             # Emit to dev window
             if config.DEV_MODE_ENABLED:
-                from interface.dev_window import emit_response_pass, emit_command_executed
+                from interface.dev_events import emit_response_pass, emit_command_executed
                 tool_names = [tc.name for tc in current_response.tool_calls] if current_response.has_tool_calls() else []
                 emit_response_pass(
                     pass_number=pass_num,
@@ -2438,7 +2438,7 @@ class ChatWindow(QMainWindow):
                 # Set up dev window callbacks for tool/response tracking
                 dev_callbacks = None
                 if config.DEV_MODE_ENABLED:
-                    from interface.dev_window import emit_response_pass, emit_command_executed
+                    from interface.dev_events import emit_response_pass, emit_command_executed
                     dev_callbacks = {
                         "emit_response_pass": emit_response_pass,
                         "emit_command_executed": emit_command_executed
@@ -2915,7 +2915,7 @@ class ChatWindow(QMainWindow):
                 # Set up dev window callbacks for tool/response tracking
                 dev_callbacks = None
                 if config.DEV_MODE_ENABLED:
-                    from interface.dev_window import emit_response_pass, emit_command_executed
+                    from interface.dev_events import emit_response_pass, emit_command_executed
                     dev_callbacks = {
                         "emit_response_pass": emit_response_pass,
                         "emit_command_executed": emit_command_executed

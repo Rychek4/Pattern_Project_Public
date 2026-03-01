@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Intentions - Dev Tools</title>
+    <link rel="stylesheet" href="/static/dev/dev-common.css">
+    <style>
+        .status-summary {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .status-chip {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 12px;
+            background: var(--surface-alt);
+        }
+        .status-chip .count { font-weight: 700; }
+        .intention-card { border-left: 3px solid var(--border); padding-left: 12px; }
+        .intention-card.triggered { border-left-color: var(--warning); }
+        .intention-card.pending { border-left-color: var(--info); }
+        .intention-card.completed { border-left-color: var(--success); }
+        .intention-card.dismissed { border-left-color: var(--text-dim); }
+        .intention-content { font-size: 13px; margin: 4px 0; }
+        .intention-meta {
+            font-size: 11px;
+            color: var(--text-dim);
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .section-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin: 16px 0 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="dev-header">
+        <a href="/dev" class="back-link">&larr; Dev Tools</a>
+        <h1>Intentions</h1>
+        <span class="subtitle">Reminders and goals</span>
+        <div class="spacer"></div>
+        <span class="timestamp" id="last-update"></span>
+        <div class="status-dot"></div>
+    </div>
+    <div class="dev-content scroll-container">
+        <div id="summary" class="stats-bar" style="display:none">
+            <div class="status-summary" id="status-summary"></div>
+        </div>
+        <div id="content">
+            <div class="empty-state">Waiting for intentions data...</div>
+        </div>
+    </div>
+
+    <script src="/static/dev/dev-common.js"></script>
+    <script>
+    const STATUS_ORDER = ['triggered', 'pending', 'completed', 'dismissed'];
+    const STATUS_BADGE = {
+        'triggered': 'badge-amber',
+        'pending': 'badge-blue',
+        'completed': 'badge-green',
+        'dismissed': 'badge-dim',
+    };
+    const STATUS_LABEL = {
+        'triggered': 'Triggered',
+        'pending': 'Pending',
+        'completed': 'Completed',
+        'dismissed': 'Dismissed',
+    };
+
+    DevConnection.on('dev_intentions', (msg) => {
+        const intentions = msg.intentions || [];
+        const timestamp = msg.timestamp || '';
+
+        document.getElementById('last-update').textContent = DevUtils.formatTime(timestamp);
+
+        // Group by status
+        const groups = {};
+        STATUS_ORDER.forEach(s => groups[s] = []);
+        intentions.forEach(i => {
+            const status = (i.status || 'pending').toLowerCase();
+            if (!groups[status]) groups[status] = [];
+            groups[status].push(i);
+        });
+
+        // Summary bar
+        const summaryEl = document.getElementById('status-summary');
+        const summaryBar = document.getElementById('summary');
+        summaryEl.innerHTML = '';
+
+        let hasAny = false;
+        STATUS_ORDER.forEach(status => {
+            const count = groups[status].length;
+            if (count > 0) hasAny = true;
+            const chip = document.createElement('div');
+            chip.className = 'status-chip';
+            chip.innerHTML = `<span class="count">${count}</span> ${STATUS_LABEL[status] || status}`;
+            summaryEl.appendChild(chip);
+        });
+        summaryBar.style.display = hasAny ? 'flex' : 'none';
+
+        // Content
+        const container = document.getElementById('content');
+        container.innerHTML = '';
+
+        if (intentions.length === 0) {
+            container.innerHTML = '<div class="empty-state">No intentions</div>';
+            return;
+        }
+
+        STATUS_ORDER.forEach(status => {
+            const items = groups[status];
+            if (items.length === 0) return;
+
+            const title = document.createElement('div');
+            title.className = 'section-title';
+            title.textContent = `${STATUS_LABEL[status] || status} (${items.length})`;
+            container.appendChild(title);
+
+            items.forEach(intention => {
+                const card = document.createElement('div');
+                card.className = `card intention-card ${status}`;
+
+                // Header
+                const header = document.createElement('div');
+                header.className = 'card-header';
+                header.appendChild(DevUtils.badge(status, STATUS_BADGE[status] || 'badge-dim'));
+                if (intention.type) {
+                    header.appendChild(DevUtils.badge(intention.type, 'badge-purple'));
+                }
+                if (intention.priority) {
+                    const priBadge = intention.priority === 'high' ? 'badge-red' :
+                                     intention.priority === 'medium' ? 'badge-amber' : 'badge-dim';
+                    header.appendChild(DevUtils.badge(intention.priority, priBadge));
+                }
+                card.appendChild(header);
+
+                // Content
+                const content = document.createElement('div');
+                content.className = 'intention-content';
+                content.textContent = intention.content || 'No content';
+                card.appendChild(content);
+
+                // Context
+                if (intention.context) {
+                    const ctx = document.createElement('div');
+                    ctx.style.cssText = 'font-size:11px;color:var(--text-dim);margin-bottom:4px';
+                    ctx.textContent = DevUtils.truncate(intention.context, 150);
+                    card.appendChild(ctx);
+                }
+
+                // Meta
+                const meta = document.createElement('div');
+                meta.className = 'intention-meta';
+
+                if (intention.id) meta.innerHTML += `<span>ID: ${DevUtils.escapeHtml(String(intention.id).substring(0, 8))}</span>`;
+                if (intention.trigger_type) meta.innerHTML += `<span>Trigger: ${DevUtils.escapeHtml(intention.trigger_type)}</span>`;
+                if (intention.trigger_at) meta.innerHTML += `<span>At: ${DevUtils.escapeHtml(intention.trigger_at)}</span>`;
+                if (intention.created_at) meta.innerHTML += `<span>Created: ${DevUtils.escapeHtml(intention.created_at)}</span>`;
+                if (intention.triggered_at) meta.innerHTML += `<span>Triggered: ${DevUtils.escapeHtml(intention.triggered_at)}</span>`;
+                if (intention.completed_at) meta.innerHTML += `<span>Completed: ${DevUtils.escapeHtml(intention.completed_at)}</span>`;
+
+                card.appendChild(meta);
+
+                if (intention.outcome) {
+                    card.appendChild(DevUtils.collapsible('Show outcome', intention.outcome));
+                }
+
+                container.appendChild(card);
+            });
+        });
+    });
+    </script>
+</body>
+</html>

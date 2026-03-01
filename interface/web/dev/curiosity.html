@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Curiosity Engine - Dev Tools</title>
+    <link rel="stylesheet" href="/static/dev/dev-common.css">
+    <style>
+        .goal-card {
+            border-left: 3px solid var(--purple);
+            padding-left: 12px;
+        }
+        .goal-content {
+            font-size: 14px;
+            font-weight: 500;
+            margin: 6px 0;
+        }
+        .goal-meta {
+            font-size: 11px;
+            color: var(--text-dim);
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .section-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin: 16px 0 8px;
+        }
+        .history-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--border);
+            font-size: 12px;
+        }
+        .history-item:last-child { border-bottom: none; }
+    </style>
+</head>
+<body>
+    <div class="dev-header">
+        <a href="/dev" class="back-link">&larr; Dev Tools</a>
+        <h1>Curiosity Engine</h1>
+        <span class="subtitle">Goal tracking and exploration</span>
+        <div class="spacer"></div>
+        <span class="timestamp" id="last-update"></span>
+        <div class="status-dot"></div>
+    </div>
+    <div class="dev-content scroll-container">
+        <div id="content">
+            <div class="empty-state">Waiting for curiosity data...</div>
+        </div>
+    </div>
+
+    <script src="/static/dev/dev-common.js"></script>
+    <script>
+    const STATUS_BADGE = {
+        'active': 'badge-green',
+        'resolved': 'badge-blue',
+        'abandoned': 'badge-dim',
+        'expired': 'badge-amber',
+    };
+
+    DevConnection.on('dev_curiosity', (msg) => {
+        const timestamp = msg.timestamp || '';
+        document.getElementById('last-update').textContent = DevUtils.formatTime(timestamp);
+
+        const container = document.getElementById('content');
+        container.innerHTML = '';
+
+        // Event badge
+        if (msg.event) {
+            const eventRow = document.createElement('div');
+            eventRow.style.marginBottom = '12px';
+            eventRow.appendChild(DevUtils.badge(`Event: ${msg.event}`, 'badge-purple'));
+            container.appendChild(eventRow);
+        }
+
+        // Current goal
+        const goal = msg.current_goal;
+        if (goal) {
+            const title = document.createElement('div');
+            title.className = 'section-title';
+            title.textContent = 'Current Goal';
+            container.appendChild(title);
+
+            const card = document.createElement('div');
+            card.className = 'card goal-card';
+
+            const content = document.createElement('div');
+            content.className = 'goal-content';
+            content.textContent = goal.content || 'No content';
+            card.appendChild(content);
+
+            const meta = document.createElement('div');
+            meta.className = 'goal-meta';
+
+            if (goal.id) meta.innerHTML += `<span>ID: <strong>${DevUtils.escapeHtml(goal.id)}</strong></span>`;
+            if (goal.category) {
+                const catSpan = document.createElement('span');
+                catSpan.appendChild(DevUtils.badge(goal.category, 'badge-blue'));
+                meta.appendChild(catSpan);
+            }
+            if (goal.activated_at) meta.innerHTML += `<span>Activated: ${DevUtils.escapeHtml(goal.activated_at)}</span>`;
+            card.appendChild(meta);
+
+            if (goal.context) {
+                card.appendChild(DevUtils.collapsible('Show context', goal.context));
+            }
+
+            container.appendChild(card);
+        } else {
+            const noGoal = document.createElement('div');
+            noGoal.className = 'empty-state';
+            noGoal.textContent = 'No active goal';
+            noGoal.style.padding = '16px 0';
+            container.appendChild(noGoal);
+        }
+
+        // History
+        const history = msg.history || [];
+        if (history.length > 0) {
+            const title = document.createElement('div');
+            title.className = 'section-title';
+            title.textContent = `History (${history.length})`;
+            container.appendChild(title);
+
+            const card = document.createElement('div');
+            card.className = 'card';
+
+            history.forEach(h => {
+                const item = document.createElement('div');
+                item.className = 'history-item';
+
+                const badge = DevUtils.badge(h.status || 'unknown', STATUS_BADGE[h.status] || 'badge-dim');
+                item.appendChild(badge);
+
+                const text = document.createElement('span');
+                text.style.flex = '1';
+                text.textContent = DevUtils.truncate(h.content || '', 120);
+                item.appendChild(text);
+
+                if (h.resolved_at) {
+                    const time = document.createElement('span');
+                    time.className = 'timestamp';
+                    time.textContent = h.resolved_at;
+                    item.appendChild(time);
+                }
+
+                card.appendChild(item);
+            });
+
+            container.appendChild(card);
+        }
+
+        // Cooldowns
+        const cooldowns = msg.cooldowns || [];
+        if (cooldowns.length > 0) {
+            const title = document.createElement('div');
+            title.className = 'section-title';
+            title.textContent = `Cooldowns (${cooldowns.length})`;
+            container.appendChild(title);
+
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.appendChild(DevUtils.collapsible('Show cooldowns', DevUtils.stringify(cooldowns)));
+            container.appendChild(card);
+        }
+    });
+    </script>
+</body>
+</html>

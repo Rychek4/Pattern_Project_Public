@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Prompt Assembly - Dev Tools</title>
+    <link rel="stylesheet" href="/static/dev/dev-common.css">
+</head>
+<body>
+    <div class="dev-header">
+        <a href="/dev" class="back-link">&larr; Dev Tools</a>
+        <h1>Prompt Assembly</h1>
+        <span class="subtitle">Context blocks per prompt</span>
+        <div class="spacer"></div>
+        <span class="timestamp" id="last-update"></span>
+        <div class="status-dot"></div>
+    </div>
+    <div class="dev-content">
+        <div class="stats-bar" id="stats">
+            <div class="stat-item">
+                <span class="stat-label">Blocks:</span>
+                <span class="stat-value" id="block-count">0</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Est. tokens:</span>
+                <span class="stat-value" id="token-count">0</span>
+            </div>
+        </div>
+        <div id="blocks" class="scroll-container">
+            <div class="empty-state">Waiting for prompt assembly...</div>
+        </div>
+    </div>
+
+    <script src="/static/dev/dev-common.js"></script>
+    <script>
+    const PRIORITY_COLORS = {
+        'critical': 'badge-red',
+        'high': 'badge-amber',
+        'medium': 'badge-blue',
+        'low': 'badge-dim',
+    };
+
+    function priorityBadgeClass(priority) {
+        if (typeof priority === 'number') {
+            if (priority >= 90) return 'badge-red';
+            if (priority >= 70) return 'badge-amber';
+            if (priority >= 40) return 'badge-blue';
+            return 'badge-dim';
+        }
+        return PRIORITY_COLORS[String(priority).toLowerCase()] || 'badge-dim';
+    }
+
+    DevConnection.on('dev_prompt_assembly', (msg) => {
+        const blocks = msg.context_blocks || [];
+        const totalTokens = msg.total_tokens_estimate || 0;
+        const timestamp = msg.timestamp || '';
+
+        document.getElementById('block-count').textContent = blocks.length;
+        document.getElementById('token-count').textContent = totalTokens.toLocaleString();
+        document.getElementById('last-update').textContent = DevUtils.formatTime(timestamp);
+
+        const container = document.getElementById('blocks');
+        container.innerHTML = '';
+
+        if (blocks.length === 0) {
+            container.innerHTML = '<div class="empty-state">No context blocks</div>';
+            return;
+        }
+
+        blocks.forEach((block, i) => {
+            const card = document.createElement('div');
+            card.className = 'card';
+
+            const header = document.createElement('div');
+            header.className = 'card-header';
+
+            const name = document.createElement('h3');
+            name.textContent = block.source_name || `Block ${i + 1}`;
+            header.appendChild(name);
+
+            const badge = DevUtils.badge(
+                String(block.priority ?? 'N/A'),
+                priorityBadgeClass(block.priority)
+            );
+            header.appendChild(badge);
+
+            if (block.metadata) {
+                const metaKeys = Object.keys(block.metadata);
+                if (metaKeys.length > 0) {
+                    const metaBadge = DevUtils.badge(`${metaKeys.length} meta`, 'badge-dim');
+                    header.appendChild(metaBadge);
+                }
+            }
+
+            card.appendChild(header);
+
+            // Content preview + collapsible full
+            const content = block.content || '';
+            const estTokens = Math.round(content.length / 4);
+
+            const detail = document.createElement('div');
+            detail.className = 'detail-row';
+            detail.innerHTML = `<span class="label">~${estTokens.toLocaleString()} tokens</span>
+                                <span class="label">${content.length.toLocaleString()} chars</span>`;
+            card.appendChild(detail);
+
+            if (content) {
+                card.appendChild(DevUtils.collapsible(
+                    'Show content',
+                    content.substring(0, 2000) + (content.length > 2000 ? '\n... (truncated)' : '')
+                ));
+            }
+
+            // Metadata collapsible
+            if (block.metadata && Object.keys(block.metadata).length > 0) {
+                card.appendChild(DevUtils.collapsible(
+                    'Show metadata',
+                    DevUtils.stringify(block.metadata)
+                ));
+            }
+
+            container.appendChild(card);
+        });
+    });
+    </script>
+</body>
+</html>

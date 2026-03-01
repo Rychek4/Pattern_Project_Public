@@ -87,7 +87,7 @@ class IntentionManager:
             return
 
         try:
-            from interface.dev_window import emit_intentions_update
+            from interface.dev_events import emit_intentions_update
 
             # Get all active intentions
             intentions_list = []

@@ -97,7 +97,7 @@ class CuriositySource(ContextSource):
             return
 
         try:
-            from interface.dev_window import emit_curiosity_update
+            from interface.dev_events import emit_curiosity_update
 
             goal_dict = {
                 "id": goal.id,
