@@ -304,10 +304,10 @@ def emit_intentions_update(intentions: List[Dict[str, Any]], event: str = "updat
 # INITIAL LOAD FUNCTIONS
 # =============================================================================
 
-def load_initial_active_thoughts():
-    """Load current active thoughts into the dev event bus on startup."""
+def get_initial_active_thoughts_data() -> Optional[ActiveThoughtsData]:
+    """Gather current active thoughts state. Returns None if unavailable."""
     if not config.DEV_MODE_ENABLED:
-        return
+        return None
     try:
         from agency.active_thoughts import get_active_thoughts_manager
         manager = get_active_thoughts_manager()
@@ -319,24 +319,24 @@ def load_initial_active_thoughts():
                 "topic": t.topic,
                 "elaboration": t.elaboration
             } for t in thoughts]
-            data = ActiveThoughtsData(
+            return ActiveThoughtsData(
                 thoughts=thought_dicts,
                 timestamp="(initial load)"
             )
-            get_dev_event_bus().emit("active_thoughts", data)
     except Exception:
         pass
+    return None
 
 
-def load_initial_curiosity():
-    """Load current curiosity state into the dev event bus on startup."""
+def get_initial_curiosity_data() -> Optional[CuriosityData]:
+    """Gather current curiosity engine state. Returns None if unavailable."""
     if not config.DEV_MODE_ENABLED:
-        return
+        return None
     try:
         from agency.curiosity import is_curiosity_enabled, get_curiosity_engine
 
         if not is_curiosity_enabled():
-            return
+            return None
 
         engine = get_curiosity_engine()
         goal = engine.get_current_goal()
@@ -360,22 +360,22 @@ def load_initial_curiosity():
                     "resolved_at": h.resolved_at.isoformat() if h.resolved_at else ""
                 })
 
-        data = CuriosityData(
+        return CuriosityData(
             current_goal=goal_dict,
             history=history_dicts,
             cooldowns=[],
             timestamp="(initial load)",
             event="initial"
         )
-        get_dev_event_bus().emit("curiosity", data)
     except Exception:
         pass
+    return None
 
 
-def load_initial_intentions():
-    """Load current intentions into the dev event bus on startup."""
+def get_initial_intentions_data() -> Optional[IntentionData]:
+    """Gather current intentions state. Returns None if unavailable."""
     if not config.DEV_MODE_ENABLED:
-        return
+        return None
     try:
         from agency.intentions import get_intention_manager
         manager = get_intention_manager()
@@ -396,11 +396,32 @@ def load_initial_intentions():
                 "completed_at": intention.completed_at.isoformat() if intention.completed_at else None,
                 "outcome": intention.outcome,
             })
-        data = IntentionData(
+        return IntentionData(
             intentions=all_intentions,
             timestamp="(initial load)",
             event="initial"
         )
-        get_dev_event_bus().emit("intentions", data)
     except Exception:
         pass
+    return None
+
+
+def load_initial_active_thoughts():
+    """Load current active thoughts into the dev event bus on startup."""
+    data = get_initial_active_thoughts_data()
+    if data:
+        get_dev_event_bus().emit("active_thoughts", data)
+
+
+def load_initial_curiosity():
+    """Load current curiosity state into the dev event bus on startup."""
+    data = get_initial_curiosity_data()
+    if data:
+        get_dev_event_bus().emit("curiosity", data)
+
+
+def load_initial_intentions():
+    """Load current intentions into the dev event bus on startup."""
+    data = get_initial_intentions_data()
+    if data:
+        get_dev_event_bus().emit("intentions", data)
