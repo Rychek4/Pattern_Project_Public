@@ -499,6 +499,13 @@ class MemoryExtractor:
                 ProcessEventType.MEMORY_EXTRACTION,
                 detail=f"Kept {memories_created} memories"
             )
+            # Old turns have rolled off the context window — clear injected image
+            # tracking so visual memories can be re-injected if recalled again.
+            try:
+                from prompt_builder.sources.semantic_memory import get_semantic_memory_source
+                get_semantic_memory_source().clear_injected_images()
+            except Exception:
+                pass
         except Exception as e:
             import traceback
             duration = (time.time() - start_time) * 1000

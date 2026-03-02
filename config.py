@@ -456,6 +456,18 @@ VISUAL_SCREENSHOT_MODE = os.getenv("VISUAL_SCREENSHOT_MODE", "auto")  # "auto", 
 VISUAL_WEBCAM_MODE = os.getenv("VISUAL_WEBCAM_MODE", "on_demand")  # "auto", "on_demand", "disabled"
 
 # =============================================================================
+# IMAGE MEMORY CONFIGURATION
+# =============================================================================
+# Image memory allows the AI to save images to long-term visual memory.
+# Saved images are stored on disk with a description embedded as a regular
+# memory in the vector store. When a memory with an attached image is recalled
+# (automatically or via search), the image is loaded and injected as multimodal
+# content so the AI can reprocess it with fresh context.
+IMAGE_MEMORY_ENABLED = os.getenv("IMAGE_MEMORY_ENABLED", "true").lower() == "true"
+IMAGE_STORAGE_DIR = DATA_DIR / "images"
+IMAGE_TEMP_DIR = DATA_DIR / "images" / "temp"
+
+# =============================================================================
 # AI COMMAND SYSTEM CONFIGURATION
 # =============================================================================
 COMMAND_MAX_PASSES = 40         # Maximum LLM calls per user message (safety cap; typical queries use 1-3)

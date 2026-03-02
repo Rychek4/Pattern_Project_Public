@@ -57,6 +57,10 @@ def get_tool_definitions(is_pulse: bool = False) -> List[Dict[str, Any]]:
         if config.VISUAL_WEBCAM_MODE == "on_demand":
             tools.append(CAPTURE_WEBCAM_TOOL)
 
+    # Image memory tool (save images to long-term visual memory)
+    if config.IMAGE_MEMORY_ENABLED:
+        tools.append(SAVE_IMAGE_TOOL)
+
     # Pulse timer tool (if pulse system enabled)
     if config.SYSTEM_PULSE_ENABLED:
         tools.append(SET_PULSE_INTERVAL_TOOL)
@@ -524,6 +528,48 @@ Be respectful of privacy - describe what you see generally without excessive det
         "type": "object",
         "properties": {},
         "required": []
+    }
+}
+
+
+# =============================================================================
+# IMAGE MEMORY TOOL
+# =============================================================================
+
+SAVE_IMAGE_TOOL: Dict[str, Any] = {
+    "name": "save_image",
+    "description": """Save the current image to your long-term visual memory.
+
+When you see an image this turn (screenshot, webcam, telegram photo, or pasted image),
+you can choose to save it if it seems worth remembering. Your description will be
+embedded and searchable — it's how you'll find this image later, so be descriptive.
+
+The image is saved to permanent storage and linked as a memory. When that memory is
+later recalled (via search_memories or automatic relevance), the original image will
+be loaded and shown to you again so you can reprocess it with fresh context.
+
+Use when:
+- An image contains information you may want to revisit later
+- The user shares something visually significant (workspace, project, photo)
+- A screenshot captures a state you want to compare against in the future
+- You notice something visually interesting or important
+
+Your description should capture what you see AND why it matters — future recall
+depends on how well your description matches future queries.""",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "source": {
+                "type": "string",
+                "description": "Which image to save from this turn",
+                "enum": ["screenshot", "webcam", "telegram", "clipboard"]
+            },
+            "description": {
+                "type": "string",
+                "description": "Your description of the image and why you're saving it. Be specific — this is how you'll find it later."
+            }
+        },
+        "required": ["source", "description"]
     }
 }
 

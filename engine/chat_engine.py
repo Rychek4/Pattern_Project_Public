@@ -185,11 +185,42 @@ class ChatEngine:
                     block["text"] = f"{relevant_memories}\n\n{block.get('text', '')}"
                     break
 
+    def _inject_memory_images(self, user_message: dict, memory_images: list):
+        """Inject recalled visual memory images into a user message.
+
+        Converts the message to multimodal format if needed, then prepends
+        image blocks. Uses the same content structure as clipboard/screenshot.
+
+        Args:
+            user_message: The message dict to modify in-place
+            memory_images: List of ImageContent objects from recalled memories
+        """
+        if not memory_images:
+            return
+
+        content = user_message.get("content")
+
+        # Convert string content to multimodal content array
+        if isinstance(content, str):
+            content = [{"type": "text", "text": content}]
+            user_message["content"] = content
+
+        # Prepend image blocks (images first, like build_multimodal_content)
+        if isinstance(content, list):
+            image_blocks = []
+            for img in memory_images:
+                image_blocks.append(img.to_api_format())
+            # Insert images at the beginning (before text)
+            for i, block in enumerate(image_blocks):
+                content.insert(i, block)
+            log_info(f"Injected {len(memory_images)} recalled image(s) into message", prefix="🖼️")
+
     def _capture_visuals_for_message(self, text_content: str) -> dict:
         """Capture visual content and build a multimodal message if enabled.
 
         Captures sources configured for "auto" mode. Sources in "on_demand"
         mode are captured via tool calls instead.
+        Also saves captured images to temp for potential save_image tool use.
         """
         if not config.VISUAL_ENABLED:
             return {"role": "user", "content": text_content}
@@ -202,11 +233,22 @@ class ChatEngine:
             return {"role": "user", "content": text_content}
 
         try:
-            from agency.visual_capture import capture_all_visuals, build_multimodal_content
+            from agency.visual_capture import capture_all_visuals, build_multimodal_content, save_temp_image
+            import base64
 
             images = capture_all_visuals()
             if not images:
                 return {"role": "user", "content": text_content}
+
+            # Save captured images to temp for potential save_image tool use
+            # (decode base64 from already-captured ImageContent to avoid re-capture)
+            if config.IMAGE_MEMORY_ENABLED:
+                for img in images:
+                    try:
+                        raw_bytes = base64.b64decode(img.data)
+                        save_temp_image(raw_bytes, img.source_type)
+                    except Exception as e:
+                        log_error(f"Failed to save temp image for {img.source_type}: {e}")
 
             content_array = build_multimodal_content(text_content, images)
             log_info(f"Built multimodal message with {len(images)} image(s)", prefix="👁️")
@@ -251,10 +293,14 @@ class ChatEngine:
         """
         try:
             import base64
-            from agency.visual_capture import ImageContent, build_multimodal_content
+            from agency.visual_capture import ImageContent, build_multimodal_content, save_temp_image
 
             if not media_type:
                 media_type = self._detect_image_media_type(image_data)
+
+            # Save to temp for potential save_image tool use
+            if config.IMAGE_MEMORY_ENABLED:
+                save_temp_image(image_data, "clipboard")
 
             base64_data = base64.standard_b64encode(image_data).decode("utf-8")
             img_content = ImageContent(
@@ -278,7 +324,16 @@ class ChatEngine:
             image: ImageContent object from Telegram photo processing
         """
         try:
-            from agency.visual_capture import build_multimodal_content
+            from agency.visual_capture import build_multimodal_content, save_temp_image
+            import base64
+
+            # Save to temp for potential save_image tool use
+            if config.IMAGE_MEMORY_ENABLED:
+                try:
+                    raw_bytes = base64.b64decode(image.data)
+                    save_temp_image(raw_bytes, "telegram")
+                except Exception as e:
+                    log_error(f"Failed to save temp telegram image: {e}")
 
             content_array = build_multimodal_content(text, [image])
             log_info(f"Built Telegram image message (source: {image.source_type})", prefix="📷")
@@ -375,6 +430,11 @@ class ChatEngine:
             self._inject_memories(user_message, relevant_memories)
             if relevant_memories:
                 self._emit(EngineEventType.MEMORIES_INJECTED)
+
+            # Inject images from recalled visual memories
+            memory_images = assembled.session_context.get("memory_images")
+            if memory_images:
+                self._inject_memory_images(user_message, memory_images)
 
             history.append(user_message)
             log_info(f"History now has {len(history)} messages", prefix="📨")
@@ -545,6 +605,12 @@ class ChatEngine:
             self._emit(EngineEventType.PROCESSING_ERROR, error=str(e), error_type=None)
 
         finally:
+            # Clean up temp images from this turn
+            try:
+                from agency.visual_capture import cleanup_temp_images
+                cleanup_temp_images()
+            except Exception:
+                pass
             self._emit(EngineEventType.PROCESSING_COMPLETE)
             self._is_processing = False
             self._cancel_requested = False
@@ -858,6 +924,11 @@ class ChatEngine:
             if relevant_memories:
                 self._emit(EngineEventType.MEMORIES_INJECTED)
 
+            # Inject images from recalled visual memories
+            memory_images = assembled.session_context.get("memory_images")
+            if memory_images:
+                self._inject_memory_images(user_message, memory_images)
+
             history.append(user_message)
 
             tools = get_tool_definitions()
@@ -948,6 +1019,12 @@ class ChatEngine:
                        error=str(e), error_type=None)
 
         finally:
+            # Clean up temp images from this turn
+            try:
+                from agency.visual_capture import cleanup_temp_images
+                cleanup_temp_images()
+            except Exception:
+                pass
             log_info("=== ChatEngine.process_telegram() completing ===", prefix="📱")
             self._emit(EngineEventType.PROCESSING_COMPLETE)
             self._resume_timers()
@@ -1008,6 +1085,11 @@ class ChatEngine:
             # Inject relevant memories
             relevant_memories = assembled.session_context.get("relevant_memories")
             self._inject_memories(user_message, relevant_memories)
+
+            # Inject images from recalled visual memories
+            memory_images = assembled.session_context.get("memory_images")
+            if memory_images:
+                self._inject_memory_images(user_message, memory_images)
 
             history.append(user_message)
             tools = get_tool_definitions()
@@ -1086,6 +1168,12 @@ class ChatEngine:
                        source=source, error=str(e))
 
         finally:
+            # Clean up temp images from this turn
+            try:
+                from agency.visual_capture import cleanup_temp_images
+                cleanup_temp_images()
+            except Exception:
+                pass
             self._emit(EngineEventType.PROCESSING_COMPLETE)
             self._resume_timers()
             self._is_processing = False

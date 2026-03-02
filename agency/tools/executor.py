@@ -86,6 +86,8 @@ class ToolExecutor:
             "reddit_search": self._exec_reddit_search,
             "reddit_subreddits": self._exec_reddit_subreddits,
             "reddit_profile": self._exec_reddit_profile,
+            # Image memory
+            "save_image": self._exec_save_image,
             # Delegation
             "delegate_task": self._exec_delegate_task,
             # Growth threads (pulse-only)
@@ -162,7 +164,7 @@ class ToolExecutor:
     def _exec_search_memories(
         self, input: Dict, id: str, ctx: Dict
     ) -> ToolResult:
-        """Execute memory search."""
+        """Execute memory search. If results include image memories, load and attach images."""
         from agency.commands.handlers.memory_search import MemorySearchHandler
 
         handler = MemorySearchHandler()
@@ -180,9 +182,52 @@ class ToolExecutor:
 
         # Format the result using existing formatter
         formatted = handler.format_result(result)
+
+        # Check if any results have associated images and load them
+        image_data = None
+        if result.data:
+            from agency.commands.handlers.image_memory_handler import load_image_for_memory
+            images = []
+            for r in result.data:
+                if hasattr(r, 'memory') and r.memory.image_id:
+                    img = load_image_for_memory(r.memory.image_id)
+                    if img:
+                        images.append(img)
+            if images:
+                image_data = images
+
         return ToolResult(
             tool_use_id=id,
             tool_name="search_memories",
+            content=formatted,
+            image_data=image_data
+        )
+
+    def _exec_save_image(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Save the current turn's image to visual memory."""
+        from agency.commands.handlers.image_memory_handler import SaveImageHandler
+
+        handler = SaveImageHandler()
+        source = input.get("source", "")
+        description = input.get("description", "")
+        query = f"{source} | {description}"
+
+        result = handler.execute(query, ctx)
+
+        if result.error:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="save_image",
+                content=result.get_error_message(),
+                is_error=True
+            )
+
+        formatted = handler.format_result(result)
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="save_image",
             content=formatted
         )
 
@@ -613,6 +658,10 @@ class ToolExecutor:
                 is_error=True
             )
 
+        # Save to temp for potential save_image tool use
+        if result.image_data and config.IMAGE_MEMORY_ENABLED:
+            self._save_tool_images_to_temp(result.image_data, "screenshot")
+
         # Return with image data
         return ToolResult(
             tool_use_id=id,
@@ -638,12 +687,28 @@ class ToolExecutor:
                 is_error=True
             )
 
+        # Save to temp for potential save_image tool use
+        if result.image_data and config.IMAGE_MEMORY_ENABLED:
+            self._save_tool_images_to_temp(result.image_data, "webcam")
+
         return ToolResult(
             tool_use_id=id,
             tool_name="capture_webcam",
             content="Webcam image captured - see attached image",
             image_data=result.image_data
         )
+
+    @staticmethod
+    def _save_tool_images_to_temp(images, source_type: str):
+        """Save tool-captured images to temp for potential save_image use."""
+        import base64
+        from agency.visual_capture import save_temp_image
+        try:
+            for img in images:
+                raw_bytes = base64.b64decode(img.data)
+                save_temp_image(raw_bytes, source_type)
+        except Exception:
+            pass  # Non-critical — temp save failure shouldn't block the tool
 
     # =========================================================================
     # ACTIVE THOUGHTS TOOL

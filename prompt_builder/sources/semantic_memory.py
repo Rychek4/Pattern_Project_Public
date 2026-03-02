@@ -271,6 +271,12 @@ class SemanticMemorySource(ContextSource):
         self.max_memories = MEMORY_MAX_PER_QUERY
         # Warmth cache for session-scoped memory boosting
         self._warmth_cache = WarmthCache()
+        # Track which image_ids have been injected in the current context window.
+        # Images are only injected once — if the memory is recalled again while
+        # the image is still visible in the conversation window, only the text
+        # description is included. The set is cleared when memory extraction runs
+        # (which is when old turns roll off the context window).
+        self._injected_image_ids: Set[int] = set()
 
     @property
     def source_name(self) -> str:
@@ -494,6 +500,9 @@ class SemanticMemorySource(ContextSource):
             "topic_chunks": len(chunks)
         }
 
+        # Load images for recalled visual memories (inject-once per context window)
+        self._load_memory_images(all_results, session_context)
+
         # Return None - memories are injected into user message, not system prompt
         return None
 
@@ -693,6 +702,50 @@ class SemanticMemorySource(ContextSource):
             return "medium"
         else:
             return "low"
+
+    def _load_memory_images(
+        self,
+        all_results: List[MemorySearchResult],
+        session_context: Dict[str, Any]
+    ) -> None:
+        """Load images from recalled visual memories into session_context.
+
+        Only loads images that haven't been injected yet in this context window.
+        Subsequent recalls of the same memory will include the text description
+        but skip re-injecting the image (it's still visible in conversation).
+
+        The _injected_image_ids set is cleared when clear_injected_images() is
+        called (triggered by memory extraction, i.e., when old turns roll off).
+
+        Args:
+            all_results: All recalled memory search results
+            session_context: Shared context dict; images stored in "memory_images"
+        """
+        import config
+        if not getattr(config, 'IMAGE_MEMORY_ENABLED', False):
+            return
+
+        from agency.commands.handlers.image_memory_handler import load_image_for_memory
+
+        images = []
+        for result in all_results:
+            mem = result.memory
+            if mem.image_id and mem.image_id not in self._injected_image_ids:
+                img = load_image_for_memory(mem.image_id)
+                if img:
+                    images.append(img)
+                    self._injected_image_ids.add(mem.image_id)
+
+        if images:
+            session_context["memory_images"] = images
+
+    def clear_injected_images(self) -> None:
+        """Clear the injected image tracking set.
+
+        Call when memory extraction runs (old turns roll off the context window),
+        so images can be re-injected if recalled again in the future.
+        """
+        self._injected_image_ids.clear()
 
     def get_warmth_stats(self) -> Dict[str, Any]:
         """Get current warmth cache statistics for debugging."""
