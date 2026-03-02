@@ -1,7 +1,7 @@
 """
 Pattern Project - Web Server
 
-FastAPI + WebSocket server that replaces the PyQt5 GUI.
+FastAPI + WebSocket server for the browser-based interface.
 Bridges ChatEngine events to connected browser clients over WebSocket.
 
 Usage:
@@ -328,7 +328,7 @@ class WebServer:
     """
     FastAPI application serving the web UI and WebSocket endpoint.
 
-    Mirrors the role of ChatWindow in gui.py:
+    Main web interface server:
     - Listens to engine events and forwards them to clients
     - Accepts user input via WebSocket and dispatches to engine
     - Manages pulse/reminder/telegram callbacks
@@ -493,7 +493,7 @@ class WebServer:
         if config.DEV_MODE_ENABLED:
             self._forward_dev_engine_event(event)
 
-        # Track processing state (mirrors GUI._on_engine_event)
+        # Track processing state
         if event.event_type == EngineEventType.PROCESSING_COMPLETE:
             with self._processing_lock:
                 self._is_processing = False
@@ -699,7 +699,7 @@ class WebServer:
             "timestamp": datetime.now().isoformat(),
         })
 
-        # Run engine in background thread (synchronous, same as GUI)
+        # Run engine in background thread (synchronous)
         loop = asyncio.get_running_loop()
         loop.run_in_executor(
             None,
@@ -757,7 +757,7 @@ class WebServer:
         get_user_settings().thinking_enabled = enabled
 
     async def _poll_voice_events(self):
-        """Background task: poll for ESP32 voice transcripts (mirrors GUI._poll_voice_events)."""
+        """Background task: poll for ESP32 voice transcripts."""
         while True:
             try:
                 from voice.api import voice_event_queue

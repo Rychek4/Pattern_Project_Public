@@ -4,12 +4,10 @@ Pattern Project - Main Entry Point
 AI Companion System with persistent memory and agency
 
 Usage:
-    python main.py           # Run in GUI mode (PyQt5 window) - default
+    python main.py           # Run in web UI mode (browser) - default
     python main.py --cli     # Run in CLI mode (console)
     python main.py -c        # Short form for CLI mode
-    python main.py --web     # Run in web UI mode (browser, ideal for VPS)
-    python main.py -w        # Short form for web mode
-    python main.py --dev     # Enable dev mode (debug window)
+    python main.py --dev     # Enable dev mode (debug tools in web UI)
     python main.py -d        # Short form for dev mode
     python main.py --dev -c  # Dev mode in CLI
 """
@@ -47,7 +45,7 @@ from memory.extractor import init_memory_extractor
 from interface.cli import init_cli, get_cli
 from interface.http_api import init_http_server, get_http_server
 # Visual capture is now stateless - no init/start/stop lifecycle needed.
-# Capture happens on-demand via capture_all_visuals() in gui.py.
+# Capture happens on-demand via capture_all_visuals() in the engine.
 # Import availability checker for startup logging only.
 from agency.visual_capture import is_visual_capture_available, release_webcam
 from agency.system_pulse import init_system_pulse_timer, get_system_pulse_timer
@@ -300,7 +298,7 @@ def start_background_services() -> None:
     log_subsection("Reminder scheduler started")
 
     # Visual capture is stateless - no background service to start.
-    # Capture happens on-demand when building messages in gui.py.
+    # Capture happens on-demand when building messages in the engine.
     if config.VISUAL_ENABLED:
         log_subsection("Visual capture ready (on-demand)")
 
@@ -431,17 +429,12 @@ def main() -> int:
     parser.add_argument(
         "--cli", "-c",
         action="store_true",
-        help="Launch CLI mode instead of GUI (console interface)"
-    )
-    parser.add_argument(
-        "--web", "-w",
-        action="store_true",
-        help="Launch web UI mode (browser-based interface, ideal for VPS)"
+        help="Launch CLI mode (console interface)"
     )
     parser.add_argument(
         "--dev", "-d",
         action="store_true",
-        help="Enable dev mode (debug window showing internal operations)"
+        help="Enable dev mode (debug tools showing internal operations)"
     )
     args = parser.parse_args()
 
@@ -453,38 +446,8 @@ def main() -> int:
     if args.cli:
         return run_cli_mode()
 
-    # Web mode
-    if args.web:
-        return run_web_mode()
-
-    # GUI mode - default
-    try:
-        # =============================================================
-        # CRITICAL: Load PyTorch BEFORE importing PyQt5
-        # MS Store Python has DLL loading conflicts - if Qt5 DLLs load
-        # first, PyTorch's c10.dll fails to initialize in the sandbox.
-        # The gui.py module has PyQt5 imports at module level, so we
-        # must load PyTorch HERE, before the import statement executes.
-        # =============================================================
-        config.LOGS_DIR.mkdir(parents=True, exist_ok=True)
-        config.DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-        print("Loading embedding model...")
-        embedding_loaded = load_embedding_model(config.EMBEDDING_MODEL)
-        if not embedding_loaded:
-            print("=" * 60)
-            print("WARNING: Embedding model failed to load")
-            print("Continuing in degraded mode (no semantic memory)")
-            print("=" * 60)
-
-        # NOW safe to import GUI module (triggers PyQt5 module-level imports)
-        from interface.gui import run_gui
-        return run_gui()
-    except ImportError as e:
-        print(f"GUI mode requires PyQt5: {e}")
-        print("Install with: pip install PyQt5")
-        print("Falling back to CLI mode...")
-        return run_cli_mode()
+    # Web mode - default
+    return run_web_mode()
 
 
 def run_web_mode() -> int:

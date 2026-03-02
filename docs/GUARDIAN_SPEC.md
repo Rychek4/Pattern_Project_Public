@@ -35,7 +35,7 @@ Guardian is a **minimal, independent watchdog process** that ensures Pattern Pro
 │  ┌──────────────┐              ┌──────────────────────┐  │
 │  │   Guardian    │──watches───>│   Pattern Project    │  │
 │  │              │              │                      │  │
-│  │  - PID check │              │  main.py (GUI/CLI)   │  │
+│  │  - PID check │              │  main.py (Web/CLI)   │  │
 │  │  - Heartbeat │              │  HTTP API :5000      │  │
 │  │  - Resources │              │  SQLite DB           │  │
 │  │  - DB safety │              │  Background threads  │  │
@@ -61,7 +61,7 @@ Guardian is a **minimal, independent watchdog process** that ensures Pattern Pro
 Pattern is a Python application launched from its project root:
 
 ```bash
-# GUI mode (default) — PyQt5 window
+# Web mode (default) — browser interface
 cd /home/user/Pattern_Project
 python main.py
 
@@ -200,7 +200,7 @@ Pattern runs everything in a single process with multiple daemon threads:
 
 | Thread Name | Purpose | Failure Impact |
 |---|---|---|
-| `MainThread` | GUI event loop or CLI input loop | Process dies |
+| `MainThread` | Web server or CLI input loop | Process dies |
 | `MemoryExtraction` | Background memory extraction (triggered, not persistent) | Memories accumulate but don't extract |
 | `PulseManager` | Reflective + action pulse timers | AI loses autonomous agency |
 | `ReminderScheduler` | Checks for due intentions every 30s | Reminders don't fire |

@@ -1,12 +1,8 @@
 """
 Pattern Project - Dev Event Bus
 
-PyQt5-free event bus for dev/debug data. Replaces the DevWindowSignals
-(pyqtSignal) system with plain callbacks so dev tools work in web mode
-without any Qt dependency.
-
-The emit_*() functions have the same signatures as their dev_window.py
-counterparts so callers only need an import-path change.
+Callback-based event bus for dev/debug data. Dev tools in the web UI
+subscribe to events emitted here and display them in real time.
 """
 
 import threading
@@ -19,7 +15,7 @@ import config
 
 
 # =============================================================================
-# DATA CLASSES (moved from dev_window.py — no PyQt5 dependency)
+# DATA CLASSES
 # =============================================================================
 
 @dataclass
@@ -171,7 +167,7 @@ def _now() -> str:
 
 
 # =============================================================================
-# EMIT FUNCTIONS (same signatures as dev_window.py)
+# EMIT FUNCTIONS
 # =============================================================================
 
 def emit_prompt_assembly(context_blocks: List[Dict[str, Any]], total_tokens: int = 0):

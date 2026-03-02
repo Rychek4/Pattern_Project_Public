@@ -394,7 +394,7 @@ USER_SETTINGS_PATH = DATA_DIR / "user_settings.json"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_TO_FILE = True
 LOG_TO_CONSOLE = True
-PROMPT_EXPORT_PATH = LOGS_DIR / "prompt_export.txt"  # Overwritten each time by Export Prompt button
+PROMPT_EXPORT_PATH = LOGS_DIR / "prompt_export.txt"  # Overwritten each time by prompt export
 
 # =============================================================================
 # CONCURRENCY CONFIGURATION
@@ -503,7 +503,7 @@ FILE_READ_MAX_CHARS = 0                    # Max chars returned to AI (0 = no li
 # =============================================================================
 # DEV MODE CONFIGURATION
 # =============================================================================
-# Dev mode provides a debug window showing internal operations:
+# Dev mode provides debug tools showing internal operations:
 # - Prompt assembly and context blocks
 # - Command/tool execution and results
 # - Multi-pass response processing
@@ -665,7 +665,7 @@ CLIPBOARD_MAX_READ_SIZE = 10000                 # Truncate clipboard reads beyon
 # The clarification tool gives the AI a formal way to pause and ask the user
 # for input when the request is ambiguous or requires a choice.
 #
-# When used, the question is displayed prominently in the UI, and in GUI mode,
+# When used, the question is displayed prominently in the UI and
 # options can be rendered as clickable buttons for easy response.
 CLARIFICATION_ENABLED = os.getenv("CLARIFICATION_ENABLED", "true").lower() == "true"
 

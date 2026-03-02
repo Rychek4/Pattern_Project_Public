@@ -3,7 +3,7 @@ Pattern Project - Engine Event Types
 
 Events emitted by ChatEngine during message processing.
 UI layers subscribe to these events and translate them into
-their own display mechanisms (PyQt signals, Rich console, WebSocket, etc.).
+their own display mechanisms (WebSocket, Rich console, etc.).
 """
 
 from dataclasses import dataclass, field
