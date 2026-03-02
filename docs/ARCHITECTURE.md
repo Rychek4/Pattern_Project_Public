@@ -12,8 +12,8 @@ Pattern is an AI companion system that doesn't just respond—it understands, re
 ┌─────────────────────────────────────────────────────────────────┐
 │                     USER INTERFACES                             │
 │  ┌──────────────────┬──────────────────┬──────────────────────┐ │
-│  │   GUI / CLI      │   HTTP API       │   Telegram           │ │
-│  │  (Rich Terminal) │  (Flask REST)    │   (Bot listener)     │ │
+│  │  Web UI / CLI    │   HTTP API       │   Telegram           │ │
+│  │ (FastAPI / Rich) │  (Flask REST)    │   (Bot listener)     │ │
 │  └──────────────────┴──────────────────┴──────────────────────┘ │
 └────────────────────────────────────────────────────────────────┘
                               │
@@ -59,8 +59,8 @@ Pattern is an AI companion system that doesn't just respond—it understands, re
 ## Core Components
 
 ### 1. Interfaces
-- **GUI** (`interface/gui.py`): Rich terminal with slash commands (primary interface)
-- **CLI** (`interface/cli.py`): Lightweight Rich terminal alternative
+- **Web UI** (`interface/web_server.py`): Browser-based interface with FastAPI + WebSocket (default)
+- **CLI** (`interface/cli.py`): Rich terminal with slash commands
 - **HTTP API** (`interface/http_api.py`): REST endpoints for external integration
 - **Telegram** (`interface/telegram_listener.py`): Bot-based messaging interface
 
@@ -256,7 +256,7 @@ LOG_LEVEL=INFO
 
 ```
 Main Process
-├── [Main Thread] GUI/CLI input loop
+├── [Main Thread] Web server or CLI input loop
 ├── [Threshold] MemoryExtractor - triggered by context overflow (40 turns)
 ├── [Daemon] SystemPulseTimer - configurable interval (default 10 min)
 ├── [Daemon] ReminderScheduler - intention due-date checking

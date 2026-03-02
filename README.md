@@ -119,9 +119,9 @@ Extracted conversations become searchable memories that resurface when semantica
 
 ## Interfaces
 
-### Web UI (Recommended)
+### Web UI (Default)
 ```bash
-python main.py --web   # Start web interface on port 8080
+python main.py         # Start web interface on port 8080 (default)
 ```
 Browser-based interface using FastAPI + WebSocket. Supports streaming,
 image paste/upload, real-time process panel, pulse controls, and theme
@@ -132,7 +132,7 @@ Set `WEB_AUTH_PASSWORD` in `.env` to require login (empty = no auth for local de
 ### CLI (Rich Terminal)
 ```bash
 python main.py --cli   # Start CLI
-python main.py --dev   # With debug window (GUI only)
+python main.py --dev   # With dev mode debug tools
 ```
 
 **Commands:**
@@ -158,10 +158,6 @@ python main.py --dev   # With debug window (GUI only)
 - `/stats` — System statistics
 - `/session/new`, `/session/end` — Session control
 
-### GUI (PyQt5) — Desktop only
-Rich graphical interface with streaming, overlays, and TTS integration.
-Requires PyQt5 (not needed for web or CLI modes).
-
 ---
 
 ## Quick Start
@@ -180,7 +176,6 @@ Core dependencies:
 - `python-dotenv>=1.0.0` — Environment loading
 
 Optional:
-- `PyQt5>=5.15.0` — Desktop GUI interface (not needed for web or CLI)
 - `python-telegram-bot>=21.0` — Telegram integration
 - `opencv-python` — Webcam capture
 - `pillow` — Screenshot capture

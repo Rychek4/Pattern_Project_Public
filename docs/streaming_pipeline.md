@@ -17,7 +17,7 @@ Total: ~4.5 seconds to first audio
 User sends → LLM streams ──────────────────────►
                 │
                 ├─ First tokens (~500ms)
-                │   └─► GUI updates
+                │   └─► UI updates
                 │
                 ├─ First sentence (~900ms)
                 │   └─► TTS starts ──► Audio plays (~1.2s)
@@ -31,10 +31,10 @@ Total: ~1.2 seconds to first audio
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         GUI Thread                               │
+│                         UI Thread                                │
 │  ┌────────────────┐    ┌──────────────────────────────────────┐ │
-│  │ Chat Display   │◄───│ MessageSignals                       │ │
-│  │ (QTextBrowser) │    │  - stream_start(timestamp)           │ │
+│  │ Chat Display   │◄───│ Engine Events                        │ │
+│  │                │    │  - stream_start(timestamp)           │ │
 │  └────────────────┘    │  - stream_chunk(text)                │ │
 │                        │  - stream_complete(full_text)        │ │
 │                        └──────────────────────────────────────┘ │
@@ -199,34 +199,13 @@ else:
     pygame.mixer.music.play()
 ```
 
-### 4. GUI Integration (`interface/gui.py`)
+### 4. UI Integration
 
-#### New Signals
-```python
-class MessageSignals(QObject):
-    # ... existing signals ...
+The engine emits streaming events that the web UI (or CLI) consumes:
 
-    # Streaming signals
-    stream_start = pyqtSignal(str)     # timestamp
-    stream_chunk = pyqtSignal(str)     # text chunk
-    stream_complete = pyqtSignal(str)  # full_text
-```
-
-#### Signal Handlers
-
-**_on_stream_start(timestamp)**
-- Creates message placeholder in chat display
-- Initializes streaming state variables
-
-**_on_stream_chunk(chunk)**
-- Appends chunk to accumulated text
-- Updates chat display (simple HTML escape during streaming)
-- Note: Full markdown rendering happens at stream_complete
-
-**_on_stream_complete(full_text)**
-- Applies full markdown rendering
-- Stores message in search index
-- Clears streaming state
+- **stream_start(timestamp)** — Creates message placeholder in chat display, initializes streaming state
+- **stream_chunk(chunk)** — Appends chunk to accumulated text, updates display
+- **stream_complete(full_text)** — Applies full markdown rendering, stores message, clears streaming state
 
 ## Configuration
 
@@ -284,7 +263,7 @@ if final_state.has_tool_calls():
 - API failures: Logged, sentence skipped, playback continues
 - Empty audio: Logged as warning, continues to next sentence
 
-### GUI Errors
+### UI Errors
 - All exceptions caught in `_process_message()`
 - `stream_complete("")` emitted on error to clean up UI state
 - `response_complete` always emitted in `finally` block

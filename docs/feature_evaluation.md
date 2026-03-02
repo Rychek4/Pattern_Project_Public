@@ -1,11 +1,12 @@
 # Feature Evaluation: Pattern Project UI Ideas
 
 *Evaluated against the current codebase architecture on 2026-02-05*
+*Note: The PyQt5 GUI has been removed. References to gui.py, gui_components.py, and PyQt5 below are historical. Future UI work targets the web interface.*
 
 ## Current Architecture Context
 
-- **Stack**: Python 3 / PyQt5 GUI / SQLite (WAL) / Anthropic Claude API
-- **UI**: PyQt5 with QTextBrowser (HTML rendering), custom theme system, QPropertyAnimation
+- **Stack**: Python 3 / Web UI (FastAPI + WebSocket) / SQLite (WAL) / Anthropic Claude API
+- **UI**: Browser-based with HTML/CSS/JS, custom theme system, real-time WebSocket updates
 - **Memory**: Semantic vector search (sentence-transformers, 384-dim), dual-track episodic+factual, decay categories (permanent/standard/ephemeral)
 - **Agency**: System pulse (configurable timer), curiosity engine, growth threads, active thoughts (ranked 1-10)
 - **Data flow**: Ephemeral context windows -- prompt rebuilt from scratch each turn from ~12 prioritized context sources. Memory lives in SQLite, not context.

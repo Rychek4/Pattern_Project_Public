@@ -2,7 +2,7 @@
  * Pattern Project - Process Panel
  *
  * Real-time sidebar showing the AI's internal processing pipeline.
- * Mirrors the PyQt5 ProcessPanel: message groups, round groups, and
+ * Renders message groups, round groups, and
  * individual step nodes with colored status dots.
  *
  * Subscribes to WebSocket events via Connection.on() and renders
@@ -299,8 +299,7 @@ const Process = (() => {
         // Only create message groups for user and retry sources.
         // Pulse, reminder, and telegram have dedicated events
         // (pulse_fired, reminder_fired, telegram_received) that
-        // create their own message groups — matching how the PyQt
-        // GUI maps EngineEvents to ProcessEvents.
+        // create their own message groups.
         if (msg.source === 'user') {
             _startNewMessageGroup('user');
             _addNode(COLORS.complete, 'You said something');
