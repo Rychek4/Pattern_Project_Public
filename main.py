@@ -164,6 +164,11 @@ def initialize_system() -> bool:
     # Initialize reminder scheduler
     init_reminder_scheduler(enabled=True)
 
+    # Create image memory directories
+    if config.IMAGE_MEMORY_ENABLED:
+        config.IMAGE_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+        config.IMAGE_TEMP_DIR.mkdir(parents=True, exist_ok=True)
+
     # Visual capture check - the new system is stateless (no init needed).
     # Just verify availability for startup logging.
     if config.VISUAL_ENABLED:

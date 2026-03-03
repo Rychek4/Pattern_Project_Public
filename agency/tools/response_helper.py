@@ -221,6 +221,10 @@ def _build_tool_detail(tool_name: str, tool_input: Any) -> str:
     if tool_name == "capture_webcam":
         return f"{tool_name}: webcam capture"
 
+    # Image memory
+    if tool_name == "save_image" and "description" in tool_input:
+        return f"{tool_name}: {tool_input['description'][:60]}"
+
     # Clipboard
     if tool_name == "set_clipboard" and "text" in tool_input:
         return f"{tool_name}: {tool_input['text'][:40]}"

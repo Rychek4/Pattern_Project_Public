@@ -63,6 +63,7 @@ class Memory:
     importance: float
     memory_type: Optional[str]
     memory_category: str = "episodic"  # 'episodic' or 'factual'
+    image_id: Optional[int] = None  # FK to image_files table (visual memory)
 
 
 @dataclass
@@ -115,7 +116,8 @@ class VectorStore:
         importance: float = 0.5,
         memory_type: Optional[str] = None,
         decay_category: str = "standard",
-        memory_category: str = "episodic"
+        memory_category: str = "episodic",
+        image_id: Optional[int] = None
     ) -> Optional[int]:
         """
         Add a new memory to the store.
@@ -194,8 +196,9 @@ class VectorStore:
                 INSERT INTO memories
                 (content, embedding, source_conversation_ids, source_session_id,
                  source_timestamp, importance, memory_type, decay_category,
-                 memory_category, created_at, last_accessed_at, access_count)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 memory_category, created_at, last_accessed_at, access_count,
+                 image_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     content,
@@ -209,7 +212,8 @@ class VectorStore:
                     memory_category,
                     now.isoformat(),
                     now.isoformat(),
-                    0
+                    0,
+                    image_id
                 )
             )
 
@@ -494,6 +498,9 @@ class VectorStore:
         # using the narrative-focused prompts before dual-track extraction was added
         memory_category = row["memory_category"] if row["memory_category"] else "episodic"
 
+        # Handle image_id (nullable, may not exist in pre-v21 databases)
+        image_id = row["image_id"] if "image_id" in row.keys() else None
+
         return Memory(
             id=row["id"],
             content=row["content"],
@@ -507,7 +514,8 @@ class VectorStore:
             decay_category=decay_category,
             importance=row["importance"],
             memory_type=row["memory_type"],
-            memory_category=memory_category
+            memory_category=memory_category,
+            image_id=image_id
         )
 
 

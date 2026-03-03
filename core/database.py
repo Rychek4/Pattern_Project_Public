@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from core.logger import log_info, log_success, log_error, log_config, log_section
 
 # Schema version for migrations
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 
 # SQL schema definition
 SCHEMA_SQL = """
@@ -78,7 +78,18 @@ CREATE TABLE IF NOT EXISTS memories (
     -- memory_category distinguishes extraction method:
     --   'episodic': Narrative memories about what happened (default, existing behavior)
     --   'factual': Concrete facts extracted from conversations
-    memory_category TEXT DEFAULT 'episodic' CHECK (memory_category IN ('episodic', 'factual'))
+    memory_category TEXT DEFAULT 'episodic' CHECK (memory_category IN ('episodic', 'factual')),
+
+    -- Optional reference to a saved image file
+    image_id INTEGER REFERENCES image_files(id)
+);
+
+-- Saved image files for visual memory
+CREATE TABLE IF NOT EXISTS image_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    file_path TEXT NOT NULL,
+    source_type TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Core memories: permanent, foundational knowledge always included
@@ -804,6 +815,19 @@ MIGRATION_V20_SQL = """
 ALTER TABLE reading_sessions ADD COLUMN observations_json TEXT DEFAULT '[]';
 """
 
+# Migration SQL for v20 -> v21 (add image memory support)
+# Creates image_files table and adds nullable image_id FK to memories.
+MIGRATION_V21_SQL = """
+CREATE TABLE IF NOT EXISTS image_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    file_path TEXT NOT NULL,
+    source_type TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE memories ADD COLUMN image_id INTEGER REFERENCES image_files(id);
+"""
+
 
 class Database:
     """SQLite database manager with WAL mode and thread-safe connections."""
@@ -997,6 +1021,10 @@ class Database:
             if from_version < 20:
                 log_config("Applying migration", "v19 → v20 (add observations persistence for novel reading)", indent=1)
                 conn.executescript(MIGRATION_V20_SQL)
+
+            if from_version < 21:
+                log_config("Applying migration", "v20 → v21 (add image memory support)", indent=1)
+                conn.executescript(MIGRATION_V21_SQL)
 
             # Record new version
             conn.execute(

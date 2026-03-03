@@ -416,6 +416,66 @@ def build_multimodal_content(
     return content
 
 
+# =============================================================================
+# TEMP IMAGE REGISTRY (turn-level image tracking for save_image tool)
+# =============================================================================
+# When images enter the system (any source), they are saved to temp files
+# and registered here. The save_image tool handler looks up temp images
+# by source_type. At end of turn, remaining temp files are cleaned up.
+
+_temp_images: Dict[str, str] = {}  # source_type -> temp_file_path
+
+
+def save_temp_image(image_bytes: bytes, source_type: str) -> Optional[str]:
+    """Save image bytes to a temp file and register for this turn.
+
+    Args:
+        image_bytes: Raw image bytes (JPEG)
+        source_type: Origin of image ("screenshot", "webcam", "telegram", "clipboard")
+
+    Returns:
+        Path to temp file, or None on failure
+    """
+    import config
+    import uuid
+
+    if not config.IMAGE_MEMORY_ENABLED:
+        return None
+
+    try:
+        config.IMAGE_TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        # Clean up old temp file for this source_type before overwriting
+        if source_type in _temp_images:
+            from pathlib import Path
+            old_path = Path(_temp_images[source_type])
+            old_path.unlink(missing_ok=True)
+        filename = f"{source_type}_{uuid.uuid4().hex[:8]}.jpg"
+        temp_path = config.IMAGE_TEMP_DIR / filename
+        temp_path.write_bytes(image_bytes)
+        _temp_images[source_type] = str(temp_path)
+        log_info(f"Temp image saved: {source_type} ({len(image_bytes)} bytes)", prefix="💾")
+        return str(temp_path)
+    except Exception as e:
+        log_error(f"Failed to save temp image: {e}")
+        return None
+
+
+def get_temp_images() -> Dict[str, str]:
+    """Get all temp image paths by source type."""
+    return dict(_temp_images)
+
+
+def cleanup_temp_images():
+    """Delete all temp images and clear registry. Call at end of turn."""
+    from pathlib import Path
+    for source_type, path_str in _temp_images.items():
+        try:
+            Path(path_str).unlink(missing_ok=True)
+        except Exception:
+            pass
+    _temp_images.clear()
+
+
 def is_visual_capture_available() -> Tuple[bool, bool]:
     """
     Check which visual capture methods are available.
