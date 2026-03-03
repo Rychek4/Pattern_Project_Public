@@ -20,7 +20,8 @@ from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
 import config
-from agency.commands.handlers.base import CommandHandler, CommandResult, ToolError, ToolErrorType
+from agency.commands.handlers.base import CommandHandler, CommandResult
+from agency.commands.errors import ToolError, ToolErrorType
 from core.logger import log_info, log_error
 
 if TYPE_CHECKING:
