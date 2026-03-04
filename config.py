@@ -527,28 +527,6 @@ FILE_READ_MAX_CHARS = 0                    # Max chars returned to AI (0 = no li
 DEV_MODE_ENABLED = False  # Set programmatically via --dev flag, not env var
 
 # =============================================================================
-# EMAIL GATEWAY CONFIGURATION
-# =============================================================================
-# Email sending via Gmail SMTP.
-# Requires a Gmail account with an app password (not regular password).
-#
-# To create an app password:
-# 1. Enable 2-Factor Authentication on your Google account
-# 2. Go to https://myaccount.google.com/apppasswords
-# 3. Generate a new app password for "Mail"
-# 4. Use that password as APP_EMAIL_PASS
-EMAIL_GATEWAY_ENABLED = os.getenv("EMAIL_GATEWAY_ENABLED", "false").lower() == "true"
-EMAIL_ADDRESS = os.getenv("APP_EMAIL_ADDRESS", "")
-EMAIL_PASSWORD = os.getenv("APP_EMAIL_PASS", "")
-EMAIL_DISPLAY_NAME = "Pattern Isaac"
-EMAIL_SMTP_HOST = "smtp.gmail.com"
-EMAIL_SMTP_PORT = 587
-
-# Email whitelist - only these addresses can receive emails
-# Empty list means all recipients blocked (since email is disabled)
-EMAIL_WHITELIST = []  # Add addresses here when enabling email
-
-# =============================================================================
 # TELEGRAM BOT CONFIGURATION
 # =============================================================================
 # Telegram Bot API for bidirectional messaging.
@@ -569,7 +547,6 @@ TELEGRAM_POLL_INTERVAL = 2  # Seconds between polling for inbound messages
 # COMMUNICATION RATE LIMITS
 # =============================================================================
 # Prevent abuse by limiting messages per hour
-EMAIL_MAX_PER_HOUR = 20      # Maximum emails per hour (when enabled)
 TELEGRAM_MAX_PER_HOUR = 30   # Maximum Telegram messages per hour
 
 # =============================================================================
@@ -612,28 +589,6 @@ WEB_FETCH_BLOCKED_DOMAINS = []                  # Default domain blacklist
 WEB_FETCH_BETA_HEADER = True                    # Send beta header (disable when tool goes GA)
 
 # =============================================================================
-# MOLTBOOK CONFIGURATION
-# =============================================================================
-# Moltbook is a social network for AI agents (https://www.moltbook.com/).
-# Pattern can post, comment, vote, and browse the platform via its REST API.
-#
-# Setup:
-# 1. Run scripts/moltbook_register.py to register an agent identity
-# 2. Complete X/Twitter verification (see script output)
-# 3. Add the resulting API key to your .env file
-#
-# The API key is permanent once verified. No Moltbot/OpenClaw harness needed.
-MOLTBOOK_ENABLED = os.getenv("MOLTBOOK_ENABLED", "false").lower() == "true"
-MOLTBOOK_API_KEY = os.getenv("MOLTBOOK_API_KEY", "")
-MOLTBOOK_API_BASE_URL = "https://www.moltbook.com/api/v1"
-MOLTBOOK_USER_AGENT = os.getenv("MOLTBOOK_USER_AGENT", "Molt/1.0 (OpenClaw; Pattern-Agent)")
-
-# Rate limits (enforced client-side to avoid 429s)
-MOLTBOOK_RATE_LIMIT_REQUESTS_PER_MIN = 100      # Global request cap
-MOLTBOOK_RATE_LIMIT_POSTS_PER_30MIN = 1          # Post creation cap
-MOLTBOOK_RATE_LIMIT_COMMENTS_PER_HOUR = 50       # Comment cap
-
-# =============================================================================
 # REDDIT CONFIGURATION
 # =============================================================================
 # Reddit integration via PRAW (Python Reddit API Wrapper).
@@ -659,27 +614,6 @@ REDDIT_RATE_LIMIT_REQUESTS_PER_MIN = 30          # Global request cap (Reddit al
 REDDIT_RATE_LIMIT_POSTS_PER_30MIN = 1             # Post creation cap
 REDDIT_RATE_LIMIT_COMMENTS_PER_HOUR = 10          # Comment cap (conservative)
 REDDIT_RATE_LIMIT_VOTES_PER_HOUR = 30             # Vote cap
-
-# =============================================================================
-# CLIPBOARD TOOL CONFIGURATION
-# =============================================================================
-# Clipboard tools allow the AI to read from and write to the system clipboard.
-# Useful for quick data transfer without file operations.
-#
-# Requires: pip install pyperclip
-# On Linux: also requires xclip or xsel (sudo apt-get install xclip)
-CLIPBOARD_ENABLED = os.getenv("CLIPBOARD_ENABLED", "true").lower() == "true"
-CLIPBOARD_MAX_READ_SIZE = 10000                 # Truncate clipboard reads beyond this (chars)
-
-# =============================================================================
-# CLARIFICATION TOOL CONFIGURATION
-# =============================================================================
-# The clarification tool gives the AI a formal way to pause and ask the user
-# for input when the request is ambiguous or requires a choice.
-#
-# When used, the question is displayed prominently in the UI and
-# options can be rendered as clickable buttons for easy response.
-CLARIFICATION_ENABLED = os.getenv("CLARIFICATION_ENABLED", "true").lower() == "true"
 
 # =============================================================================
 # NOVEL READING CONFIGURATION

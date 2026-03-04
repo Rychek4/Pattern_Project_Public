@@ -131,21 +131,15 @@ def initialize_system() -> bool:
     init_prompt_builder()
 
     # Initialize communication gateways if enabled
-    if config.EMAIL_GATEWAY_ENABLED or config.TELEGRAM_ENABLED:
+    if config.TELEGRAM_ENABLED:
         from communication.rate_limiter import init_rate_limiter
 
         # Initialize rate limiter
         init_rate_limiter(
-            email_max_per_hour=config.EMAIL_MAX_PER_HOUR,
             telegram_max_per_hour=config.TELEGRAM_MAX_PER_HOUR
         )
 
-        # Initialize email gateway if enabled
-        if config.EMAIL_GATEWAY_ENABLED:
-            from communication.email_gateway import init_email_gateway
-            init_email_gateway()
-
-        # Initialize Telegram gateway and listener if enabled
+        # Initialize Telegram gateway and listener
         if config.TELEGRAM_ENABLED:
             from communication.telegram_gateway import init_telegram_gateway, get_telegram_gateway
             from communication.telegram_listener import init_telegram_listener, get_telegram_listener
@@ -256,16 +250,15 @@ def print_configuration() -> None:
         log_subsection(f"Webcam: {config.VISUAL_WEBCAM_MODE}")
 
     # Communication settings
-    if config.EMAIL_GATEWAY_ENABLED or config.TELEGRAM_ENABLED or config.GOOGLE_CALENDAR_ENABLED:
+    if config.TELEGRAM_ENABLED or config.GOOGLE_CALENDAR_ENABLED:
         log_section("Communication", "📱")
-        log_subsection(f"Email: {'ENABLED' if config.EMAIL_GATEWAY_ENABLED else 'DISABLED'}")
         log_subsection(f"Telegram: {'ENABLED' if config.TELEGRAM_ENABLED else 'DISABLED'}")
         if config.TELEGRAM_ENABLED:
             chat_id = config.TELEGRAM_CHAT_ID
             masked = f"...{chat_id[-4:]}" if len(chat_id) >= 4 else "auto-detect"
             log_subsection(f"Telegram Chat: {masked}")
         log_subsection(f"Google Calendar: {'ENABLED' if config.GOOGLE_CALENDAR_ENABLED else 'DISABLED'}")
-        log_subsection(f"Rate Limits: {config.EMAIL_MAX_PER_HOUR} email/hr, {config.TELEGRAM_MAX_PER_HOUR} telegram/hr")
+        log_subsection(f"Rate Limits: {config.TELEGRAM_MAX_PER_HOUR} telegram/hr")
 
 
 def check_llm_providers() -> None:
