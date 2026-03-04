@@ -305,6 +305,9 @@ class CreateCalendarEventHandler(CommandHandler):
                     )
                 )
 
+            # Get reminders from context (passed by executor as array of objects)
+            reminders = context.get("calendar_params", {}).get("reminders")
+
             result = gateway.create_event(
                 title=title,
                 start_time=start_time,
@@ -312,6 +315,7 @@ class CreateCalendarEventHandler(CommandHandler):
                 description=description,
                 location=location,
                 recurrence=recurrence,
+                reminders=reminders,
             )
 
             if result.success:
@@ -502,6 +506,7 @@ class UpdateCalendarEventHandler(CommandHandler):
                 location=params.get("location"),
                 recurrence=params.get("recurrence"),
                 update_scope=params.get("update_scope", "this_event"),
+                reminders=params.get("reminders"),
             )
 
             if result.success:
