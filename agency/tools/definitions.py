@@ -1796,6 +1796,25 @@ The end date for all-day events is exclusive (end="2025-03-16" means a single-da
             "recurrence": {
                 "type": "string",
                 "description": "Optional RFC 5733 RRULE string for recurring events (e.g., 'RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR')"
+            },
+            "reminders": {
+                "type": "array",
+                "description": "Optional list of reminders for this event. Each item has 'method' ('popup' or 'email') and 'minutes' (minutes before event start). Max 5 entries. If omitted, defaults to a 30-minute and 10-minute popup reminder. Set to an empty list [] to create the event with no reminders.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "method": {
+                            "type": "string",
+                            "enum": ["popup", "email"],
+                            "description": "Reminder method: 'popup' for a notification or 'email' for an email reminder"
+                        },
+                        "minutes": {
+                            "type": "integer",
+                            "description": "Minutes before the event start to trigger the reminder"
+                        }
+                    },
+                    "required": ["method", "minutes"]
+                }
             }
         },
         "required": ["title", "start_time", "end_time"]
@@ -1855,6 +1874,25 @@ set recurrence to an empty string with update_scope="all_events".""",
                 "type": "string",
                 "enum": ["this_event", "all_events"],
                 "description": "Scope of update for recurring events: 'this_event' (default) or 'all_events' for entire series"
+            },
+            "reminders": {
+                "type": "array",
+                "description": "Optional updated reminders. Each item has 'method' ('popup' or 'email') and 'minutes' (minutes before event start). Max 5 entries. Set to an empty list [] to remove all reminders.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "method": {
+                            "type": "string",
+                            "enum": ["popup", "email"],
+                            "description": "Reminder method: 'popup' for a notification or 'email' for an email reminder"
+                        },
+                        "minutes": {
+                            "type": "integer",
+                            "description": "Minutes before the event start to trigger the reminder"
+                        }
+                    },
+                    "required": ["method", "minutes"]
+                }
             }
         },
         "required": ["event_id"]

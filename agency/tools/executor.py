@@ -2205,6 +2205,11 @@ class ToolExecutor:
 
         query = f"{title} | {start_time} | {end_time} | {description} | {location} | {recurrence}"
 
+        # Pass reminders via context (array of objects can't be pipe-delimited)
+        ctx["calendar_params"] = {
+            "reminders": input.get("reminders"),
+        }
+
         result = handler.execute(query, ctx)
 
         if result.error:
@@ -2248,6 +2253,7 @@ class ToolExecutor:
             "location": input.get("location"),
             "recurrence": input.get("recurrence"),
             "update_scope": input.get("update_scope", "this_event"),
+            "reminders": input.get("reminders"),
         }
 
         result = handler.execute(input.get("event_id", ""), ctx)

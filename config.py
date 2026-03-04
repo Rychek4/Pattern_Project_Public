@@ -745,6 +745,13 @@ GOOGLE_CALENDAR_TOKEN_PATH = os.getenv(
 )
 GOOGLE_CALENDAR_TIMEZONE = os.getenv("GOOGLE_CALENDAR_TIMEZONE", "America/New_York")
 
+# Default reminders applied to calendar events when the AI doesn't specify any.
+# Each entry: {"method": "popup" or "email", "minutes": N}. Max 5 entries.
+GOOGLE_CALENDAR_DEFAULT_REMINDERS = [
+    {"method": "popup", "minutes": 30},
+    {"method": "popup", "minutes": 10},
+]
+
 # =============================================================================
 # GUARDIAN WATCHDOG CONFIGURATION
 # =============================================================================

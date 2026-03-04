@@ -211,6 +211,7 @@ class CalendarGateway:
         description: str = "",
         location: str = "",
         recurrence: str = "",
+        reminders: Optional[List[Dict[str, Any]]] = None,
     ) -> CalendarResult:
         """
         Create a new event on the primary calendar.
@@ -241,6 +242,9 @@ class CalendarGateway:
                 event_body["location"] = location
             if recurrence:
                 event_body["recurrence"] = [recurrence]
+
+            # Apply reminders: AI-provided, defaults from config, or none
+            event_body["reminders"] = self._build_reminders_field(reminders)
 
             created = service.events().insert(
                 calendarId="primary",
@@ -278,6 +282,7 @@ class CalendarGateway:
         location: Optional[str] = None,
         recurrence: Optional[str] = None,
         update_scope: str = "this_event",
+        reminders: Optional[List[Dict[str, Any]]] = None,
     ) -> CalendarResult:
         """
         Update an existing event on the primary calendar.
@@ -322,6 +327,8 @@ class CalendarGateway:
                 existing["location"] = location
             if recurrence is not None:
                 existing["recurrence"] = [recurrence] if recurrence else []
+            if reminders is not None:
+                existing["reminders"] = self._build_reminders_field(reminders)
 
             updated = service.events().update(
                 calendarId="primary",
@@ -435,6 +442,39 @@ class CalendarGateway:
             simplified["status"] = event["status"]
 
         return simplified
+
+    def _build_reminders_field(
+        self, reminders: Optional[List[Dict[str, Any]]]
+    ) -> Dict[str, Any]:
+        """
+        Build the Google Calendar reminders field for an event.
+
+        Args:
+            reminders: List of reminder dicts with 'method' and 'minutes',
+                       or None to apply defaults from config.
+                       An empty list means no reminders.
+
+        Returns:
+            Dict with 'useDefault' and optional 'overrides' for the API
+        """
+        if reminders is None:
+            # Apply defaults from config
+            from config import GOOGLE_CALENDAR_DEFAULT_REMINDERS
+            overrides = GOOGLE_CALENDAR_DEFAULT_REMINDERS
+        else:
+            overrides = reminders
+
+        if not overrides:
+            # Explicitly no reminders
+            return {"useDefault": False, "overrides": []}
+
+        return {
+            "useDefault": False,
+            "overrides": [
+                {"method": r["method"], "minutes": r["minutes"]}
+                for r in overrides[:5]  # Google API max is 5
+            ],
+        }
 
     def _build_datetime_field(self, iso_time: str) -> Dict[str, str]:
         """
