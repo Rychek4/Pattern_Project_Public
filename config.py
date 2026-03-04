@@ -721,6 +721,30 @@ NOVEL_REFLECTION_MAX_TOKENS = 4000
 NOVEL_BOOKS_DIR = DATA_DIR / "files"  # Books stored alongside other files
 
 # =============================================================================
+# GOOGLE CALENDAR CONFIGURATION
+# =============================================================================
+# Google Calendar API integration for reading and writing calendar events.
+# Uses OAuth2 for authentication (one-time browser consent flow).
+#
+# Setup:
+# 1. Create a project in Google Cloud Console (https://console.cloud.google.com)
+# 2. Enable the Google Calendar API
+# 3. Create OAuth2 credentials (Desktop app type)
+# 4. Download the credentials JSON and save to data/Calendar_Google_Credentials.json
+# 5. Set GOOGLE_CALENDAR_ENABLED=true in .env
+# 6. On first use, a browser window will open for OAuth consent
+# 7. After consent, the token is saved and auto-refreshes (no browser needed again)
+GOOGLE_CALENDAR_ENABLED = os.getenv("GOOGLE_CALENDAR_ENABLED", "false").lower() == "true"
+GOOGLE_CALENDAR_CREDENTIALS_PATH = os.getenv(
+    "GOOGLE_CALENDAR_CREDENTIALS_PATH",
+    str(DATA_DIR / "Calendar_Google_Credentials.json")
+)
+GOOGLE_CALENDAR_TOKEN_PATH = os.getenv(
+    "GOOGLE_CALENDAR_TOKEN_PATH",
+    str(DATA_DIR / "Calendar_Google_Token.json")
+)
+
+# =============================================================================
 # GUARDIAN WATCHDOG CONFIGURATION
 # =============================================================================
 # Guardian is an external watchdog process that monitors Pattern's health

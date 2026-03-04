@@ -101,6 +101,11 @@ class ToolExecutor:
             "reading_progress": self._exec_reading_progress,
             "abandon_reading": self._exec_abandon_reading,
             "resume_reading": self._exec_resume_reading,
+            # Google Calendar
+            "list_calendar_events": self._exec_list_calendar_events,
+            "create_calendar_event": self._exec_create_calendar_event,
+            "update_calendar_event": self._exec_update_calendar_event,
+            "delete_calendar_event": self._exec_delete_calendar_event,
         }
 
     def execute(
@@ -2132,6 +2137,173 @@ class ToolExecutor:
             tool_use_id=id,
             tool_name="resume_reading",
             content="\n".join(parts)
+        )
+
+    # =========================================================================
+    # GOOGLE CALENDAR TOOLS
+    # =========================================================================
+
+    def _exec_list_calendar_events(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """List calendar events in a date range."""
+        try:
+            from agency.commands.handlers.calendar_handler import ListCalendarEventsHandler
+        except ImportError:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="list_calendar_events",
+                content="Calendar handler not available. Install: google-api-python-client google-auth-oauthlib",
+                is_error=True
+            )
+
+        handler = ListCalendarEventsHandler()
+        start_date = input.get("start_date", "")
+        end_date = input.get("end_date", "")
+        max_results = input.get("max_results", 50)
+
+        query = f"{start_date} | {end_date} | {max_results}"
+
+        result = handler.execute(query, ctx)
+
+        if result.error:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="list_calendar_events",
+                content=result.get_error_message(),
+                is_error=True
+            )
+
+        formatted = handler.format_result(result)
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="list_calendar_events",
+            content=formatted
+        )
+
+    def _exec_create_calendar_event(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Create a calendar event."""
+        try:
+            from agency.commands.handlers.calendar_handler import CreateCalendarEventHandler
+        except ImportError:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="create_calendar_event",
+                content="Calendar handler not available. Install: google-api-python-client google-auth-oauthlib",
+                is_error=True
+            )
+
+        handler = CreateCalendarEventHandler()
+        title = input.get("title", "")
+        start_time = input.get("start_time", "")
+        end_time = input.get("end_time", "")
+        description = input.get("description", "")
+        location = input.get("location", "")
+        recurrence = input.get("recurrence", "")
+
+        query = f"{title} | {start_time} | {end_time} | {description} | {location} | {recurrence}"
+
+        result = handler.execute(query, ctx)
+
+        if result.error:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="create_calendar_event",
+                content=result.get_error_message(),
+                is_error=True
+            )
+
+        formatted = handler.format_result(result)
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="create_calendar_event",
+            content=formatted
+        )
+
+    def _exec_update_calendar_event(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Update a calendar event."""
+        try:
+            from agency.commands.handlers.calendar_handler import UpdateCalendarEventHandler
+        except ImportError:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="update_calendar_event",
+                content="Calendar handler not available. Install: google-api-python-client google-auth-oauthlib",
+                is_error=True
+            )
+
+        handler = UpdateCalendarEventHandler()
+
+        # Pass all params via context since update has many optional fields
+        ctx["calendar_params"] = {
+            "event_id": input.get("event_id", ""),
+            "title": input.get("title"),
+            "start_time": input.get("start_time"),
+            "end_time": input.get("end_time"),
+            "description": input.get("description"),
+            "location": input.get("location"),
+            "recurrence": input.get("recurrence"),
+            "update_scope": input.get("update_scope", "this_event"),
+        }
+
+        result = handler.execute(input.get("event_id", ""), ctx)
+
+        if result.error:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="update_calendar_event",
+                content=result.get_error_message(),
+                is_error=True
+            )
+
+        formatted = handler.format_result(result)
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="update_calendar_event",
+            content=formatted
+        )
+
+    def _exec_delete_calendar_event(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Delete a calendar event."""
+        try:
+            from agency.commands.handlers.calendar_handler import DeleteCalendarEventHandler
+        except ImportError:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="delete_calendar_event",
+                content="Calendar handler not available. Install: google-api-python-client google-auth-oauthlib",
+                is_error=True
+            )
+
+        handler = DeleteCalendarEventHandler()
+
+        # Pass params via context for consistency with update
+        ctx["calendar_params"] = {
+            "event_id": input.get("event_id", ""),
+            "delete_scope": input.get("delete_scope", "this_event"),
+        }
+
+        result = handler.execute(input.get("event_id", ""), ctx)
+
+        if result.error:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="delete_calendar_event",
+                content=result.get_error_message(),
+                is_error=True
+            )
+
+        formatted = handler.format_result(result)
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="delete_calendar_event",
+            content=formatted
         )
 
 
