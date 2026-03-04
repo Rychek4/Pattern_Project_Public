@@ -339,7 +339,6 @@ Debug interface showing internal operations:
 | 18 | ActiveThoughtsSource | No | AI's working memory |
 | 22 | IntentionSource | No | Pending/triggered reminders |
 | 25 | SystemPulseSource | No | Pulse timer state |
-| 26 | AICommandsSource | Yes | Tool documentation |
 | 30 | TemporalSource | Yes | Time/session awareness |
 | 40 | VisualSource | No | Screenshot/webcam descriptions |
 | 50 | SemanticMemorySource | No | Vector-searched memories |

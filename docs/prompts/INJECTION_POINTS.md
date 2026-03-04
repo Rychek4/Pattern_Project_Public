@@ -185,74 +185,7 @@ Use this when:
 
 ---
 
-### 4. AI Commands Injection
-
-**Source**: `prompt_builder/sources/ai_commands.py:27-67`
-**Priority**: 26
-**Always Included**: Yes (if handlers registered)
-
-#### Data Flow
-
-```
-CommandProcessor._handlers
-    │
-    ▼
-processor.get_all_instructions()
-    │
-    ├─ For each handler:
-    │     handler.get_instructions()
-    │
-    ▼
-Concatenate all instruction strings
-```
-
-#### Output Format
-
-```xml
-<ai_commands>
-You can search your memory archive by including this command in your response:
-  [[SEARCH: your query here]]
-
-Use this when:
-- The user asks about past conversations ("What did we discuss about...")
-- You need more context than the automatically-recalled memories provide
-- The user references something with "remember when..." or similar
-
-The search executes and results are provided for you to continue your response.
-
-You can create reminders to follow up on things:
-  [[REMIND: when | what to remember]]
-  [[REMIND: when | what | context]]
-
-Examples:
-  [[REMIND: in 2 hours | ask how their meeting went]]
-  [[REMIND: tomorrow morning | check on sleep quality]]
-  [[REMIND: next session | follow up on anxiety discussion]]
-
-...additional handler instructions...
-</ai_commands>
-```
-
-#### Registered Handlers
-
-| Handler | Command | Instruction Source |
-|---------|---------|-------------------|
-| MemorySearchHandler | `[[SEARCH:]]` | `handlers/memory_search.py:86-96` |
-| RemindHandler | `[[REMIND:]]` | `handlers/intention_handler.py:124-138` |
-| CompleteHandler | `[[COMPLETE:]]` | `handlers/intention_handler.py:264-269` |
-| DismissHandler | `[[DISMISS:]]` | `handlers/intention_handler.py:328-332` |
-| ListIntentionsHandler | `[[LIST_INTENTIONS]]` | `handlers/intention_handler.py:404-408` |
-
-#### Injection Risks
-
-| Risk | Description | Mitigation |
-|------|-------------|------------|
-| Instruction mismatch | Handler registered but no instructions | Returns empty string if no handlers |
-| Handler conflict | Duplicate command patterns | Handlers keyed by command_name |
-
----
-
-### 5. Temporal Injection
+### 4. Temporal Injection
 
 **Source**: `prompt_builder/sources/temporal.py:35-69`
 **Priority**: 30
@@ -304,7 +237,7 @@ Located in `core/temporal.py`. Converts raw temporal data to natural language:
 
 ---
 
-### 6. Visual Injection
+### 5. Visual Injection
 
 **Source**: `prompt_builder/sources/visual.py`
 **Priority**: 40
@@ -349,7 +282,7 @@ computer screen. Natural lighting from a window to their left.
 
 ---
 
-### 7. Semantic Memory Injection
+### 6. Semantic Memory Injection
 
 **Source**: `prompt_builder/sources/semantic_memory.py:52-111`
 **Priority**: 50
@@ -409,7 +342,7 @@ MEMORY_ACCESS_WEIGHT = 0.15         # Access frequency weight
 
 ---
 
-### 8. Conversation Injection
+### 7. Conversation Injection
 
 **Source**: `prompt_builder/sources/conversation.py:44-87`
 **Priority**: 60 (last in system prompt)
@@ -521,7 +454,6 @@ Continue your response naturally, incorporating this information.
 | Core Memory | `core_memory.py` | (none) | `core_memories` table | Medium |
 | Intentions | `intention_source.py` | `<your_intentions>` | `intentions` table | Low |
 | System Pulse | `system_pulse.py` | `<system_pulse_control>` | Timer state | Low |
-| AI Commands | `ai_commands.py` | `<ai_commands>` | Handler instructions | Low |
 | Temporal | `temporal.py` | `<temporal_context>` | System clock/session | Low |
 | Visual | `visual.py` | `<visual_context>` | Vision API | Medium |
 | Semantic Memory | `semantic_memory.py` | `<recalled_context>` | Vector search | Medium |

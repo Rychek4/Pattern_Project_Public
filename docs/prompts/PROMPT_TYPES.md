@@ -59,10 +59,6 @@ router.chat(
   <pulse timer instructions>
 </system_pulse_control>
 
-<ai_commands>
-  <available command instructions>
-</ai_commands>
-
 <temporal_context>
   <current time, session duration, turn count>
 </temporal_context>

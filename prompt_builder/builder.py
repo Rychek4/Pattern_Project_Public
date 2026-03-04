@@ -216,7 +216,6 @@ def create_default_builder() -> PromptBuilder:
     from prompt_builder.sources.semantic_memory import SemanticMemorySource
     from prompt_builder.sources.temporal import TemporalSource
     from prompt_builder.sources.system_pulse import SystemPulseSource
-    from prompt_builder.sources.ai_commands import AICommandsSource
     from prompt_builder.sources.intention_source import IntentionSource
     from prompt_builder.sources.dev_mode import DevModeSource
     from prompt_builder.sources.active_thoughts import ActiveThoughtsSource
@@ -234,7 +233,6 @@ def create_default_builder() -> PromptBuilder:
         GrowthThreadsSource(),  # AI's developmental aspirations (priority 20)
         IntentionSource(),      # AI's forward-looking memory (priority 22)
         SystemPulseSource(),
-        AICommandsSource(),
         TemporalSource(),
         SemanticMemorySource(),
     ]

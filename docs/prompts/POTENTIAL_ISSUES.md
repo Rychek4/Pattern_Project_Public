@@ -115,29 +115,7 @@ for source in self._sources:
 
 ## Moderate Issues
 
-### 5. Command Instructions Always Included
-
-**Location**: `prompt_builder/sources/ai_commands.py:46-48`
-
-**Issue**: All command instructions are included in every prompt, even when irrelevant:
-
-```python
-if not processor.has_handlers():
-    return None
-
-instructions = processor.get_all_instructions()
-```
-
-**Impact**:
-- ~200 tokens of command instructions in every prompt
-- Instructions for reminders shown even in casual conversations
-- Could encourage unnecessary command use
-
-**Recommendation**: Consider context-aware instruction inclusion (e.g., only show search when user asks about past).
-
----
-
-### 6. Intention Context Privacy Claim May Be Inaccurate
+### 5. Intention Context Privacy Claim May Be Inaccurate
 
 **Location**: `prompt_builder/sources/intention_source.py:99, 116`
 
@@ -157,7 +135,7 @@ But intentions appear in the system prompt which:
 
 ---
 
-### 7. Semantic Memory Could Return Duplicates
+### 6. Semantic Memory Could Return Duplicates
 
 **Location**: `prompt_builder/sources/semantic_memory.py:61-65`
 
@@ -177,7 +155,7 @@ results = vector_store.search(
 
 ---
 
-### 8. Continuation Prompt Doesn't Include Original Context
+### 7. Continuation Prompt Doesn't Include Original Context
 
 **Location**: `interface/cli.py:160-171`
 
@@ -200,7 +178,7 @@ continuation = router.chat(
 
 ---
 
-### 9. Memory Extraction Importance Scoring is Coarse
+### 8. Memory Extraction Importance Scoring is Coarse
 
 **Location**: `memory/extractor.py:120-130`
 
@@ -223,7 +201,7 @@ But the scoring guide is imprecise:
 
 ---
 
-### 10. Visual Context Cache Could Be Stale
+### 9. Visual Context Cache Could Be Stale
 
 **Location**: `prompt_builder/sources/visual.py` (general)
 
@@ -244,14 +222,13 @@ VISUAL_CAPTURE_INTERVAL = int(os.getenv("VISUAL_CAPTURE_INTERVAL", "30"))
 
 ## Minor Issues
 
-### 11. XML Tag Inconsistency
+### 10. XML Tag Inconsistency
 
 **Issue**: Some context uses XML tags, some doesn't:
 
 ```
 Core Memory: No wrapping tag (just content)
 Intentions: <your_intentions>
-Commands: <ai_commands>
 Temporal: <temporal_context>
 Semantic: <recalled_context>
 Conversation: <recent_conversation>
@@ -263,7 +240,7 @@ Conversation: <recent_conversation>
 
 ---
 
-### 12. Time Expression Parsing May Fail Silently
+### 11. Time Expression Parsing May Fail Silently
 
 **Location**: `agency/intentions/parser.py` (via `parse_time_expression`)
 
@@ -287,7 +264,7 @@ if trigger_type == 'time' and trigger_at is None:
 
 ---
 
-### 13. Session Context Not Thread-Safe
+### 12. Session Context Not Thread-Safe
 
 **Location**: `prompt_builder/builder.py:113`
 
@@ -309,7 +286,7 @@ session_context["pulse_interval_seconds"] = current_interval  # From SystemPulse
 
 ---
 
-### 14. Turn Assignment JSON Parsing is Fragile
+### 13. Turn Assignment JSON Parsing is Fragile
 
 **Location**: `memory/extractor.py:683-762`
 
@@ -331,7 +308,7 @@ elif "```" in text:
 
 ---
 
-### 15. Core Memory Categories Limited Without Explanation
+### 14. Core Memory Categories Limited Without Explanation
 
 **Location**: `interface/cli.py:582-587`
 
