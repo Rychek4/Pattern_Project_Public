@@ -158,6 +158,11 @@ def initialize_system() -> bool:
                 gateway.set_chat_id(chat_id)
             listener.set_chat_id_callback(on_chat_id_detected)
 
+    # Initialize Google Calendar gateway if enabled
+    if config.GOOGLE_CALENDAR_ENABLED:
+        from communication.calendar_gateway import init_calendar_gateway
+        init_calendar_gateway()
+
     # Initialize system pulse timer
     init_system_pulse_timer()
 
@@ -251,7 +256,7 @@ def print_configuration() -> None:
         log_subsection(f"Webcam: {config.VISUAL_WEBCAM_MODE}")
 
     # Communication settings
-    if config.EMAIL_GATEWAY_ENABLED or config.TELEGRAM_ENABLED:
+    if config.EMAIL_GATEWAY_ENABLED or config.TELEGRAM_ENABLED or config.GOOGLE_CALENDAR_ENABLED:
         log_section("Communication", "📱")
         log_subsection(f"Email: {'ENABLED' if config.EMAIL_GATEWAY_ENABLED else 'DISABLED'}")
         log_subsection(f"Telegram: {'ENABLED' if config.TELEGRAM_ENABLED else 'DISABLED'}")
@@ -259,6 +264,7 @@ def print_configuration() -> None:
             chat_id = config.TELEGRAM_CHAT_ID
             masked = f"...{chat_id[-4:]}" if len(chat_id) >= 4 else "auto-detect"
             log_subsection(f"Telegram Chat: {masked}")
+        log_subsection(f"Google Calendar: {'ENABLED' if config.GOOGLE_CALENDAR_ENABLED else 'DISABLED'}")
         log_subsection(f"Rate Limits: {config.EMAIL_MAX_PER_HOUR} email/hr, {config.TELEGRAM_MAX_PER_HOUR} telegram/hr")
 
 
