@@ -37,12 +37,11 @@ USER INPUT
     │
     ▼
 ┌─────────────────────────────────────────┐
-│         Context Sources (8 total)        │
+│         Context Sources (7 total)        │
 │                                          │
 │  Priority 10: CoreMemorySource           │
 │  Priority 22: IntentionSource            │
 │  Priority 25: SystemPulseSource          │
-│  Priority 26: AICommandsSource           │
 │  Priority 30: TemporalSource             │
 │  Priority 40: VisualSource               │
 │  Priority 50: SemanticMemorySource       │
@@ -137,7 +136,6 @@ Sources are assembled into the system prompt in priority order (lowest number fi
 | 10 | CoreMemorySource | Yes | Permanent foundational knowledge |
 | 22 | IntentionSource | Yes | AI's reminders/goals (forward-looking) |
 | 25 | SystemPulseSource | Conditional* | Pulse timer control instructions |
-| 26 | AICommandsSource | Yes | Available command syntax |
 | 30 | TemporalSource | Yes | Current time, session info |
 | 40 | VisualSource | Conditional** | Screenshot/webcam descriptions |
 | 50 | SemanticMemorySource | No | Vector-searched memories |

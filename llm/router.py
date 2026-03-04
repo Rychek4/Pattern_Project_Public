@@ -222,15 +222,15 @@ class LLMRouter:
                 self._check_web_fetch_availability()
             )
 
-        # If web search is unavailable due to daily limit, notify Claude in system prompt
-        unavailable_notices = []
+        # Append web search/fetch notices (unavailability or low budget warnings)
+        web_notices = []
         if web_search_unavailable_msg:
-            unavailable_notices.append(web_search_unavailable_msg)
+            web_notices.append(web_search_unavailable_msg)
         if web_fetch_unavailable_msg:
-            unavailable_notices.append(web_fetch_unavailable_msg)
+            web_notices.append(web_fetch_unavailable_msg)
 
-        if unavailable_notices:
-            notice_text = "\n\n".join(unavailable_notices)
+        if web_notices:
+            notice_text = "\n\n".join(web_notices)
             if system_prompt:
                 system_prompt = f"{system_prompt}\n\n{notice_text}"
             else:
@@ -673,8 +673,19 @@ class LLMRouter:
 
             # Web search is available
             max_uses = limiter.get_max_for_request()
+            remaining = limiter.get_remaining()
             log_info(f"Web search enabled (max {max_uses} uses this request)", prefix="🔍")
-            return (True, max_uses, None)
+
+            # Budget warning when running low
+            budget_msg = None
+            if remaining < 10:
+                used, total = limiter.get_usage()
+                budget_msg = (
+                    f"<web_search_notice>Web search budget low: {remaining} remaining "
+                    f"({used}/{total} used)</web_search_notice>"
+                )
+
+            return (True, max_uses, budget_msg)
 
         except Exception as e:
             log_error(f"Web search limiter error, disabling web search: {e}")
@@ -731,8 +742,19 @@ class LLMRouter:
             if config.WEB_FETCH_CITATIONS_ENABLED:
                 fetch_config["citations"] = {"enabled": True}
 
+            remaining = limiter.get_remaining()
             log_info(f"Web fetch enabled (max {max_uses} uses this request)", prefix="🌐")
-            return (True, max_uses, fetch_config, None)
+
+            # Budget warning when running low
+            budget_msg = None
+            if remaining < 10:
+                used, total = limiter.get_usage()
+                budget_msg = (
+                    f"<web_fetch_notice>Web fetch budget low: {remaining} remaining "
+                    f"({used}/{total} used)</web_fetch_notice>"
+                )
+
+            return (True, max_uses, fetch_config, budget_msg)
 
         except Exception as e:
             log_error(f"Web fetch limiter error, disabling web fetch: {e}")

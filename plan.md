@@ -1,170 +1,69 @@
-# Plan: Fix Tool Use Calls Missing from Web Process Panel
+# Plan: Remove `ai_commands` Section from Prompt
 
-## Context
+## Rationale
 
-The web UI's process panel doesn't show tool invocations because of gaps between
-two parallel event systems (EngineEventType and ProcessEventType). Since the
-desktop GUI is being deprecated, this plan focuses exclusively on the web path.
+The `ai_commands` section injects redundant capability announcements into every prompt. The AI already knows what tools are available via native tool schemas in the API call. The metadata (`native_tools_mode`, `web_search_enabled`, `web_fetch_enabled`) is written but **never read** by any code. The only non-redundant value — budget warnings when < 10 uses remain — can be handled by the router, which already has the limiter integration for unavailability notices.
+
+## Steps
+
+### Step 1: Relocate budget warnings into the router
+
+**File:** `llm/router.py` (~lines 646-681, 689-739)
+
+The router's `_check_web_search_availability()` and `_check_web_fetch_availability()` already check limiter state and inject unavailability messages when limits are exhausted. Extend these methods to also return a brief budget warning when remaining < 10 (but > 0). This preserves the one useful behavior from `ai_commands`.
+
+For `_check_web_search_availability()`, after confirming available (~line 674):
+```python
+remaining = limiter.get_remaining()
+budget_msg = None
+if remaining < 10:
+    used, total = limiter.get_usage()
+    budget_msg = f"<web_search_notice>Web search budget low: {remaining} remaining ({used}/{total} used)</web_search_notice>"
+return (True, max_uses, budget_msg)
+```
+
+Same pattern for `_check_web_fetch_availability()`.
+
+The caller at ~line 226 already appends notice strings to the system prompt — adjust it to also handle non-None budget messages returned alongside the existing unavailable messages. The return signatures gain a budget notice field, or we can reuse the existing unavailable_msg field (since both are mutually exclusive — you're either unavailable OR low budget, never both).
+
+**Simplest approach:** Reuse the existing `unavailable_msg` return slot. When budget is low, return the budget warning there instead. The caller already appends it to the system prompt. No signature change needed.
+
+### Step 2: Delete the ai_commands source file
+
+**File:** `prompt_builder/sources/ai_commands.py` — **DELETE** entire file (167 lines)
+
+### Step 3: Remove registration from builder
+
+**File:** `prompt_builder/builder.py`
+- Remove import of `AICommandsSource` (~line 219)
+- Remove `AICommandsSource()` from the sources list in `create_default_builder()` (~line 237)
+
+### Step 4: Remove priority enum entry
+
+**File:** `prompt_builder/sources/base.py`
+- Remove `AI_COMMANDS = 26` from `SourcePriority` enum (~line 18-20)
+- Leave the gap (25 → 30) — renumbering would be unnecessary churn
+
+### Step 5: Update documentation (5 files)
+
+1. **`FEATURE_CATALOG.md`** (~line 342) — Remove the AICommandsSource row from the source table
+2. **`docs/prompts/PROMPT_SYSTEM_OVERVIEW.md`** (~lines 45, 140, 150-159) — Remove from priority diagram, source table, and key files section
+3. **`docs/prompts/INJECTION_POINTS.md`** (~lines 188-253, 524) — Remove entire Section 4 "AI Commands Injection" and its row in the summary table
+4. **`docs/prompts/PROMPT_TYPES.md`** (~lines 62-64) — Remove `<ai_commands>` from the example prompt structure
+5. **`docs/prompts/POTENTIAL_ISSUES.md`** (~lines 118-137, 254) — Remove Section 5 "Command Instructions Always Included" and the tag reference
 
 ---
 
-## Architecture Decision: Which Event System to Use?
+## What's preserved
+- Budget warnings when running low (relocated to router, only shown when < 10 remaining)
+- Unavailability notices when limits exhausted (already in router, unchanged)
+- Tool availability (communicated via native tool schemas, unchanged)
 
-There are two options for getting tool calls to the web UI:
+## What's removed
+- Redundant "Web search available" / "Web fetch available" every single request
+- Dead metadata fields nobody reads
+- "Combined research guidance" boilerplate (the AI doesn't need instructions to search then fetch)
+- ~167 lines of source code + documentation references
 
-**Option A — Forward ProcessEventType.TOOL_INVOKED from ProcessEventBus**
-- Add `TOOL_INVOKED` to `_FORWARDED_PROCESS_EVENTS` in web_server.py
-- Add a conversion case in `_process_event_to_ws()`
-- Pros: Single line change fixes ALL sources (user, pulse, reminder, telegram)
-  because `response_helper.py` already emits `ProcessEventType.TOOL_INVOKED` for
-  every tool call regardless of origin
-- Cons: Relies on the ProcessEventBus (a GUI-era artifact) surviving long-term
-
-**Option B — Emit EngineEventType.TOOL_INVOKED from the engine**
-- Add `self._emit(EngineEventType.TOOL_INVOKED, ...)` in chat_engine.py wherever
-  tools are processed
-- Pros: Uses the "proper" engine event system; web_server.py already has a handler
-  for it (line 195)
-- Cons: Must add emission in multiple places (process_message, process_pulse,
-  process_reminder); risk of double-display with existing SERVER_TOOL_INVOKED
-  emission for server tools
-
-**Recommendation: Option A** — It's the minimal, correct fix. ProcessEventBus is
-the single source of truth for tool invocations (response_helper.py emits there
-for ALL code paths). Forwarding it is one change that fixes everything. We can
-deprecate ProcessEventBus later as a separate effort if desired.
-
----
-
-## Changes
-
-### Step 1: Forward TOOL_INVOKED to web clients
-
-**File: `interface/web_server.py`**
-
-1a. Add `ProcessEventType.TOOL_INVOKED` to `_FORWARDED_PROCESS_EVENTS` (~line 265):
-
-```python
-_FORWARDED_PROCESS_EVENTS = frozenset({
-    ProcessEventType.DELEGATION_START,
-    ProcessEventType.DELEGATION_TOOL,
-    ProcessEventType.DELEGATION_COMPLETE,
-    ProcessEventType.CURIOSITY_SELECTED,
-    ProcessEventType.MEMORY_EXTRACTION,
-    ProcessEventType.TOOL_INVOKED,        # ← ADD
-})
-```
-
-1b. Add a conversion case in `_process_event_to_ws()` (~line 273-296):
-
-```python
-if event.event_type == ProcessEventType.TOOL_INVOKED:
-    detail = event.data.get("detail", "")
-    tool_name = detail.split(":")[0].strip() if ":" in detail else detail
-    return {
-        "type": "tool_invoked",
-        "tool_name": tool_name,
-        "detail": detail,
-    }
-```
-
-This single change makes ALL tool calls visible in the web UI — user messages,
-pulses, reminders, and telegrams — because they all flow through
-`response_helper.process_response()` which emits `ProcessEventType.TOOL_INVOKED`.
-
-### Step 2: Remove phantom EngineEventType.TOOL_INVOKED handler
-
-**File: `interface/web_server.py`**
-
-Remove the `EngineEventType.TOOL_INVOKED` case from `_engine_event_to_ws()`
-(~lines 195-200).
-
-**Why:** No code in the entire codebase ever emits `EngineEventType.TOOL_INVOKED`.
-It's dead code that creates confusion. Tool display now comes exclusively through
-the ProcessEventBus forwarding (Step 1).
-
-### Step 3: Deduplicate server tool display
-
-After Steps 1-2, server tools called during `process_message()` would show twice:
-once via `EngineEventType.SERVER_TOOL_INVOKED` (emitted at chat_engine.py:422-427)
-and once via `ProcessEventType.TOOL_INVOKED` (emitted at response_helper.py:453-462).
-
-**Fix — Remove SERVER_TOOL_INVOKED emission from chat_engine.py:**
-- Delete lines ~421-427 in `chat_engine.py` (the `if final_state.server_tool_details`
-  block inside `process_message()`)
-- Remove the `EngineEventType.SERVER_TOOL_INVOKED` handler from
-  `_engine_event_to_ws()` in web_server.py (~lines 202-207)
-- ProcessEventBus becomes the single path for ALL tool display — clean, no duplication
-
-### Step 4: Add STREAM_START to pulse and reminder paths
-
-**File: `engine/chat_engine.py`**
-
-Without STREAM_START, the web process panel never creates a "round group" for
-pulse/reminder responses. The process.js client uses `stream_start` to open a new
-round context (the container that holds tool nodes).
-
-4a. In `process_pulse()` (~line 578, before the LLM call):
-```python
-self._emit(EngineEventType.STREAM_START)
-```
-
-4b. In `process_reminder()` (~line 700, before the LLM call):
-```python
-self._emit(EngineEventType.STREAM_START)
-```
-
-This ensures tool nodes have proper round context in the process panel.
-
-### Step 5: Clean up dead code in gui.py
-
-**File: `interface/gui.py`**
-
-Remove the unused `_process_typed_pulse()` method (~line 2813+). It's dead code
-from before the engine refactor — never called, emits to the wrong event system,
-and creates confusion during maintenance.
-
-Since GUI is being deprecated, this is low priority. Alternatively, mark it with a
-`# DEPRECATED` comment if full removal feels risky.
-
----
-
-## Summary of Changes
-
-| File | Change | Fixes |
-|------|--------|-------|
-| `web_server.py` | Add TOOL_INVOKED to forwarded set + conversion | All tools invisible in web |
-| `web_server.py` | Remove phantom TOOL_INVOKED engine handler | Dead code cleanup |
-| `web_server.py` | Remove SERVER_TOOL_INVOKED engine handler | Dedup with Step 1 |
-| `chat_engine.py` | Remove SERVER_TOOL_INVOKED emission in process_message() | Dedup with Step 1 |
-| `chat_engine.py` | Add STREAM_START to process_pulse() | Missing round context |
-| `chat_engine.py` | Add STREAM_START to process_reminder() | Missing round context |
-| `gui.py` | Remove/deprecate dead _process_typed_pulse() | Dead code cleanup |
-
-## What This Does NOT Change
-
-- **response_helper.py** — Untouched. It already correctly emits TOOL_INVOKED for
-  all tool types and all sources. It's the single source of truth.
-- **process.js** — Untouched. It already handles `tool_invoked` messages correctly.
-- **process_panel.py** — Untouched. Desktop GUI continues working as-is during
-  deprecation period.
-
-## Risk Assessment
-
-- **Low risk**: Step 1 (forwarding) is additive — worst case is tools show when
-  they didn't before (which is the goal)
-- **Medium risk**: Step 3 (dedup) removes emission paths — needs testing to confirm
-  no other consumers depend on SERVER_TOOL_INVOKED engine events
-- **Low risk**: Step 4 (STREAM_START) is additive — adds context that was missing
-- **No risk**: Step 5 (dead code) removes unreachable code
-
-## Testing Strategy
-
-1. Send a user message that triggers tool calls (e.g., "search for X") → verify
-   tools appear in web process panel
-2. Trigger a reflective pulse → verify pulse tool calls appear
-3. Trigger a reminder → verify reminder tool calls appear
-4. Send a message that triggers server tools (web_search/web_fetch) → verify they
-   appear exactly once (not duplicated)
-5. Verify desktop GUI still shows tools correctly (regression check during
-   deprecation period)
+## Risk
+**Low.** No code reads the metadata. The router already handles availability. Native tool schemas already communicate tool presence. Budget warnings are relocated, not lost.
