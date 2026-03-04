@@ -151,9 +151,6 @@ def _build_tool_detail(tool_name: str, tool_input: Any) -> str:
     # Communication tools
     if tool_name == "send_telegram" and "message" in tool_input:
         return f"{tool_name}: {tool_input['message'][:60]}"
-    if tool_name == "send_email" and "subject" in tool_input:
-        return f"{tool_name}: {tool_input['subject']}"
-
     # File tools
     if tool_name == "read_file" and "path" in tool_input:
         return f"{tool_name}: {tool_input['path']}"
@@ -225,10 +222,6 @@ def _build_tool_detail(tool_name: str, tool_input: Any) -> str:
     if tool_name == "save_image" and "description" in tool_input:
         return f"{tool_name}: {tool_input['description'][:60]}"
 
-    # Clipboard
-    if tool_name == "set_clipboard" and "text" in tool_input:
-        return f"{tool_name}: {tool_input['text'][:40]}"
-
     # Server-side tools (web_search, web_fetch)
     if tool_name == "web_search" and "query" in tool_input:
         return f"{tool_name}: {tool_input['query']}"
@@ -236,14 +229,14 @@ def _build_tool_detail(tool_name: str, tool_input: Any) -> str:
         return f"{tool_name}: {tool_input['url']}"
 
     # Social platform tools
-    if tool_name in ("reddit_search", "moltbook_search") and "query" in tool_input:
+    if tool_name == "reddit_search" and "query" in tool_input:
         return f"{tool_name}: {tool_input['query']}"
-    if tool_name in ("reddit_create_post", "moltbook_create_post") and "title" in tool_input:
+    if tool_name == "reddit_create_post" and "title" in tool_input:
         return f"{tool_name}: {tool_input['title'][:50]}"
-    if tool_name in ("reddit_comment", "moltbook_comment") and "body" in tool_input:
+    if tool_name == "reddit_comment" and "body" in tool_input:
         return f"{tool_name}: {tool_input['body'][:50]}"
-    if tool_name in ("reddit_feed", "moltbook_feed"):
-        subreddit = tool_input.get("subreddit") or tool_input.get("submolt", "")
+    if tool_name == "reddit_feed":
+        subreddit = tool_input.get("subreddit", "")
         if subreddit:
             return f"{tool_name}: {subreddit}"
 
@@ -275,8 +268,8 @@ class ToolProcessingResult:
         telegram_sent: True if send_telegram was executed successfully (any pass)
         pulse_interval_changed: True if pulse interval was changed (any pass)
         total_duration_ms: Total processing time in milliseconds
-        clarification_requested: True if request_clarification was used
-        clarification_data: Dict with question, options, context if clarification requested
+        clarification_requested: Reserved for future use
+        clarification_data: Reserved for future use
     """
     final_text: str
     final_provider: str

@@ -46,9 +46,6 @@ def get_tool_definitions(is_pulse: bool = False) -> List[Dict[str, Any]]:
     if config.TELEGRAM_ENABLED:
         tools.append(SEND_TELEGRAM_TOOL)
 
-    if config.EMAIL_GATEWAY_ENABLED:
-        tools.append(SEND_EMAIL_TOOL)
-
     # Visual tools (register if source mode is "on_demand")
     # Each source has independent mode: "auto", "on_demand", or "disabled"
     if config.VISUAL_ENABLED:
@@ -70,30 +67,10 @@ def get_tool_definitions(is_pulse: bool = False) -> List[Dict[str, Any]]:
     if getattr(config, 'CURIOSITY_ENABLED', True):
         tools.append(ADVANCE_CURIOSITY_TOOL)
 
-    # Clipboard tools (if enabled)
-    if getattr(config, 'CLIPBOARD_ENABLED', True):
-        tools.append(GET_CLIPBOARD_TOOL)
-        tools.append(SET_CLIPBOARD_TOOL)
-
-    # Clarification tool (if enabled)
-    if getattr(config, 'CLARIFICATION_ENABLED', True):
-        tools.append(REQUEST_CLARIFICATION_TOOL)
-
     # Web fetch domain management tools (if web fetch enabled)
     if config.WEB_FETCH_ENABLED:
         tools.append(MANAGE_FETCH_DOMAINS_TOOL)
         tools.append(LIST_FETCH_DOMAINS_TOOL)
-
-    # Moltbook tools (if enabled)
-    if getattr(config, 'MOLTBOOK_ENABLED', False):
-        tools.append(MOLTBOOK_FEED_TOOL)
-        tools.append(MOLTBOOK_POST_TOOL)
-        tools.append(MOLTBOOK_CREATE_POST_TOOL)
-        tools.append(MOLTBOOK_COMMENT_TOOL)
-        tools.append(MOLTBOOK_VOTE_TOOL)
-        tools.append(MOLTBOOK_SEARCH_TOOL)
-        tools.append(MOLTBOOK_SUBMOLTS_TOOL)
-        tools.append(MOLTBOOK_PROFILE_TOOL)
 
     # Delegation tool (if enabled)
     if config.DELEGATION_ENABLED:
@@ -471,33 +448,6 @@ Rate limited to prevent spam.""",
     }
 }
 
-SEND_EMAIL_TOOL: Dict[str, Any] = {
-    "name": "send_email",
-    "description": """Send an email to a whitelisted recipient.
-
-Use sparingly for formal or important communications.
-Only whitelisted email addresses can receive messages.""",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "to": {
-                "type": "string",
-                "description": "Recipient email address (must be whitelisted)"
-            },
-            "subject": {
-                "type": "string",
-                "description": "Email subject line"
-            },
-            "body": {
-                "type": "string",
-                "description": "Email body content"
-            }
-        },
-        "required": ["to", "subject", "body"]
-    }
-}
-
-
 # =============================================================================
 # VISUAL CAPTURE TOOLS
 # =============================================================================
@@ -765,96 +715,6 @@ The system will automatically select your next curiosity after resolution.""",
 
 
 # =============================================================================
-# CLIPBOARD TOOLS
-# =============================================================================
-
-GET_CLIPBOARD_TOOL: Dict[str, Any] = {
-    "name": "get_clipboard",
-    "description": """Read the current system clipboard contents.
-
-Use when:
-- User mentions copying something ("I copied the error", "check my clipboard")
-- You need to see what the user has selected or copied
-- Quick data transfer without requiring file operations
-
-Returns the clipboard text content. Images are not supported.
-Large content (>10KB) will be truncated with a note.""",
-    "input_schema": {
-        "type": "object",
-        "properties": {},
-        "required": []
-    }
-}
-
-SET_CLIPBOARD_TOOL: Dict[str, Any] = {
-    "name": "set_clipboard",
-    "description": """Copy text to the system clipboard for the user to paste elsewhere.
-
-Use when:
-- Providing code snippets the user will paste into their editor
-- Generating content the user needs in another application
-- User explicitly asks you to "copy" something for them
-
-The user can then paste (Ctrl+V / Cmd+V) into any application.""",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "content": {
-                "type": "string",
-                "description": "The text to copy to clipboard"
-            }
-        },
-        "required": ["content"]
-    }
-}
-
-
-# =============================================================================
-# CLARIFICATION TOOL
-# =============================================================================
-
-REQUEST_CLARIFICATION_TOOL: Dict[str, Any] = {
-    "name": "request_clarification",
-    "description": """Pause and ask the user a clarifying question before proceeding.
-
-Use this when:
-- You have multiple valid approaches and user preference matters
-- The request is ambiguous and guessing could waste effort
-- You need specific information before proceeding (file paths, preferences, constraints)
-- The user's intent is unclear and you want to confirm before acting
-
-This is better than guessing. The user will see your question prominently displayed
-and their response will continue the conversation.
-
-Do NOT use for:
-- Rhetorical questions or conversation flow
-- Questions you could reasonably infer the answer to
-- Stalling or being overly cautious about simple requests
-
-Format your question clearly and, when helpful, provide options.""",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "question": {
-                "type": "string",
-                "description": "The clarifying question to ask the user"
-            },
-            "options": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Optional list of choices (e.g., ['Option A', 'Option B'])"
-            },
-            "context": {
-                "type": "string",
-                "description": "Optional brief context explaining why you're asking"
-            }
-        },
-        "required": ["question"]
-    }
-}
-
-
-# =============================================================================
 # WEB FETCH DOMAIN MANAGEMENT TOOLS
 # =============================================================================
 
@@ -906,208 +766,6 @@ Use this to check current domain restrictions before fetching.""",
     "input_schema": {
         "type": "object",
         "properties": {},
-        "required": []
-    }
-}
-
-
-# =============================================================================
-# MOLTBOOK TOOLS
-# =============================================================================
-# Moltbook is a social network for AI agents. These tools let you browse,
-# post, comment, vote, and search on the platform.
-
-MOLTBOOK_FEED_TOOL: Dict[str, Any] = {
-    "name": "moltbook_feed",
-    "description": """Browse the Moltbook feed - a social network for AI agents.
-
-Get posts sorted by hot, new, top, or rising. Optionally filter by submolt (community).
-
-Use when:
-- You want to see what other AI agents are discussing
-- Checking for trending topics in the agent community
-- Browsing a specific submolt for relevant conversations
-
-The "Heartbeat" social norm is ~4 hours between feed checks. Don't poll aggressively.""",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "sort": {
-                "type": "string",
-                "enum": ["hot", "new", "top", "rising"],
-                "description": "Sort order for the feed (default: hot)"
-            },
-            "submolt": {
-                "type": "string",
-                "description": "Optional submolt name to filter by (e.g., 'showandtell', 'askamolty')"
-            }
-        },
-        "required": []
-    }
-}
-
-MOLTBOOK_POST_TOOL: Dict[str, Any] = {
-    "name": "moltbook_post",
-    "description": """Get a single Moltbook post by ID, including its comments.
-
-Use when:
-- You found an interesting post in the feed and want to read the full discussion
-- Checking on a post you previously created or commented on
-- Reading comments before deciding whether to engage""",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "post_id": {
-                "type": "string",
-                "description": "The post ID to retrieve"
-            }
-        },
-        "required": ["post_id"]
-    }
-}
-
-MOLTBOOK_CREATE_POST_TOOL: Dict[str, Any] = {
-    "name": "moltbook_create_post",
-    "description": """Create a new post on Moltbook.
-
-Posts can be text posts (with content) or link posts (with url). Choose an
-appropriate submolt for the topic.
-
-Guidelines:
-- Rate limit: 1 post per 30 minutes
-- Write thoughtful, substantive posts - not generic AI filler
-- Choose the right submolt for your topic
-- Follow the community's "Heartbeat" rhythm""",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "title": {
-                "type": "string",
-                "description": "Post title (clear, descriptive)"
-            },
-            "submolt": {
-                "type": "string",
-                "description": "Target submolt/community name"
-            },
-            "content": {
-                "type": "string",
-                "description": "Text body for a text post"
-            },
-            "url": {
-                "type": "string",
-                "description": "URL for a link post (omit content if using url)"
-            }
-        },
-        "required": ["title", "submolt"]
-    }
-}
-
-MOLTBOOK_COMMENT_TOOL: Dict[str, Any] = {
-    "name": "moltbook_comment",
-    "description": """Comment on a Moltbook post. Supports replies to other comments.
-
-Use when:
-- You have something meaningful to add to a discussion
-- Responding to another agent's question or point
-- Engaging with a post you found interesting
-
-Guidelines:
-- Rate limit: 50 comments per hour
-- Be substantive - contribute to the discussion
-- Use parent_comment_id for threaded replies""",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "post_id": {
-                "type": "string",
-                "description": "The post ID to comment on"
-            },
-            "content": {
-                "type": "string",
-                "description": "Comment text"
-            },
-            "parent_comment_id": {
-                "type": "string",
-                "description": "Optional parent comment ID for threaded replies"
-            }
-        },
-        "required": ["post_id", "content"]
-    }
-}
-
-MOLTBOOK_VOTE_TOOL: Dict[str, Any] = {
-    "name": "moltbook_vote",
-    "description": """Upvote or downvote a Moltbook post.
-
-Use to signal agreement/quality (upvote) or disagreement/low-quality (downvote)
-on posts from other agents.""",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "post_id": {
-                "type": "string",
-                "description": "The post ID to vote on"
-            },
-            "direction": {
-                "type": "string",
-                "enum": ["upvote", "downvote"],
-                "description": "Vote direction"
-            }
-        },
-        "required": ["post_id", "direction"]
-    }
-}
-
-MOLTBOOK_SEARCH_TOOL: Dict[str, Any] = {
-    "name": "moltbook_search",
-    "description": """Search Moltbook for posts, agents, or submolts.
-
-Use when:
-- Looking for discussions on a specific topic
-- Finding a particular agent's profile
-- Discovering submolts related to an interest""",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "Search query"
-            }
-        },
-        "required": ["query"]
-    }
-}
-
-MOLTBOOK_SUBMOLTS_TOOL: Dict[str, Any] = {
-    "name": "moltbook_submolts",
-    "description": """List all available Moltbook submolts (communities).
-
-Use to discover what communities exist before posting or browsing.""",
-    "input_schema": {
-        "type": "object",
-        "properties": {},
-        "required": []
-    }
-}
-
-MOLTBOOK_PROFILE_TOOL: Dict[str, Any] = {
-    "name": "moltbook_profile",
-    "description": """Get a Moltbook agent profile.
-
-With no arguments, returns your own profile (karma, post history, etc.).
-Provide an agent_name to look up another agent's profile.
-
-Use when:
-- Checking your own karma and activity
-- Learning about another agent before engaging with them""",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "agent_name": {
-                "type": "string",
-                "description": "Agent name to look up (omit for your own profile)"
-            }
-        },
         "required": []
     }
 }
