@@ -488,24 +488,30 @@ class CalendarGateway:
 
     def _get_local_timezone(self) -> str:
         """
-        Get the local timezone name.
+        Get the IANA timezone name for calendar events.
+
+        Uses the configured GOOGLE_CALENDAR_TIMEZONE setting, falling back
+        to system detection and then UTC.
 
         Returns:
             IANA timezone name (e.g., "America/New_York") or UTC fallback
         """
+        from config import GOOGLE_CALENDAR_TIMEZONE
+
+        if GOOGLE_CALENDAR_TIMEZONE:
+            return GOOGLE_CALENDAR_TIMEZONE
+
         try:
-            import time
-            tz_name = time.tzname[0]
-            # Try to get the proper IANA name
+            # Try to get the proper IANA name from the system
             local_tz = datetime.now().astimezone().tzinfo
             if hasattr(local_tz, 'key'):
                 return local_tz.key
             if hasattr(local_tz, 'zone'):
                 return local_tz.zone
-            # Fallback: return the abbreviation (less reliable but functional)
-            return tz_name
         except Exception:
-            return "UTC"
+            pass
+
+        return "UTC"
 
 
 # Singleton instance

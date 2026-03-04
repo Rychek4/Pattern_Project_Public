@@ -743,6 +743,7 @@ GOOGLE_CALENDAR_TOKEN_PATH = os.getenv(
     "GOOGLE_CALENDAR_TOKEN_PATH",
     str(DATA_DIR / "Calendar_Google_Token.json")
 )
+GOOGLE_CALENDAR_TIMEZONE = os.getenv("GOOGLE_CALENDAR_TIMEZONE", "America/New_York")
 
 # =============================================================================
 # GUARDIAN WATCHDOG CONFIGURATION
