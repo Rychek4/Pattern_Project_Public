@@ -182,10 +182,11 @@ Use this when:
         events = result.data
         lines = [f"  Found {len(events)} event(s):"]
         for event in events:
+            event_id = event.get("event_id", "")
             title = event.get("title", "(No title)")
             start = event.get("start", "")
             end = event.get("end", "")
-            line = f"  - {title}: {start} to {end}"
+            line = f"  - [{event_id}] {title}: {start} to {end}"
             if event.get("location"):
                 line += f" @ {event['location']}"
             if event.get("recurring_event_id"):
