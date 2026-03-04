@@ -285,10 +285,30 @@ def capture_webcam_bytes() -> Optional[bytes]:
 # IMAGE FORMATTING FOR CLAUDE API
 # =============================================================================
 
+def _detect_media_type(image_bytes: bytes) -> str:
+    """Detect image MIME type from magic bytes.
+
+    Args:
+        image_bytes: Raw image bytes
+
+    Returns:
+        Detected MIME type string, defaults to "image/jpeg" if unknown
+    """
+    if image_bytes[:8] == b'\x89PNG\r\n\x1a\n':
+        return "image/png"
+    if image_bytes[:2] == b'\xff\xd8':
+        return "image/jpeg"
+    if image_bytes[:4] == b'GIF8':
+        return "image/gif"
+    if image_bytes[:4] == b'RIFF' and len(image_bytes) > 11 and image_bytes[8:12] == b'WEBP':
+        return "image/webp"
+    return "image/jpeg"
+
+
 def format_image_for_claude(
     image_bytes: bytes,
     source_type: str,
-    media_type: str = "image/jpeg"
+    media_type: Optional[str] = None
 ) -> ImageContent:
     """
     Format raw image bytes into Claude API-compatible content.
@@ -296,11 +316,14 @@ def format_image_for_claude(
     Args:
         image_bytes: Raw image data
         source_type: Origin of image ("screenshot", "webcam", or "telegram")
-        media_type: MIME type of the image
+        media_type: Optional MIME type of the image. If not provided,
+                    detected automatically from image magic bytes.
 
     Returns:
         ImageContent object ready for API use
     """
+    if not media_type:
+        media_type = _detect_media_type(image_bytes)
     encoded = base64.b64encode(image_bytes).decode('utf-8')
     return ImageContent(
         media_type=media_type,
