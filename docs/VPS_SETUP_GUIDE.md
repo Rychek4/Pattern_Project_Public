@@ -838,6 +838,56 @@ DigitalOcean offers automatic weekly droplet snapshots for 20% of the droplet co
 Enable under **Droplet → Backups** in the DO control panel. This backs up the entire
 server image, not just the database.
 
+### 10.5 (Optional) Google Drive Backups
+
+Pattern can upload compressed database snapshots directly to Google Drive.
+Uses the `drive.file` scope so it can only see files it created — it cannot
+access any of your personal Drive files.
+
+**One-time setup:**
+
+1. In [Google Cloud Console](https://console.cloud.google.com), go to the same
+   project you used for Google Calendar (or create a new one).
+2. Enable the **Google Drive API** (APIs & Services → Library → search "Drive").
+3. You can reuse the same OAuth2 credentials file (`Calendar_Google_Credentials.json`).
+4. Set the following in your `.env`:
+
+```bash
+GOOGLE_DRIVE_BACKUP_ENABLED=true
+# These defaults are usually fine:
+# GOOGLE_DRIVE_BACKUP_CREDENTIALS_PATH=data/Calendar_Google_Credentials.json
+# GOOGLE_DRIVE_BACKUP_TOKEN_PATH=data/Drive_Google_Token.json
+# GOOGLE_DRIVE_BACKUP_FOLDER_NAME=Pattern Backups
+# GOOGLE_DRIVE_BACKUP_RETENTION_COUNT=7
+```
+
+5. On first use, a browser window opens for OAuth consent. After consent, the
+   token is saved and auto-refreshes (no browser needed again).
+
+**Running a backup** (from the Pattern project directory):
+
+```bash
+cd /opt/pattern
+source venv/bin/activate
+python -c "
+from communication.drive_backup_gateway import init_drive_backup_gateway, run_drive_backup
+init_drive_backup_gateway()
+result = run_drive_backup()
+print(result)
+"
+```
+
+**Automated daily backups** — add to the `pattern` user's crontab:
+
+```bash
+crontab -e
+# Add this line (runs at 4 AM daily, after the local backup at 3 AM):
+0 4 * * * cd /opt/pattern && source venv/bin/activate && python -c "from communication.drive_backup_gateway import init_drive_backup_gateway, run_drive_backup; init_drive_backup_gateway(); print(run_drive_backup())" >> /opt/pattern/logs/drive_backup.log 2>&1
+```
+
+Backups are stored in a "Pattern Backups" folder on Drive. Old backups beyond
+the retention count (default 7) are automatically deleted after each upload.
+
 ---
 
 ## 11. Set Up Log Rotation
