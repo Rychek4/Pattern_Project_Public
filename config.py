@@ -689,9 +689,10 @@ GOOGLE_CALENDAR_DEFAULT_REMINDERS = [
 # =============================================================================
 # GOOGLE DRIVE BACKUP CONFIGURATION
 # =============================================================================
-# Automated database backups to Google Drive. Creates compressed SQLite
-# snapshots and uploads them to a dedicated Drive folder. Uses the
-# drive.file scope (can only see files created by this app).
+# Automated backups to Google Drive. Creates a compressed tar.gz archive
+# containing the SQLite database snapshot and the data/files/ directory
+# (user writings, journals, novels), then uploads it to a dedicated Drive
+# folder. Uses the drive.file scope (can only see files created by this app).
 #
 # Setup:
 # 1. In Google Cloud Console, enable the Google Drive API (same project as Calendar)

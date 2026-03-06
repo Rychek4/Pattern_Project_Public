@@ -1,9 +1,11 @@
 """
 Pattern Project - Google Drive Backup Gateway
-OAuth2-based Google Drive API integration for backing up the Pattern database.
+OAuth2-based Google Drive API integration for backing up the Pattern database
+and user files (writings, journals, novels).
 
-This module uploads compressed SQLite snapshots to a dedicated Google Drive
-folder and prunes old backups beyond a configurable retention count. On first
+This module creates a compressed tar archive containing a safe SQLite snapshot
+and the full data/files/ directory, uploads it to a dedicated Google Drive
+folder, and prunes old backups beyond a configurable retention count. On first
 use, it triggers a browser-based OAuth consent flow. After consent, tokens
 are saved locally and auto-refresh.
 
@@ -11,10 +13,10 @@ Uses the drive.file scope so the app can only see files it created — it
 cannot access any other files on your Drive.
 """
 
-import gzip
 import os
 import shutil
 import sqlite3
+import tarfile
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime
@@ -211,12 +213,18 @@ class DriveBackupGateway:
         log_success(f"Created Drive folder '{self.folder_name}'")
         return self._folder_id
 
-    def run_backup(self, db_path: str) -> BackupResult:
+    def run_backup(self, db_path: str, files_dir: Optional[str] = None) -> BackupResult:
         """
-        Perform a full backup: snapshot the database, compress, upload, and prune.
+        Perform a full backup: snapshot the database, bundle with user files,
+        compress into a tar.gz archive, upload, and prune.
+
+        The archive contains:
+          - pattern_snapshot.db  (safe SQLite snapshot)
+          - files/              (user writings, journals, novels from data/files/)
 
         Args:
             db_path: Path to the SQLite database file to back up
+            files_dir: Path to the user files directory (defaults to data/files/)
 
         Returns:
             BackupResult with upload metadata on success
@@ -242,23 +250,38 @@ class DriveBackupGateway:
             src_conn.close()
             log_info("SQLite snapshot complete")
 
-            # Step 2: Compress with gzip
-            gz_filename = f"pattern_backup_{timestamp}.db.gz"
-            gz_path = os.path.join(tmp_dir, gz_filename)
-            log_info("Compressing snapshot...")
-            with open(snapshot_path, "rb") as f_in:
-                with gzip.open(gz_path, "wb") as f_out:
-                    shutil.copyfileobj(f_in, f_out)
-
+            # Step 2: Create tar.gz archive with DB snapshot + user files
+            archive_filename = f"pattern_backup_{timestamp}.tar.gz"
+            archive_path = os.path.join(tmp_dir, archive_filename)
             original_size = os.path.getsize(snapshot_path)
-            compressed_size = os.path.getsize(gz_path)
+            files_count = 0
+
+            log_info("Creating compressed archive...")
+            with tarfile.open(archive_path, "w:gz") as tar:
+                # Add the database snapshot
+                tar.add(snapshot_path, arcname="pattern_snapshot.db")
+
+                # Add user files directory if it exists and has content
+                if files_dir and os.path.isdir(files_dir):
+                    for entry in os.scandir(files_dir):
+                        if entry.is_file() or entry.is_dir():
+                            tar.add(entry.path, arcname=f"files/{entry.name}")
+                            files_count += 1
+                    if files_count > 0:
+                        log_info(f"Included {files_count} item(s) from {files_dir}")
+                    else:
+                        log_info("User files directory is empty, archive contains DB only")
+                else:
+                    log_info("No user files directory found, archive contains DB only")
+
+            compressed_size = os.path.getsize(archive_path)
             log_info(
-                f"Compressed {original_size / 1024 / 1024:.1f} MB → "
-                f"{compressed_size / 1024 / 1024:.1f} MB"
+                f"Archive created: {compressed_size / 1024 / 1024:.1f} MB "
+                f"(DB: {original_size / 1024 / 1024:.1f} MB + {files_count} file(s))"
             )
 
             # Step 3: Upload to Google Drive
-            upload_result = self._upload_file(gz_path, gz_filename)
+            upload_result = self._upload_file(archive_path, archive_filename)
             if not upload_result.success:
                 return upload_result
 
@@ -273,15 +296,17 @@ class DriveBackupGateway:
             return BackupResult(
                 success=True,
                 message=(
-                    f"Backup uploaded: {gz_filename} "
-                    f"({compressed_size / 1024 / 1024:.1f} MB)"
+                    f"Backup uploaded: {archive_filename} "
+                    f"({compressed_size / 1024 / 1024:.1f} MB, "
+                    f"{files_count} user file(s))"
                     f"{prune_msg}"
                 ),
                 data={
-                    "filename": gz_filename,
+                    "filename": archive_filename,
                     "file_id": upload_result.data.get("file_id") if upload_result.data else None,
-                    "original_size_bytes": original_size,
+                    "db_size_bytes": original_size,
                     "compressed_size_bytes": compressed_size,
+                    "files_count": files_count,
                     "timestamp": timestamp,
                 },
             )
@@ -321,7 +346,7 @@ class DriveBackupGateway:
 
             media = MediaFileUpload(
                 file_path,
-                mimetype="application/gzip",
+                mimetype="application/gzip" if file_path.endswith(".gz") else "application/octet-stream",
                 resumable=True,
             )
 
@@ -526,17 +551,21 @@ def init_drive_backup_gateway(
     return _gateway
 
 
-def run_drive_backup(db_path: Optional[str] = None) -> BackupResult:
+def run_drive_backup(db_path: Optional[str] = None, files_dir: Optional[str] = None) -> BackupResult:
     """
     Convenience function: run a backup using the global gateway.
 
     Args:
         db_path: Path to the database (defaults to config DATABASE_PATH)
+        files_dir: Path to user files directory (defaults to config FILE_STORAGE_DIR)
 
     Returns:
         BackupResult from the backup operation
     """
-    from config import DATABASE_PATH
+    from config import DATABASE_PATH, FILE_STORAGE_DIR
 
     gateway = get_drive_backup_gateway()
-    return gateway.run_backup(db_path or str(DATABASE_PATH))
+    return gateway.run_backup(
+        db_path or str(DATABASE_PATH),
+        files_dir or str(FILE_STORAGE_DIR),
+    )

@@ -840,9 +840,11 @@ server image, not just the database.
 
 ### 10.5 (Optional) Google Drive Backups
 
-Pattern can upload compressed database snapshots directly to Google Drive.
-Uses the `drive.file` scope so it can only see files it created — it cannot
-access any of your personal Drive files.
+Pattern can upload compressed backups directly to Google Drive. Each backup is
+a `.tar.gz` archive containing the SQLite database snapshot and the entire
+`data/files/` directory (user writings, journals, novels). Uses the `drive.file`
+scope so it can only see files it created — it cannot access any of your
+personal Drive files.
 
 **One-time setup:**
 
@@ -885,8 +887,9 @@ crontab -e
 0 4 * * * cd /opt/pattern && source venv/bin/activate && python -c "from communication.drive_backup_gateway import init_drive_backup_gateway, run_drive_backup; init_drive_backup_gateway(); print(run_drive_backup())" >> /opt/pattern/logs/drive_backup.log 2>&1
 ```
 
-Backups are stored in a "Pattern Backups" folder on Drive. Old backups beyond
-the retention count (default 7) are automatically deleted after each upload.
+Backups are stored in a "Pattern Backups" folder on Drive as `.tar.gz` archives
+containing both the database and user files. Old backups beyond the retention
+count (default 7) are automatically deleted after each upload.
 
 ---
 
