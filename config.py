@@ -687,6 +687,31 @@ GOOGLE_CALENDAR_DEFAULT_REMINDERS = [
 ]
 
 # =============================================================================
+# GOOGLE DRIVE BACKUP CONFIGURATION
+# =============================================================================
+# Automated database backups to Google Drive. Creates compressed SQLite
+# snapshots and uploads them to a dedicated Drive folder. Uses the
+# drive.file scope (can only see files created by this app).
+#
+# Setup:
+# 1. In Google Cloud Console, enable the Google Drive API (same project as Calendar)
+# 2. Reuse the same OAuth2 credentials file (or create a separate one)
+# 3. Set GOOGLE_DRIVE_BACKUP_ENABLED=true in .env
+# 4. On first use, a browser window will open for OAuth consent
+# 5. After consent, the token is saved and auto-refreshes
+GOOGLE_DRIVE_BACKUP_ENABLED = os.getenv("GOOGLE_DRIVE_BACKUP_ENABLED", "false").lower() == "true"
+GOOGLE_DRIVE_BACKUP_CREDENTIALS_PATH = os.getenv(
+    "GOOGLE_DRIVE_BACKUP_CREDENTIALS_PATH",
+    str(DATA_DIR / "Calendar_Google_Credentials.json")
+)
+GOOGLE_DRIVE_BACKUP_TOKEN_PATH = os.getenv(
+    "GOOGLE_DRIVE_BACKUP_TOKEN_PATH",
+    str(DATA_DIR / "Drive_Google_Token.json")
+)
+GOOGLE_DRIVE_BACKUP_FOLDER_NAME = os.getenv("GOOGLE_DRIVE_BACKUP_FOLDER_NAME", "Pattern Backups")
+GOOGLE_DRIVE_BACKUP_RETENTION_COUNT = int(os.getenv("GOOGLE_DRIVE_BACKUP_RETENTION_COUNT", "7"))
+
+# =============================================================================
 # GUARDIAN WATCHDOG CONFIGURATION
 # =============================================================================
 # Guardian is an external watchdog process that monitors Pattern's health
