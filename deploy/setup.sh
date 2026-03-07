@@ -97,15 +97,32 @@ systemctl daemon-reload
 systemctl enable pattern
 
 # --- Firewall ---
-echo "Configuring firewall..."
+echo "Checking firewall..."
 if command -v ufw &>/dev/null; then
-    ufw allow OpenSSH
-    ufw allow 'Nginx Full'
-    ufw --force enable
-    echo "  UFW enabled (SSH + Nginx allowed)"
+    if ufw status | grep -q "Status: active"; then
+        echo "  UFW already active, skipping (manage manually)"
+    else
+        ufw default deny incoming
+        ufw default allow outgoing
+        ufw allow 22/tcp     # SSH
+        ufw allow 80/tcp     # HTTP (certbot + redirect)
+        ufw allow 443/tcp    # HTTPS
+        ufw --force enable
+        echo "  UFW enabled (SSH + HTTP + HTTPS only)"
+        echo "  Ports 5000/8080 intentionally NOT opened (nginx proxies locally)"
+    fi
 else
     echo "  UFW not found, skipping firewall setup"
 fi
+
+# --- fail2ban ---
+echo "Setting up fail2ban..."
+if ! dpkg -s fail2ban &>/dev/null 2>&1; then
+    apt-get install -y -qq fail2ban
+fi
+systemctl enable fail2ban
+systemctl start fail2ban
+echo "  fail2ban enabled (SSH brute-force protection)"
 
 echo ""
 echo "=== Setup Complete ==="
