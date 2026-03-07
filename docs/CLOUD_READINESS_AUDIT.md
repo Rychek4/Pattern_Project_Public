@@ -119,7 +119,7 @@ The project is **architecturally ready** for a single-instance VPS deployment. T
 
 **Current state:** Single-process Python app managed by systemd.
 
-- Entry point: `python main.py --web` (FastAPI + Uvicorn)
+- Entry point: `python main.py` (FastAPI + Uvicorn, web mode is the default)
 - Background threads: system pulse, reminder scheduler, Telegram listener, subprocess monitor, Guardian checker
 - No multi-worker / multi-process configuration (Uvicorn runs single-worker by default)
 - File descriptor limit: 65,535
@@ -286,7 +286,6 @@ The project is **architecturally ready** for a single-instance VPS deployment. T
   - `telegram_bot` + `TELEGRAM_CHAT_ID` (if using Telegram)
   - `APP_EMAIL_ADDRESS` + `APP_EMAIL_PASS` (if using email)
 - [ ] **Disable unneeded features** in `.env` to reduce attack surface:
-  - `CLIPBOARD_ENABLED=false` (no clipboard on VPS)
   - `VISUAL_ENABLED=false` (no screen/webcam on VPS)
   - `VISUAL_SCREENSHOT_MODE=disabled`
   - `VISUAL_WEBCAM_MODE=disabled`

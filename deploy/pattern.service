@@ -36,7 +36,7 @@ LimitNOFILE=65535
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=/opt/pattern/data /opt/pattern/logs
+ReadWritePaths=/opt/pattern/data /opt/pattern/logs /opt/pattern/backups
 PrivateTmp=yes
 
 # Logging
