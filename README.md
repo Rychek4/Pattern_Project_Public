@@ -179,7 +179,6 @@ Optional:
 - `python-telegram-bot>=21.0` — Telegram integration
 - `opencv-python` — Webcam capture
 - `pillow` — Screenshot capture
-- `pyperclip` — Clipboard access
 
 ### 2. Configure Environment
 
