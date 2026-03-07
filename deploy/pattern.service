@@ -17,7 +17,7 @@ Type=simple
 User=pattern
 Group=pattern
 WorkingDirectory=/opt/pattern
-ExecStart=/opt/pattern/venv/bin/python main.py --web
+ExecStart=/opt/pattern/venv/bin/python main.py
 
 # Environment file for secrets (API keys, auth password)
 # Create /opt/pattern/.env with your configuration

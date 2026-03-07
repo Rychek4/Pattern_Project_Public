@@ -50,7 +50,7 @@ pip install --upgrade pip -q
 pip install -r requirements.txt -q
 
 # Create data and logs directories
-mkdir -p data logs
+mkdir -p data data/files logs
 chown -R pattern:pattern "$APP_DIR"
 
 # --- Environment file template ---
@@ -95,6 +95,17 @@ echo "Installing systemd service..."
 cp "$APP_DIR/deploy/pattern.service" /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable pattern
+
+# --- Firewall ---
+echo "Configuring firewall..."
+if command -v ufw &>/dev/null; then
+    ufw allow OpenSSH
+    ufw allow 'Nginx Full'
+    ufw --force enable
+    echo "  UFW enabled (SSH + Nginx allowed)"
+else
+    echo "  UFW not found, skipping firewall setup"
+fi
 
 echo ""
 echo "=== Setup Complete ==="
