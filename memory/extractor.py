@@ -29,6 +29,7 @@ from core.logger import log_info, log_warning, log_error, log_success
 from core.temporal import get_temporal_tracker
 from memory.conversation import get_conversation_manager, ConversationTurn
 from memory.vector_store import get_vector_store
+from core.embeddings import is_model_loaded
 from llm.router import get_llm_router, TaskType
 from concurrency.locks import get_lock_manager
 from config import USER_NAME, AI_NAME
@@ -492,6 +493,18 @@ class MemoryExtractor:
         event_bus.emit_event(ProcessEventType.MEMORY_EXTRACTION, detail="Deciding what matters...")
 
         try:
+            # If embedding model isn't loaded, attempt to load it once.
+            # The initial failure may have been transient (e.g. read-only fs
+            # now fixed, network restored, etc.).
+            if not is_model_loaded():
+                from core.embeddings import load_embedding_model
+                from config import EMBEDDING_MODEL
+                log_info("Embedding model not loaded — attempting reload...", prefix="🧠")
+                if load_embedding_model(EMBEDDING_MODEL):
+                    log_info("Embedding model loaded successfully on retry", prefix="🧠")
+                else:
+                    log_error("Embedding model reload failed — extraction will be skipped", prefix="🧠")
+
             memories_created = self.extract_memories()
             duration = (time.time() - start_time) * 1000
             log_info(f"=== EXTRACTION THREAD COMPLETE ({duration:.0f}ms) ===", prefix="🧠")
@@ -580,6 +593,17 @@ class MemoryExtractor:
         """
         with self._lock_manager.acquire("memory_extraction"):
             try:
+                # Bail out early if embedding model isn't loaded.
+                # Without it, add_memory() will fail for every memory,
+                # wasting the expensive LLM extraction API call.
+                if not is_model_loaded():
+                    log_error(
+                        "Embedding model not loaded — skipping extraction to avoid "
+                        "wasted API calls. Turns will remain unprocessed.",
+                        prefix="🧠"
+                    )
+                    return 0
+
                 conversation_mgr = get_conversation_manager()
                 vector_store = get_vector_store()
                 tracker = get_temporal_tracker()

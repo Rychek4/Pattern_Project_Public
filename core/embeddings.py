@@ -3,6 +3,7 @@ Pattern Project - Embeddings Module
 Lazy-loaded sentence transformers for vector embeddings
 """
 
+import os
 import threading
 from typing import Optional, List, Union
 import numpy as np
@@ -37,6 +38,16 @@ def load_embedding_model(model_name: str = "all-MiniLM-L6-v2") -> bool:
 
         try:
             log_loading_start("EMBEDDING MODEL")
+
+            # Ensure HuggingFace cache is on a writable filesystem.
+            # Default ~/.cache/huggingface may be read-only (e.g. /opt/pattern/).
+            # Redirect to DATA_DIR which is always writable.
+            if not os.environ.get("HF_HOME"):
+                from config import DATA_DIR
+                hf_cache = os.path.join(str(DATA_DIR), ".cache", "huggingface")
+                os.makedirs(hf_cache, exist_ok=True)
+                os.environ["HF_HOME"] = hf_cache
+                log_info(f"Set HF_HOME to writable path: {hf_cache}", prefix="📦")
 
             log_info(f"Importing sentence_transformers library...", prefix="📦")
 
