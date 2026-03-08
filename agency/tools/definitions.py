@@ -85,6 +85,11 @@ def get_tool_definitions(is_pulse: bool = False) -> List[Dict[str, Any]]:
         tools.append(ABANDON_READING_TOOL)
         tools.append(RESUME_READING_TOOL)
 
+    # Google Drive backup tool (if enabled)
+    if config.GOOGLE_DRIVE_BACKUP_ENABLED:
+        tools.append(BACKUP_DATABASE_TOOL)
+        tools.append(LIST_BACKUPS_TOOL)
+
     # Google Calendar tools (if enabled)
     if getattr(config, 'GOOGLE_CALENDAR_ENABLED', False):
         tools.append(LIST_CALENDAR_EVENTS_TOOL)
@@ -1586,5 +1591,45 @@ Always confirm with the user before deleting events, especially recurring series
             }
         },
         "required": ["event_id"]
+    }
+}
+
+
+# =============================================================================
+# GOOGLE DRIVE BACKUP TOOLS
+# =============================================================================
+
+BACKUP_DATABASE_TOOL: Dict[str, Any] = {
+    "name": "backup_database",
+    "description": """Back up the Pattern database and user files to Google Drive.
+
+Creates a compressed archive containing:
+- A safe SQLite snapshot of the database
+- All user files (writings, journals, novels from data/files/)
+
+The archive is uploaded to the "Pattern Backups" folder on Google Drive.
+Old backups beyond the retention count are automatically pruned.
+
+Use this proactively to protect data, or when the user asks for a backup.
+No parameters needed — it uses the configured database and files paths.""",
+    "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+    }
+}
+
+LIST_BACKUPS_TOOL: Dict[str, Any] = {
+    "name": "list_backups",
+    "description": """List all database backups stored on Google Drive.
+
+Returns the name, size, and creation date of each backup in the
+"Pattern Backups" folder, ordered by most recent first.
+
+Use this to check backup status or verify that backups are running.""",
+    "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": []
     }
 }
