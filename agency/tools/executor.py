@@ -93,9 +93,6 @@ class ToolExecutor:
             "create_calendar_event": self._exec_create_calendar_event,
             "update_calendar_event": self._exec_update_calendar_event,
             "delete_calendar_event": self._exec_delete_calendar_event,
-            # Google Drive Backup
-            "backup_database": self._exec_backup_database,
-            "list_backups": self._exec_list_backups,
         }
 
     def execute(
@@ -1927,89 +1924,6 @@ class ToolExecutor:
             tool_use_id=id,
             tool_name="delete_calendar_event",
             content=formatted
-        )
-
-    # -------------------------------------------------------------------------
-    # Google Drive Backup
-    # -------------------------------------------------------------------------
-
-    def _exec_backup_database(
-        self, input: Dict, id: str, ctx: Dict
-    ) -> ToolResult:
-        """Run a full database backup to Google Drive."""
-        try:
-            from communication.drive_backup_gateway import run_drive_backup
-        except ImportError:
-            return ToolResult(
-                tool_use_id=id,
-                tool_name="backup_database",
-                content="Drive backup gateway not available. Install: google-api-python-client google-auth-oauthlib",
-                is_error=True
-            )
-
-        bus = get_process_event_bus()
-        bus.emit(ProcessEventType.TOOL_START, tool_name="backup_database", detail="Backing up database to Google Drive...")
-
-        result = run_drive_backup()
-
-        bus.emit(ProcessEventType.TOOL_END, tool_name="backup_database")
-
-        if not result.success:
-            return ToolResult(
-                tool_use_id=id,
-                tool_name="backup_database",
-                content=f"Backup failed: {result.message}",
-                is_error=True
-            )
-
-        return ToolResult(
-            tool_use_id=id,
-            tool_name="backup_database",
-            content=result.message
-        )
-
-    def _exec_list_backups(
-        self, input: Dict, id: str, ctx: Dict
-    ) -> ToolResult:
-        """List all backups on Google Drive."""
-        try:
-            from communication.drive_backup_gateway import get_drive_backup_gateway
-        except ImportError:
-            return ToolResult(
-                tool_use_id=id,
-                tool_name="list_backups",
-                content="Drive backup gateway not available. Install: google-api-python-client google-auth-oauthlib",
-                is_error=True
-            )
-
-        gateway = get_drive_backup_gateway()
-        result = gateway.list_backups()
-
-        if not result.success:
-            return ToolResult(
-                tool_use_id=id,
-                tool_name="list_backups",
-                content=f"Failed to list backups: {result.message}",
-                is_error=True
-            )
-
-        backups = result.data or []
-        if not backups:
-            return ToolResult(
-                tool_use_id=id,
-                tool_name="list_backups",
-                content="No backups found on Google Drive."
-            )
-
-        lines = [f"Found {len(backups)} backup(s) on Google Drive:\n"]
-        for b in backups:
-            size_mb = int(b.get("size", 0)) / 1024 / 1024 if b.get("size") else 0
-            lines.append(f"  - {b['name']}  ({size_mb:.1f} MB, created {b.get('created', 'unknown')})")
-
-        return ToolResult(
-            tool_use_id=id,
-            tool_name="list_backups",
-            content="\n".join(lines)
         )
 
 

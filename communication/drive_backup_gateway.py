@@ -146,23 +146,11 @@ class DriveBackupGateway:
                 creds = None
 
         if not creds or not creds.valid:
+            log_info("Starting Google Drive OAuth consent flow (browser will open)...")
             flow = InstalledAppFlow.from_client_secrets_file(
                 self.credentials_path, self.SCOPES
             )
-
-            # Detect headless environments (no DISPLAY / no desktop session)
-            is_headless = not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY")
-
-            if is_headless:
-                log_info(
-                    "Headless environment detected — using console-based OAuth flow. "
-                    "Visit the URL printed below and paste the authorization code."
-                )
-                creds = flow.run_console()
-            else:
-                log_info("Starting Google Drive OAuth consent flow (browser will open)...")
-                creds = flow.run_local_server(port=0)
-
+            creds = flow.run_local_server(port=0)
             log_success("Google Drive OAuth consent completed")
 
             # Save token for future use
