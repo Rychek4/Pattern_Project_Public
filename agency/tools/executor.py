@@ -93,6 +93,12 @@ class ToolExecutor:
             "create_calendar_event": self._exec_create_calendar_event,
             "update_calendar_event": self._exec_update_calendar_event,
             "delete_calendar_event": self._exec_delete_calendar_event,
+            # Blog
+            "publish_blog_post": self._exec_publish_blog_post,
+            "save_blog_draft": self._exec_save_blog_draft,
+            "edit_blog_post": self._exec_edit_blog_post,
+            "list_blog_posts": self._exec_list_blog_posts,
+            "unpublish_blog_post": self._exec_unpublish_blog_post,
         }
 
     def execute(
@@ -1924,6 +1930,141 @@ class ToolExecutor:
             tool_use_id=id,
             tool_name="delete_calendar_event",
             content=formatted
+        )
+
+    # =========================================================================
+    # BLOG TOOLS
+    # =========================================================================
+
+    def _exec_publish_blog_post(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Create and publish a blog post."""
+        from agency.commands.handlers.blog_handler import PublishBlogPostHandler
+
+        handler = PublishBlogPostHandler()
+        ctx["blog_params"] = {
+            "title": input.get("title", ""),
+            "content": input.get("content", ""),
+            "tags": input.get("tags", []),
+            "summary": input.get("summary", ""),
+        }
+
+        result = handler.execute(input.get("title", ""), ctx)
+
+        if result.error:
+            return ToolResult(
+                tool_use_id=id, tool_name="publish_blog_post",
+                content=result.get_error_message(), is_error=True,
+            )
+
+        return ToolResult(
+            tool_use_id=id, tool_name="publish_blog_post",
+            content=handler.format_result(result),
+        )
+
+    def _exec_save_blog_draft(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Save a blog post as draft."""
+        from agency.commands.handlers.blog_handler import SaveBlogDraftHandler
+
+        handler = SaveBlogDraftHandler()
+        ctx["blog_params"] = {
+            "title": input.get("title", ""),
+            "content": input.get("content", ""),
+            "tags": input.get("tags", []),
+            "summary": input.get("summary", ""),
+        }
+
+        result = handler.execute(input.get("title", ""), ctx)
+
+        if result.error:
+            return ToolResult(
+                tool_use_id=id, tool_name="save_blog_draft",
+                content=result.get_error_message(), is_error=True,
+            )
+
+        return ToolResult(
+            tool_use_id=id, tool_name="save_blog_draft",
+            content=handler.format_result(result),
+        )
+
+    def _exec_edit_blog_post(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Edit an existing blog post."""
+        from agency.commands.handlers.blog_handler import EditBlogPostHandler
+
+        handler = EditBlogPostHandler()
+        ctx["blog_params"] = {
+            "slug": input.get("slug", ""),
+            "content": input.get("content"),
+            "title": input.get("title"),
+            "tags": input.get("tags"),
+            "summary": input.get("summary"),
+            "status": input.get("status"),
+        }
+
+        result = handler.execute(input.get("slug", ""), ctx)
+
+        if result.error:
+            return ToolResult(
+                tool_use_id=id, tool_name="edit_blog_post",
+                content=result.get_error_message(), is_error=True,
+            )
+
+        return ToolResult(
+            tool_use_id=id, tool_name="edit_blog_post",
+            content=handler.format_result(result),
+        )
+
+    def _exec_list_blog_posts(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """List blog posts."""
+        from agency.commands.handlers.blog_handler import ListBlogPostsHandler
+
+        handler = ListBlogPostsHandler()
+        ctx["blog_params"] = {
+            "status": input.get("status"),
+        }
+
+        result = handler.execute("list", ctx)
+
+        if result.error:
+            return ToolResult(
+                tool_use_id=id, tool_name="list_blog_posts",
+                content=result.get_error_message(), is_error=True,
+            )
+
+        return ToolResult(
+            tool_use_id=id, tool_name="list_blog_posts",
+            content=handler.format_result(result),
+        )
+
+    def _exec_unpublish_blog_post(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Unpublish a blog post (revert to draft)."""
+        from agency.commands.handlers.blog_handler import UnpublishBlogPostHandler
+
+        handler = UnpublishBlogPostHandler()
+        ctx["blog_params"] = {
+            "slug": input.get("slug", ""),
+        }
+
+        result = handler.execute(input.get("slug", ""), ctx)
+
+        if result.error:
+            return ToolResult(
+                tool_use_id=id, tool_name="unpublish_blog_post",
+                content=result.get_error_message(), is_error=True,
+            )
+
+        return ToolResult(
+            tool_use_id=id, tool_name="unpublish_blog_post",
+            content=handler.format_result(result),
         )
 
 

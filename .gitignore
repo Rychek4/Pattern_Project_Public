@@ -40,3 +40,6 @@ build/
 # Models (large files)
 *.gguf
 *.bin
+
+# Blog generated output (rebuild from posts + templates)
+blog/output/
