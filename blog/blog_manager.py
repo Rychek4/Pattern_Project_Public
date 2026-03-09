@@ -163,6 +163,7 @@ def _parse_post(filepath: Path) -> Optional[Dict[str, Any]]:
     meta.setdefault("status", "draft")
     meta.setdefault("tags", [])
     meta.setdefault("summary", "")
+    meta.setdefault("in_response_to", "")  # optional: slug of post this responds to
 
     # Normalize date
     d = meta.get("date")
@@ -197,6 +198,10 @@ def _write_post(filepath: Path, meta: Dict[str, Any], content: str) -> None:
         "status": meta.get("status", "draft"),
         "summary": meta.get("summary", ""),
     }
+    # Only include in_response_to if set
+    irt = meta.get("in_response_to", "")
+    if irt:
+        frontmatter["in_response_to"] = irt
     text = "---\n" + yaml.dump(frontmatter, default_flow_style=False, allow_unicode=True).strip() + "\n---\n\n" + content
     filepath.write_text(text, encoding="utf-8")
 
@@ -225,6 +230,7 @@ def create_post(
     tags: Optional[List[str]] = None,
     summary: str = "",
     status: str = "draft",
+    in_response_to: str = "",
 ) -> Dict[str, Any]:
     """
     Create a new blog post.
@@ -261,6 +267,7 @@ def create_post(
         "tags": tags or [],
         "status": status,
         "summary": summary,
+        "in_response_to": in_response_to,
     }
 
     _write_post(filepath, meta, content)
@@ -372,6 +379,7 @@ def list_posts(status: Optional[str] = None) -> List[Dict[str, Any]]:
             "tags": post["tags"],
             "status": post["status"],
             "summary": post["summary"],
+            "in_response_to": post.get("in_response_to", ""),
         })
 
     posts.sort(key=lambda p: p["date"], reverse=True)
@@ -419,6 +427,40 @@ def _collect_tags(posts: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]
     return dict(sorted(tags.items()))
 
 
+def _collect_authors(posts: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    """Group posts by author. Returns {author_name: [post, ...]}."""
+    authors: Dict[str, List[Dict[str, Any]]] = {}
+    for post in posts:
+        author = post.get("author", "Isaac")
+        if author not in authors:
+            authors[author] = []
+        authors[author].append(post)
+    return dict(sorted(authors.items()))
+
+
+def _resolve_responses(posts: List[Dict[str, Any]]) -> None:
+    """
+    Resolve in_response_to slugs to post metadata.
+    Adds 'response_to_post' and 'responses' fields to each post.
+    Mutates the post dicts in place.
+    """
+    slug_map = {p["slug"]: p for p in posts}
+
+    for post in posts:
+        post["responses"] = []
+        irt = post.get("in_response_to", "")
+        if irt and irt in slug_map:
+            post["response_to_post"] = slug_map[irt]
+        else:
+            post["response_to_post"] = None
+
+    # Build reverse links (which posts respond to this one)
+    for post in posts:
+        irt = post.get("in_response_to", "")
+        if irt and irt in slug_map:
+            slug_map[irt]["responses"].append(post)
+
+
 def _generate_rss(posts: List[Dict[str, Any]], blog_url: str) -> str:
     """Generate an RSS 2.0 feed from published posts."""
     items = []
@@ -456,6 +498,8 @@ def rebuild_site() -> Dict[str, Any]:
         env = _get_jinja_env()
         posts = _get_published_posts()
         all_tags = _collect_tags(posts)
+        all_authors = _collect_authors(posts)
+        _resolve_responses(posts)
         blog_url = getattr(config, "BLOG_URL", "/blog")
 
         template_ctx = {
@@ -464,6 +508,7 @@ def rebuild_site() -> Dict[str, Any]:
             "blog_url": blog_url,
             "posts": posts,
             "all_tags": all_tags,
+            "all_authors": all_authors,
             "now": datetime.now(),
         }
 
@@ -511,6 +556,20 @@ def rebuild_site() -> Dict[str, Any]:
         except Exception:
             pass  # Tags overview is optional
 
+        # Render author index pages
+        authors_out = tmp_dir / "author"
+        authors_out.mkdir()
+        try:
+            author_tmpl = env.get_template("author.html")
+            for author_name, author_posts in all_authors.items():
+                author_slug = _make_slug(author_name)
+                html = author_tmpl.render(
+                    **template_ctx, author_name=author_name, author_posts=author_posts
+                )
+                (authors_out / f"{author_slug}.html").write_text(html, encoding="utf-8")
+        except Exception:
+            pass  # Author pages are optional
+
         # Generate RSS feed
         rss_content = _generate_rss(posts, blog_url)
         (tmp_dir / "feed.xml").write_text(rss_content, encoding="utf-8")
@@ -543,7 +602,7 @@ def rebuild_site() -> Dict[str, Any]:
             f"Blog: site rebuilt ({len(posts)} published posts, {len(all_tags)} tags)",
             prefix="📝"
         )
-        return {"posts": len(posts), "tags": len(all_tags)}
+        return {"posts": len(posts), "tags": len(all_tags), "authors": len(all_authors)}
 
     except Exception as e:
         log_error(f"Blog: rebuild failed: {e}")

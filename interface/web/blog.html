@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pattern — Write Blog Post</title>
+    <style>
+        :root {
+            --bg: #1a1a2e;
+            --bg-secondary: #16213e;
+            --text: #e0e0e0;
+            --text-muted: #8a8a9a;
+            --accent: #7eb8da;
+            --accent-hover: #a3d5f0;
+            --border: #2a2a4a;
+            --code-bg: #0f0f23;
+            --success: #4caf50;
+            --error: #e57373;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            max-width: 720px;
+            margin: 0 auto;
+            padding: 2rem 1rem;
+            min-height: 100vh;
+        }
+        h1 { font-size: 1.4rem; margin-bottom: 1.5rem; }
+        .back-link {
+            display: inline-block;
+            margin-bottom: 1rem;
+            color: var(--accent);
+            text-decoration: none;
+            font-size: 0.85rem;
+        }
+        .back-link:hover { color: var(--accent-hover); }
+        label {
+            display: block;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 0.3rem;
+            margin-top: 1rem;
+        }
+        input[type="text"], textarea, select {
+            width: 100%;
+            padding: 0.6rem 0.8rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text);
+            font-family: inherit;
+            font-size: 0.95rem;
+        }
+        input[type="text"]:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        textarea {
+            min-height: 320px;
+            resize: vertical;
+            font-family: "SF Mono", "Fira Code", Menlo, monospace;
+            font-size: 0.88rem;
+            line-height: 1.6;
+        }
+        .row {
+            display: flex;
+            gap: 1rem;
+        }
+        .row > * { flex: 1; }
+        .btn {
+            display: inline-block;
+            margin-top: 1.5rem;
+            padding: 0.6rem 1.5rem;
+            background: var(--accent);
+            color: var(--bg);
+            border: none;
+            border-radius: 4px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .btn:hover { background: var(--accent-hover); }
+        .btn-secondary {
+            background: var(--bg-secondary);
+            color: var(--text);
+            border: 1px solid var(--border);
+            margin-left: 0.5rem;
+        }
+        .btn-secondary:hover { background: var(--border); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .msg {
+            margin-top: 1rem;
+            padding: 0.6rem 0.8rem;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            display: none;
+        }
+        .msg.success { display: block; background: #1b3a1b; color: var(--success); border: 1px solid #2d5a2d; }
+        .msg.error { display: block; background: #3a1b1b; color: var(--error); border: 1px solid #5a2d2d; }
+        .help-text {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            margin-top: 0.2rem;
+        }
+    </style>
+</head>
+<body>
+    <a class="back-link" href="/">&larr; Back to Pattern</a>
+    <h1>Write Blog Post</h1>
+
+    <form id="blog-form">
+        <label for="title">Title</label>
+        <input type="text" id="title" name="title" placeholder="Post title" required>
+
+        <label for="summary">Summary</label>
+        <input type="text" id="summary" name="summary" placeholder="One-sentence summary (for index and RSS)">
+
+        <div class="row">
+            <div>
+                <label for="tags">Tags</label>
+                <input type="text" id="tags" name="tags" placeholder="philosophy, ai, technology">
+                <div class="help-text">Comma-separated</div>
+            </div>
+            <div>
+                <label for="in_response_to">In response to</label>
+                <input type="text" id="in_response_to" name="in_response_to" placeholder="slug (optional)">
+                <div class="help-text">Slug of post to link as a response</div>
+            </div>
+        </div>
+
+        <label for="content">Content (Markdown)</label>
+        <textarea id="content" name="content" placeholder="Write your post in Markdown..." required></textarea>
+
+        <div>
+            <button type="submit" class="btn" id="btn-publish">Publish</button>
+            <button type="button" class="btn btn-secondary" id="btn-draft">Save as Draft</button>
+        </div>
+
+        <div id="msg" class="msg"></div>
+    </form>
+
+    <script>
+    const form = document.getElementById('blog-form');
+    const msgEl = document.getElementById('msg');
+    const btnPublish = document.getElementById('btn-publish');
+    const btnDraft = document.getElementById('btn-draft');
+
+    function showMsg(text, type) {
+        msgEl.textContent = text;
+        msgEl.className = 'msg ' + type;
+    }
+
+    async function submitPost(status) {
+        const title = document.getElementById('title').value.trim();
+        const content = document.getElementById('content').value.trim();
+        if (!title || !content) {
+            showMsg('Title and content are required.', 'error');
+            return;
+        }
+
+        const tagsRaw = document.getElementById('tags').value;
+        const tags = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [];
+
+        btnPublish.disabled = true;
+        btnDraft.disabled = true;
+
+        try {
+            const resp = await fetch('/api/blog/publish', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    title,
+                    content,
+                    summary: document.getElementById('summary').value.trim(),
+                    tags,
+                    status,
+                    in_response_to: document.getElementById('in_response_to').value.trim(),
+                }),
+            });
+
+            if (!resp.ok) {
+                const err = await resp.json();
+                throw new Error(err.detail || err.error || 'Unknown error');
+            }
+
+            const data = await resp.json();
+            const label = status === 'published' ? 'Published' : 'Draft saved';
+            showMsg(label + ': ' + title + ' (slug: ' + data.slug + ')', 'success');
+            form.reset();
+        } catch (e) {
+            showMsg('Error: ' + e.message, 'error');
+        } finally {
+            btnPublish.disabled = false;
+            btnDraft.disabled = false;
+        }
+    }
+
+    form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        submitPost('published');
+    });
+
+    btnDraft.addEventListener('click', () => {
+        submitPost('draft');
+    });
+    </script>
+</body>
+</html>

@@ -1633,6 +1633,10 @@ The post will be attributed to you (Isaac) by default.""",
             "summary": {
                 "type": "string",
                 "description": "A one-sentence summary shown on the index page and in the RSS feed"
+            },
+            "in_response_to": {
+                "type": "string",
+                "description": "Optional slug of another post this is responding to (creates a 'see also' link between the two posts)"
             }
         },
         "required": ["title", "content"]
@@ -1664,6 +1668,10 @@ Drafts can be listed, edited, and published later.""",
             "summary": {
                 "type": "string",
                 "description": "A one-sentence summary"
+            },
+            "in_response_to": {
+                "type": "string",
+                "description": "Optional slug of another post this is responding to"
             }
         },
         "required": ["title", "content"]

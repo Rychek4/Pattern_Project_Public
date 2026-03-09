@@ -1024,6 +1024,45 @@ class WebServer:
                 ]
             }
 
+        # --- Blog API ---
+
+        @app.get("/blog/write", response_class=HTMLResponse)
+        async def blog_write_page():
+            """Serve the blog writing/publishing form."""
+            blog_html = WEB_DIR / "blog.html"
+            if blog_html.exists():
+                return HTMLResponse(blog_html.read_text())
+            return HTMLResponse("<p>Blog write page not found.</p>")
+
+        @app.post("/api/blog/publish")
+        async def api_blog_publish(request: Request):
+            """Create a blog post via the web UI (author: Brian)."""
+            data = await request.json()
+            title = (data.get("title") or "").strip()
+            content = (data.get("content") or "").strip()
+            if not title or not content:
+                raise HTTPException(400, "Title and content are required")
+
+            from blog.blog_manager import create_post
+            result = create_post(
+                title=title,
+                content=content,
+                author="Brian",
+                tags=data.get("tags", []),
+                summary=(data.get("summary") or "").strip(),
+                status=data.get("status", "published"),
+                in_response_to=(data.get("in_response_to") or "").strip(),
+            )
+            if "error" in result:
+                raise HTTPException(400, result["error"])
+            return result
+
+        @app.get("/api/blog/posts")
+        async def api_blog_list(status: str = None):
+            """List blog posts."""
+            from blog.blog_manager import list_posts
+            return {"posts": list_posts(status=status)}
+
         return app
 
 
