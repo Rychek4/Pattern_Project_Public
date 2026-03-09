@@ -48,8 +48,9 @@ class PublishBlogPostHandler(CommandHandler):
             )
 
         result = create_post(
-            title=title, content=content, author="Isaac",
+            title=title, content=content, author=params.get("author", "Isaac"),
             tags=tags, summary=summary, status="published",
+            in_response_to=params.get("in_response_to", ""),
         )
 
         if "error" in result:
@@ -113,8 +114,9 @@ class SaveBlogDraftHandler(CommandHandler):
             )
 
         result = create_post(
-            title=title, content=content, author="Isaac",
+            title=title, content=content, author=params.get("author", "Isaac"),
             tags=tags, summary=summary, status="draft",
+            in_response_to=params.get("in_response_to", ""),
         )
 
         if "error" in result:

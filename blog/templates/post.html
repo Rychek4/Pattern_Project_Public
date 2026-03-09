@@ -12,7 +12,7 @@
 <article>
     <div class="post-header">
         <h1>{{ post.title }}</h1>
-        <div class="post-meta">{{ post.date_display }}{% if post.author %} &middot; {{ post.author }}{% endif %}</div>
+        <div class="post-meta">{{ post.date_display }}{% if post.author %} &middot; <a href="{{ blog_url }}/author/{{ post.author | lower | replace(' ', '-') }}.html">{{ post.author }}</a>{% endif %}</div>
         {% if post.tags %}
         <div class="tags">
         {% for tag in post.tags %}
@@ -20,10 +20,28 @@
         {% endfor %}
         </div>
         {% endif %}
+        {% if post.response_to_post %}
+        <div class="post-meta" style="margin-top: 0.4rem;">In response to: <a href="{{ blog_url }}/posts/{{ post.response_to_post.slug }}.html">{{ post.response_to_post.title }}</a> by {{ post.response_to_post.author }}</div>
+        {% endif %}
     </div>
 
     <div class="post-content">
         {{ post.html_content }}
     </div>
+
+    {% if post.responses %}
+    <div class="post-responses">
+        <hr>
+        <p><strong>Responses to this post:</strong></p>
+        <ul class="post-list">
+        {% for resp in post.responses %}
+            <li>
+                <div class="post-title"><a href="{{ blog_url }}/posts/{{ resp.slug }}.html">{{ resp.title }}</a></div>
+                <div class="post-meta">{{ resp.date_display }} &middot; {{ resp.author }}</div>
+            </li>
+        {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
 </article>
 {% endblock %}

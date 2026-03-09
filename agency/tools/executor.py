@@ -1948,6 +1948,7 @@ class ToolExecutor:
             "content": input.get("content", ""),
             "tags": input.get("tags", []),
             "summary": input.get("summary", ""),
+            "in_response_to": input.get("in_response_to", ""),
         }
 
         result = handler.execute(input.get("title", ""), ctx)
@@ -1975,6 +1976,7 @@ class ToolExecutor:
             "content": input.get("content", ""),
             "tags": input.get("tags", []),
             "summary": input.get("summary", ""),
+            "in_response_to": input.get("in_response_to", ""),
         }
 
         result = handler.execute(input.get("title", ""), ctx)

@@ -1,11 +1,14 @@
 {% extends "base.html" %}
 
+{% block title %}Posts by {{ author_name }} — {{ blog_title }}{% endblock %}
+
 {% block content %}
+<h1>Posts by {{ author_name }}</h1>
 <ul class="post-list">
-{% for post in posts %}
+{% for post in author_posts %}
     <li>
         <div class="post-title"><a href="{{ blog_url }}/posts/{{ post.slug }}.html">{{ post.title }}</a></div>
-        <div class="post-meta">{{ post.date_display }}{% if post.author %} &middot; <a href="{{ blog_url }}/author/{{ post.author | lower | replace(' ', '-') }}.html">{{ post.author }}</a>{% endif %}</div>
+        <div class="post-meta">{{ post.date_display }}</div>
         {% if post.summary %}
         <div class="post-summary">{{ post.summary }}</div>
         {% endif %}
@@ -17,8 +20,6 @@
         </div>
         {% endif %}
     </li>
-{% else %}
-    <li><p>No posts yet.</p></li>
 {% endfor %}
 </ul>
 {% endblock %}
