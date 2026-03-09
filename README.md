@@ -306,7 +306,7 @@ Pattern is built around these principles:
 
 ## License
 
-This project is for personal use.
+This project is licensed under the [GNU General Public License v3.0](LICENSE).
 
 ---
 
