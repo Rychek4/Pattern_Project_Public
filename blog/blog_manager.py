@@ -16,6 +16,7 @@ from xml.sax.saxutils import escape as xml_escape
 import yaml
 import markdown
 from jinja2 import Environment, FileSystemLoader
+from markupsafe import Markup
 
 from core.logger import log_info, log_error, log_warning
 import config
@@ -392,7 +393,7 @@ def _get_jinja_env() -> Environment:
     """Create a Jinja2 environment with the blog templates."""
     return Environment(
         loader=FileSystemLoader(str(TEMPLATES_DIR)),
-        autoescape=False,  # We handle sanitization ourselves in _render_markdown
+        autoescape=True,
     )
 
 
@@ -405,7 +406,7 @@ def _get_published_posts() -> List[Dict[str, Any]]:
         post = _parse_post(filepath)
         if post is None or post["status"] != "published":
             continue
-        post["html_content"] = _render_markdown(post["content"])
+        post["html_content"] = Markup(_render_markdown(post["content"]))
         post["date_display"] = post["date"].strftime("%d %b, %Y")
         post["date_iso"] = post["date"].strftime("%Y-%m-%dT%H:%M:%S+00:00")
         post["url"] = f"/blog/posts/{post['slug']}.html"
