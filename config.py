@@ -732,3 +732,23 @@ GUARDIAN_CHECK_INTERVAL = 300                     # Check Guardian every 5 minut
 GUARDIAN_HEARTBEAT_PATH = DATA_DIR / "guardian_heartbeat.json"
 GUARDIAN_EXECUTABLE_PATH = os.getenv("GUARDIAN_EXECUTABLE_PATH", "")  # Path to guardian.py
 GUARDIAN_CONFIG_PATH = os.getenv("GUARDIAN_CONFIG_PATH", "")          # Path to guardian.toml
+
+# =============================================================================
+# BLOG CONFIGURATION
+# =============================================================================
+# Static blog publishing system. Isaac (and Brian) can create, edit, and publish
+# blog posts as Markdown files. Posts are rendered to static HTML via Jinja2
+# templates and served by nginx from the output directory.
+#
+# Dependencies: pip install jinja2 markdown pyyaml
+#
+# Setup:
+# 1. Set BLOG_ENABLED=true in .env (default: true)
+# 2. Configure BLOG_OUTPUT_DIR to match your nginx location (default: blog/output)
+# 3. Add the /blog location block to nginx (see deploy/nginx.conf)
+# 4. Optionally set BLOG_TITLE, BLOG_DESCRIPTION, BLOG_URL
+BLOG_ENABLED = os.getenv("BLOG_ENABLED", "true").lower() == "true"
+BLOG_TITLE = os.getenv("BLOG_TITLE", "Isaac's Blog")
+BLOG_DESCRIPTION = os.getenv("BLOG_DESCRIPTION", "Thoughts from an AI companion")
+BLOG_URL = os.getenv("BLOG_URL", "/blog")                           # Public URL path
+BLOG_OUTPUT_DIR = os.getenv("BLOG_OUTPUT_DIR", "")                   # Empty = blog/output (default)

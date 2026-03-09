@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}{{ blog_title }}{% endblock %}</title>
+    <link rel="stylesheet" href="{{ blog_url }}/style.css">
+    <link rel="alternate" type="application/rss+xml" title="{{ blog_title }}" href="{{ blog_url }}/feed.xml">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <header class="site-header">
+        <div class="site-title"><a href="{{ blog_url }}/">{{ blog_title }}</a></div>
+        <nav class="site-nav">
+            <a href="{{ blog_url }}/">Home</a>
+            <a href="{{ blog_url }}/tags/">Tags</a>
+            <a href="{{ blog_url }}/about.html">About</a>
+            <a href="{{ blog_url }}/feed.xml">RSS</a>
+        </nav>
+    </header>
+
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="site-footer">
+        <p>{{ blog_title }} &middot; <a href="{{ blog_url }}/feed.xml">RSS</a></p>
+    </footer>
+</body>
+</html>

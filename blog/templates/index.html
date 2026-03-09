@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block content %}
+<ul class="post-list">
+{% for post in posts %}
+    <li>
+        <div class="post-title"><a href="{{ blog_url }}/posts/{{ post.slug }}.html">{{ post.title }}</a></div>
+        <div class="post-meta">{{ post.date_display }}{% if post.author %} &middot; {{ post.author }}{% endif %}</div>
+        {% if post.summary %}
+        <div class="post-summary">{{ post.summary }}</div>
+        {% endif %}
+        {% if post.tags %}
+        <div class="tags">
+        {% for tag in post.tags %}
+            <a class="tag" href="{{ blog_url }}/tags/{{ tag | lower | replace(' ', '-') }}.html">{{ tag }}</a>
+        {% endfor %}
+        </div>
+        {% endif %}
+    </li>
+{% else %}
+    <li><p>No posts yet.</p></li>
+{% endfor %}
+</ul>
+{% endblock %}
