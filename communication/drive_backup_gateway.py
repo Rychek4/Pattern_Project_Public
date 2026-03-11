@@ -141,16 +141,29 @@ class DriveBackupGateway:
             try:
                 creds.refresh(Request())
                 log_info("Refreshed Google Drive token")
+                # Save the refreshed token so it persists across restarts
+                with open(self.token_path, "w") as token_file:
+                    token_file.write(creds.to_json())
+                log_info("Saved refreshed Google Drive token")
             except Exception as e:
                 log_warning(f"Drive token refresh failed, will re-authenticate: {e}")
                 creds = None
 
         if not creds or not creds.valid:
-            log_info("Starting Google Drive OAuth consent flow (browser will open)...")
-            flow = InstalledAppFlow.from_client_secrets_file(
-                self.credentials_path, self.SCOPES
-            )
-            creds = flow.run_local_server(port=0)
+            try:
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    self.credentials_path, self.SCOPES
+                )
+                creds = flow.run_local_server(port=0)
+            except Exception as e:
+                raise RuntimeError(
+                    "Google Drive OAuth requires a browser but none is available "
+                    "(headless server). To fix this:\n"
+                    "  1. Run the app once on a machine with a browser to complete OAuth consent\n"
+                    f"  2. Copy the generated token file to this server at: {self.token_path}\n"
+                    "  3. Restart the app — the token will auto-refresh from then on.\n"
+                    f"Original error: {e}"
+                ) from e
             log_success("Google Drive OAuth consent completed")
 
             # Save token for future use
