@@ -366,8 +366,14 @@ class VectorStore:
 
             # Sort by combined score
             results.sort(key=lambda x: x.combined_score, reverse=True)
+            top_results = results[:limit]
 
-            return results[:limit]
+            # Track retrieval access for returned memories
+            if top_results:
+                returned_ids = [r.memory.id for r in top_results]
+                self._record_access(db, returned_ids, now)
+
+            return top_results
 
     def _compute_freshness(self, memory: Memory, now: datetime) -> float:
         """
@@ -417,6 +423,24 @@ class VectorStore:
         # At age = 2 * half_life_days, score = 0.25
         # Clamp to 1.0 as a safety measure (should already be <= 1.0 with non-negative age)
         return min(1.0, math.exp(-0.693 * age_days / half_life_days))
+
+    def _record_access(self, db, memory_ids: List[int], now: datetime) -> None:
+        """Update access_count and last_accessed_at for retrieved memories."""
+        if not memory_ids:
+            return
+        try:
+            placeholders = ",".join("?" * len(memory_ids))
+            db.execute(
+                f"""
+                UPDATE memories
+                SET access_count = access_count + 1,
+                    last_accessed_at = ?
+                WHERE id IN ({placeholders})
+                """,
+                (now.isoformat(), *memory_ids)
+            )
+        except Exception as e:
+            log_error(f"Failed to record memory access: {e}")
 
     @db_retry()
     def get_memory(self, memory_id: int) -> Optional[Memory]:

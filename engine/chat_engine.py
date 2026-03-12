@@ -627,7 +627,8 @@ class ChatEngine:
         """
         from agency.system_pulse import (
             get_action_pulse_prompt, ACTION_PULSE_STORED_MESSAGE,
-            get_reflective_pulse_prompt, REFLECTIVE_PULSE_STORED_MESSAGE
+            get_reflective_pulse_prompt, REFLECTIVE_PULSE_STORED_MESSAGE,
+            run_metacognition, build_metacognition_section
         )
         from prompt_builder.sources.system_pulse import get_interval_label
 
@@ -646,7 +647,21 @@ class ChatEngine:
                 interval = self._pulse_manager.reflective_timer.interval if self._pulse_manager else 43200
                 task_type = TaskType.PULSE_REFLECTIVE
                 stored_message = REFLECTIVE_PULSE_STORED_MESSAGE
-                pulse_prompt = get_reflective_pulse_prompt(get_interval_label(interval))
+
+                # Run metacognition pre-pass if enabled
+                metacognition_section = ""
+                if getattr(config, 'METACOGNITION_ENABLED', False):
+                    try:
+                        metacognition_data = run_metacognition()
+                        metacognition_section = build_metacognition_section(metacognition_data)
+                        log_info("Metacognition pre-pass complete", prefix="🧠")
+                    except Exception as e:
+                        log_error(f"Metacognition pre-pass failed (continuing without): {e}")
+
+                pulse_prompt = get_reflective_pulse_prompt(
+                    get_interval_label(interval),
+                    metacognition_section=metacognition_section
+                )
             else:
                 interval = self._pulse_manager.action_timer.interval if self._pulse_manager else 7200
                 task_type = TaskType.PULSE_ACTION

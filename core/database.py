@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from core.logger import log_info, log_success, log_error, log_config, log_section
 
 # Schema version for migrations
-SCHEMA_VERSION = 21
+SCHEMA_VERSION = 22
 
 # SQL schema definition
 SCHEMA_SQL = """
@@ -81,7 +81,12 @@ CREATE TABLE IF NOT EXISTS memories (
     memory_category TEXT DEFAULT 'episodic' CHECK (memory_category IN ('episodic', 'factual')),
 
     -- Optional reference to a saved image file
-    image_id INTEGER REFERENCES image_files(id)
+    image_id INTEGER REFERENCES image_files(id),
+
+    -- Bridge memory tracking (NULL for non-bridge memories)
+    bridge_target_ids JSON,
+    bridge_status TEXT CHECK (bridge_status IN ('active', 'effective', 'ineffective', 'retired')),
+    bridge_attempt_number INTEGER
 );
 
 -- Saved image files for visual memory
@@ -247,6 +252,7 @@ CREATE INDEX IF NOT EXISTS idx_thoughts_history_archived ON active_thoughts_hist
 CREATE INDEX IF NOT EXISTS idx_growth_threads_stage ON growth_threads(stage);
 CREATE INDEX IF NOT EXISTS idx_growth_threads_slug ON growth_threads(slug);
 CREATE INDEX IF NOT EXISTS idx_reading_sessions_status ON reading_sessions(status);
+CREATE INDEX IF NOT EXISTS idx_memories_bridge_status ON memories(bridge_status);
 """
 
 # Migration SQL for v1 -> v2
@@ -828,6 +834,16 @@ CREATE TABLE IF NOT EXISTS image_files (
 ALTER TABLE memories ADD COLUMN image_id INTEGER REFERENCES image_files(id);
 """
 
+# Migration SQL for v21 -> v22 (bridge memory tracking for metacognition)
+MIGRATION_V22_SQL = """
+ALTER TABLE memories ADD COLUMN bridge_target_ids JSON;
+ALTER TABLE memories ADD COLUMN bridge_status TEXT CHECK (
+    bridge_status IN ('active', 'effective', 'ineffective', 'retired')
+);
+ALTER TABLE memories ADD COLUMN bridge_attempt_number INTEGER;
+CREATE INDEX IF NOT EXISTS idx_memories_bridge_status ON memories(bridge_status);
+"""
+
 
 class Database:
     """SQLite database manager with WAL mode and thread-safe connections."""
@@ -1025,6 +1041,10 @@ class Database:
             if from_version < 21:
                 log_config("Applying migration", "v20 → v21 (add image memory support)", indent=1)
                 conn.executescript(MIGRATION_V21_SQL)
+
+            if from_version < 22:
+                log_config("Applying migration", "v21 → v22 (bridge memory tracking for metacognition)", indent=1)
+                conn.executescript(MIGRATION_V22_SQL)
 
             # Record new version
             conn.execute(

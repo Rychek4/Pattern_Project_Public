@@ -267,6 +267,12 @@ def create_default_builder() -> PromptBuilder:
         sources.append(ResponseScopeSource())
         log_info("ResponseScopeSource enabled", prefix="📏")
 
+    # Memory self-model source (if metacognition enabled)
+    if getattr(config, 'METACOGNITION_ENABLED', True):
+        from prompt_builder.sources.memory_self_model import MemorySelfModelSource
+        sources.append(MemorySelfModelSource())
+        log_info("MemorySelfModelSource enabled", prefix="🧠")
+
     for source in sources:
         builder.register_source(source)
 

@@ -283,6 +283,20 @@ REFLECTIVE_PULSE_INTERVAL = 43200   # 12 hours (deep reflection, Opus)
 ACTION_PULSE_INTERVAL = 7200        # 2 hours (open-ended agency, Sonnet)
 
 # =============================================================================
+# MEMORY METACOGNITION CONFIGURATION
+# =============================================================================
+# Metacognition gives the AI structural self-awareness about its memory store.
+# Three components: MemoryObserver (signal detection), BridgeManager (bridge
+# memory lifecycle), and Memory Self-Model (ambient awareness every turn).
+# Runs during reflective pulse only.
+METACOGNITION_ENABLED = os.getenv("METACOGNITION_ENABLED", "true").lower() == "true"
+BRIDGE_EFFECTIVENESS_WINDOW_DAYS = int(os.getenv("BRIDGE_EFFECTIVENESS_WINDOW_DAYS", "14"))
+BRIDGE_SELF_SUSTAINING_ACCESS_COUNT = int(os.getenv("BRIDGE_SELF_SUSTAINING_ACCESS_COUNT", "3"))
+BRIDGE_MAX_ATTEMPTS = int(os.getenv("BRIDGE_MAX_ATTEMPTS", "3"))
+OBSERVER_ROLLING_WINDOW = int(os.getenv("OBSERVER_ROLLING_WINDOW", "20"))
+SELF_MODEL_MAX_TOKENS = 250  # Hard cap on self-model size (approximate token count)
+
+# =============================================================================
 # CURIOSITY ENGINE CONFIGURATION
 # =============================================================================
 # The curiosity engine gives the AI topics to explore during conversation.
