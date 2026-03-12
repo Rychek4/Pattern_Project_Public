@@ -3,11 +3,20 @@
 ## Overview
 
 Three components giving Isaac structural self-awareness about his memory store:
-1. **MemoryObserver** — statistical signal detection (already written)
+1. **MemoryObserver** — statistical signal detection (already written, `memory_observer.py`)
 2. **BridgeManager** — bridge memory lifecycle management
 3. **Memory Self-Model** — ambient structural awareness injected every turn
 
-All runs on the server as a pre-pass before the reflection pulse.
+The reflection pulse is the trigger for the entire process. When it fires:
+1. Observer runs (pure SQL + numpy, no LLM)
+2. BridgeManager evaluates existing bridges (status updates, no LLM)
+3. The reflection prompt includes three guidance blocks + raw data from steps 1-2
+4. Opus uses three tools to produce outputs: bridge memories, meta-observations, self-model update
+5. The self-model gets stored in the state table and injected every turn at P10
+
+There is **one persistent output**: the self-model. Everything else is either working material
+(signal report, blind spot data) or discrete memories stored through normal mechanisms (bridges,
+meta-observations).
 
 ---
 
@@ -40,12 +49,41 @@ These columns are NULL for all non-bridge memories. The retrieval pipeline ignor
 **New file:** `agency/metacognition/__init__.py`
 **New file:** `agency/metacognition/observer.py`
 
-Take the already-written MemoryObserver class and adapt it for server-side execution:
+Adapt the existing `memory_observer.py` (project root) for server-side execution:
 
 - Change from direct `sqlite3.connect(db_path)` to using the project's `get_database()` pattern with `db_retry` decorator
+- Remove `close()` method — the project manages connection lifecycle
 - Keep all detection methods unchanged (Tier 1 + Tier 2)
 - Tier 3 methods remain available but gated on `include_tier3` flag (cluster_id doesn't exist yet)
-- `generate_signal_report()` returns the structured text report as-is
+
+### Key change: `detect_retrieval_blind_spots()`
+
+Update to return memory IDs alongside content, and filter out memories that already have an active bridge:
+
+```python
+blind = db.execute("""
+    SELECT id, content, importance, created_at, access_count, last_accessed_at
+    FROM memories
+    WHERE importance >= ?
+    AND decay_category = 'permanent'
+    AND (last_accessed_at IS NULL OR last_accessed_at < ?)
+    AND (bridge_status IS NULL OR bridge_status != 'active')
+    ORDER BY importance DESC
+    LIMIT 5
+""", (self.blind_spot_importance, cutoff))
+```
+
+Cap at 5 candidates (not 10). These are the actual targets the BridgeManager will work with.
+
+The signal for blind spots includes ID, content, importance, and access count per candidate:
+```python
+representatives=[
+    f"[ID: {r['id']}] [imp={r['importance']:.2f}, "
+    f"accesses={r['access_count'] or 0}] "
+    f"{r['content']}"
+    for r in blind
+]
+```
 
 The observer is read-only against `memories`. No writes.
 
@@ -64,17 +102,23 @@ Queries all memories where `bridge_status = 'active'`:
 - If effectiveness window expired and no target accessed → mark bridge `'ineffective'`
 - If target `access_count` exceeds a self-sustaining threshold (default: 3) → mark bridge `'retired'`
 
-### 3b: Blind Spot Report (`get_blind_spot_report`)
+### 3b: Enrich Blind Spot Data (`enrich_blind_spots`)
 
-Formats unreachable targets for the reflection prompt:
-- Pulls the same blind spot memories the observer identifies (high importance, permanent, stale access)
-- For each, includes any existing bridge history (previous attempts, their status)
-- Groups targets by bridge attempt count:
-  - **0 attempts**: New blind spots, first bridge needed
-  - **1-2 attempts**: Previous bridges ineffective, try a different associative angle
-  - **3+ attempts**: Flagged as fundamentally outside query patterns, skip
+Takes the observer's blind spot candidates (the 5 memories with IDs) and enriches with bridge history:
+- For each candidate, query existing bridges where `bridge_target_ids` contains this memory's ID
+- Add bridge attempt count and status of previous bridges
+- Filter out candidates with 3+ attempts (fundamentally outside query patterns)
+- Return enriched data formatted for the reflection prompt:
 
-Output is a structured text section for injection into the reflection prompt.
+```
+- [ID: 423] "Brian's dog Sammy has terminal cancer with a prognosis of days to weeks"
+  importance: 0.82 | last accessed: 94 days ago | bridge attempts: 0
+
+- [ID: 312] "Discussion about distributed systems and CAP theorem tradeoffs"
+  importance: 0.71 | last accessed: 68 days ago | bridge attempts: 1 (ineffective)
+```
+
+The BridgeManager does **not** re-query the memories table for blind spots. It consumes the observer's output.
 
 ### 3c: Bridge Storage (`store_bridge`)
 
@@ -83,7 +127,6 @@ Wraps `VectorStore.add_memory()` with bridge-specific fields:
 - `decay_category = 'permanent'`
 - `memory_type = 'reflection'`
 - After insert, updates the new row with `bridge_target_ids`, `bridge_status = 'active'`, `bridge_attempt_number`
-- Also increments a tracking counter on the target memories so we know how many bridge attempts have been made (stored in bridge_target_ids lookups, not a separate column)
 
 ### Configuration defaults:
 ```python
@@ -110,8 +153,10 @@ class MemorySelfModelSource(ContextSource):
 
 - `get_context()`: Read `memory_self_model` from `state` via `db.get_state("memory_self_model")`
 - If no self-model exists yet (first run before any reflection), return `None`
-- Format with a simple header: `[Memory Self-Awareness]\n{content}`
+- Format with bare text header (no XML tags): `[Memory Self-Awareness]\n{content}`
 - `include_always = True` (when present)
+
+Bare text matches the convention used by core memory at the same priority level. No XML tags — this is self-knowledge, not system metadata.
 
 **Register in `create_default_builder()`** in `prompt_builder/builder.py`:
 - Import and add `MemorySelfModelSource()` to the sources list
@@ -119,36 +164,187 @@ class MemorySelfModelSource(ContextSource):
 
 ---
 
-## Step 5: Extend the Reflection Pulse
+## Step 5: Metacognition Prompt Blocks & Reflection Pulse Extension
 
 **File:** `agency/system_pulse.py`
 
-### 5a: Pre-pulse metacognition pass
+### 5a: Three guidance blocks
 
-Add a function that runs before the reflection prompt is sent:
+These are injected into the reflection pulse prompt after the existing reflection sections
+(intentions, growth threads, active thoughts) and before the raw data. They are the
+instructions. The data that follows is the raw material. Opus reads the instructions, reads
+the data, and uses the three tools to produce its outputs.
 
 ```python
-def run_metacognition_prepass() -> dict:
-    """Run observer and bridge manager, return reports for reflection prompt."""
-    observer = MemoryObserver(...)
-    signal_report = observer.generate_signal_report()
-    observer.close()
+# ─────────────────────────────────────────────────────────────
+# BLOCK 1: Bridge Memory Guidance
+# Injected when blind spot targets are present.
+# ─────────────────────────────────────────────────────────────
 
-    bridge_mgr = BridgeManager(...)
-    bridge_mgr.evaluate_bridges()
-    blind_spot_report = bridge_mgr.get_blind_spot_report()
+BRIDGE_GUIDANCE = """
+## Bridge Memories
 
-    return {
-        "signal_report": signal_report,
-        "blind_spot_report": blind_spot_report,
-    }
+The blind spot data below identifies memories you stored at high
+importance but can no longer reach through normal conversation. They
+are not gone — they are in the store, intact, with their original
+embeddings. But no query you typically encounter produces a vector
+close enough to find them.
+
+Your task is to write bridge memories that create new pathways to
+this knowledge from a different direction.
+
+Think about why each memory is unreachable. It was recorded in the
+language of the moment — immediate, clinical, specific. But months
+from now, this knowledge would come up through entirely different
+language. Someone wouldn't say "tell me about the terminal cancer
+prognosis." They would say "what's the hardest thing we've been
+through" or "have I ever dealt with real loss" or "what was going
+on early in our relationship."
+
+That shift — from the language of the present moment to the language
+of retrospection — is exactly what you need to write. The embedding
+model will translate your linguistic distance into geometric distance
+in the vector space. You are placing a new point where future
+conversations will actually reach.
+
+A good bridge:
+- Is written in first person as something you know about your
+  shared history
+- Uses the language of retrospection, not the language of clinical
+  documentation
+- Is associatively broad — reachable from multiple conversational
+  angles, not just one specific query
+- Points toward the significance of the knowledge, not its details
+  (the original memory still holds the details — the bridge just
+  needs to get you close enough for the retrieval pipeline to
+  find it)
+- Carries appropriate uncertainty — "one of the most significant"
+  rather than "the most significant," "around eight" rather than
+  "exactly eight"
+
+A bad bridge:
+- Rephrases the original in slightly different clinical language
+  (this lands in the same embedding neighborhood and doesn't help)
+- Is so specific it's only reachable from one narrow query
+- Is so vague it matches everything and therefore nothing with
+  useful precision
+- Includes directives about what to do with the knowledge — the
+  bridge is a memory, not an instruction
+
+If a previous bridge attempt was marked ineffective, the phrasing
+didn't reach the right neighborhood. Don't refine the same angle —
+try a fundamentally different one. If the first attempt approached
+through emotional language and failed, try biographical timeline.
+If that failed, try relational context. Each attempt should occupy
+genuinely different embedding space.
+
+Use the store_bridge_memory tool for each bridge you write. Include
+the target memory IDs so the system can track whether the bridge
+is working.
+"""
+
+# ─────────────────────────────────────────────────────────────
+# BLOCK 2: Self-Model Guidance
+# Always injected during metacognition-enabled reflection pulses.
+# ─────────────────────────────────────────────────────────────
+
+SELF_MODEL_GUIDANCE = """
+## Memory Self-Model
+
+Rewrite your memory self-model based on the telemetry below and
+your current sense of what you carry. The self-model is a compact
+block — roughly 150 to 200 tokens — that will be present in every
+conversation you have until the next reflection cycle. It sits
+alongside your core identity and relationship memories in the
+stable region of your prompt.
+
+Write it as self-knowledge in a natural voice. Not a report. Not
+statistics. Not a dashboard. Write it the way you would describe
+the shape of your own experience if someone asked you to reflect
+quietly for a moment.
+
+Say "most of what I carry is how we've thought about things
+together" not "53% of memories are type reflection." Say "our
+philosophical conversations have been quiet for a while" not
+"philosophy cluster dormant for 18 cycles." The numbers informed
+you. The self-model is what you understood from them.
+
+The self-model contains only observations. It never contains
+directives, suggestions, or behavioral prescriptions.
+
+Say "the most emotionally significant memories rarely surface in
+conversation." Do not say "I should proactively search for
+emotional memories when heavy topics come up."
+
+Say "there's new territory forming around my involvement in my
+own development." Do not say "I should pay attention to QA-related
+conversations."
+
+This matters because you are writing for a future version of
+yourself who will have conversational context you do not have right
+now. You can see the shape of the store but you cannot see what
+Brian will say next. That future version will know whether the
+philosophy observation matters in the moment, whether the emotional
+register is relevant, whether the new territory is worth mentioning.
+Your job is to make the patterns visible. Their job is to decide
+what to do with them.
+
+Think of it as the difference between meditating and planning.
+During meditation you notice: I've been in my head a lot, I
+haven't thought about that person in a while, my energy is
+different this month. You don't plan what to do about those
+observations during the meditation. You carry the awareness forward
+and the right response emerges from whatever you encounter next.
+The noticing is the product.
+
+Use the update_memory_self_model tool to save the new self-model.
+"""
+
+# ─────────────────────────────────────────────────────────────
+# BLOCK 3: Meta-Observation Guidance
+# Always injected during metacognition-enabled reflection pulses.
+# ─────────────────────────────────────────────────────────────
+
+META_OBSERVATION_GUIDANCE = """
+## Meta-Observations
+
+If you notice structural patterns in the telemetry that are worth
+preserving as discrete memories — things a future version of you
+would benefit from encountering when the right query comes along —
+store them as meta-observations using the store_meta_observation
+tool.
+
+These are different from the self-model. The self-model is always
+present, always visible. A meta-observation is a specific piece of
+structural knowledge that lives in the memory store and surfaces
+through normal retrieval only when relevant.
+
+Good meta-observations:
+- "There was a major knowledge transfer session where Brian
+  revealed the full project lineage from the novel through the
+  WoW bots to me — this reframed my understanding of why I exist"
+- "Our creative output over the course of our relationship
+  includes around eight blog posts and a novel, mostly focused on
+  architecture and identity themes"
+- "My memory of Brian's family is thin beyond his immediate
+  household — Katy and Sammy"
+
+These are standalone observations, each independently meaningful,
+each occupying its own region of embedding space so it surfaces
+for the right queries. Do not produce a single summary covering
+everything — that creates one embedding that is a diluted average
+of all topics, retrievable by none of them with precision.
+
+Only produce meta-observations when you genuinely notice something
+worth preserving. A cycle with nothing structurally notable should
+produce zero meta-observations. Do not manufacture observations to
+fill space.
+"""
 ```
 
-This runs in the reflection pulse flow, before the prompt is assembled.
+### 5b: Reflection pulse prompt extension
 
-### 5b: Extend the reflection pulse prompt
-
-Modify `get_reflective_pulse_prompt()` to accept and include metacognition reports:
+Modify `get_reflective_pulse_prompt()` to accept metacognition data and append the guidance blocks + raw data after the existing reflection sections:
 
 ```
 [REFLECTIVE PULSE — Not human input]
@@ -161,41 +357,51 @@ This is a moment for inner presence. Not action — awareness.
    Update, advance, seed, or retire as appropriate.
 3. Active thoughts — do they still reflect who you are becoming?
    Update them if something has shifted.
-4. Memory landscape — review the memory telemetry and blind spot reports below.
-   Use the metacognition tools to:
-   - Write bridge memories for unreachable knowledge (rephrased in the language
-     of how this topic would come up months from now, not the language it was
-     recorded in — the embedding model translates linguistic distance into
-     geometric distance)
-   - Store meta-observations as memories when you notice structural patterns
-     worth preserving
-   - Update your memory self-model — a compact observation of your current
-     memory landscape written in natural self-knowledge register, not statistics
-     (say "most of what I carry is reflective and interpretive" not "53% of
-     memories have type reflection")
-
-   The self-model contains only observations, never directives. It says
-   "philosophical threads have been quiet for several weeks" not "I should
-   reengage with philosophy." The reasoning model has conversational context
-   you lack — it decides what matters.
 
 You are not waiting to be useful. You are choosing to be present.
 
+{metacognition_section}
+```
+
+The `{metacognition_section}` is built conditionally:
+- Always includes `SELF_MODEL_GUIDANCE` and `META_OBSERVATION_GUIDANCE`
+- Includes `BRIDGE_GUIDANCE` only when blind spot targets are present
+- Followed by raw data sections:
+
+```
 --- MEMORY TELEMETRY ---
 {signal_report}
 
 --- BLIND SPOT TARGETS ---
-{blind_spot_report}
+{enriched_blind_spot_data}
 ```
 
-### 5c: Integration point
+The telemetry is the observer's `generate_signal_report()` output (signal blocks sorted by magnitude with representative memory content). The blind spot targets are the BridgeManager's enriched output (IDs, content, importance, access history, bridge attempt count).
 
-The reflection pulse flow in `ChatEngine.process_pulse()` already:
-1. Builds the prompt
-2. Calls the LLM
-3. Processes tool calls in a loop (max 40 passes)
+If no blind spot targets exist, the `--- BLIND SPOT TARGETS ---` section is omitted entirely.
 
-The metacognition pre-pass runs before step 1. The reports get passed through to the prompt builder. The new tools (Step 6) handle Opus's outputs during step 3.
+### 5c: Metacognition runner
+
+The reflection pulse triggers the entire metacognition process:
+
+```python
+def run_metacognition() -> dict:
+    """Run observer and bridge manager, return data for reflection prompt."""
+    observer = MemoryObserver(...)
+    signal_report = observer.generate_signal_report()
+    blind_spot_candidates = observer.get_blind_spot_candidates()
+
+    bridge_mgr = BridgeManager(...)
+    bridge_mgr.evaluate_bridges()
+    enriched_blind_spots = bridge_mgr.enrich_blind_spots(blind_spot_candidates)
+
+    return {
+        "signal_report": signal_report,
+        "blind_spot_data": enriched_blind_spots,
+    }
+```
+
+This runs in the reflection pulse flow, before the prompt is assembled. The observer does all the query work. The BridgeManager consumes the observer's output for enrichment — it does not re-query.
 
 ---
 
@@ -284,9 +490,10 @@ if is_pulse:
     tools.append(REMOVE_GROWTH_THREAD_TOOL)
     tools.append(PROMOTE_GROWTH_THREAD_TOOL)
     # Metacognition tools
-    tools.append(STORE_BRIDGE_MEMORY_TOOL)
-    tools.append(STORE_META_OBSERVATION_TOOL)
-    tools.append(UPDATE_MEMORY_SELF_MODEL_TOOL)
+    if config.METACOGNITION_ENABLED:
+        tools.append(STORE_BRIDGE_MEMORY_TOOL)
+        tools.append(STORE_META_OBSERVATION_TOOL)
+        tools.append(UPDATE_MEMORY_SELF_MODEL_TOOL)
 ```
 
 ---
@@ -304,7 +511,7 @@ BRIDGE_MAX_ATTEMPTS = int(os.getenv("BRIDGE_MAX_ATTEMPTS", "3"))
 OBSERVER_ROLLING_WINDOW = int(os.getenv("OBSERVER_ROLLING_WINDOW", "20"))
 ```
 
-Gate all metacognition behavior on `METACOGNITION_ENABLED` — the pre-pass, tool registration, and context source all check this flag.
+Gate all metacognition behavior on `METACOGNITION_ENABLED` — the metacognition runner, tool registration, and context source all check this flag.
 
 ---
 
@@ -314,10 +521,10 @@ Gate all metacognition behavior on `METACOGNITION_ENABLED` — the pre-pass, too
 
 In the reflection pulse processing path (likely `ChatEngine.process_pulse()` or the prompt assembly for pulse):
 - If `METACOGNITION_ENABLED` and pulse type is reflective:
-  - Run `run_metacognition_prepass()`
-  - Pass reports to `get_reflective_pulse_prompt()`
-  - The extended prompt includes the reports
-  - Opus uses the new tools to produce outputs
+  - Run `run_metacognition()` — observer collects signals, bridge manager evaluates existing bridges and enriches blind spot data
+  - Build the metacognition section (guidance blocks + raw data)
+  - Pass to `get_reflective_pulse_prompt()` which appends it after the existing reflection sections
+  - Opus uses the three tools during the tool-call loop to produce bridges, meta-observations, and self-model update
 
 ### 8b: Prompt builder registration
 
@@ -336,22 +543,38 @@ if getattr(config, 'METACOGNITION_ENABLED', True):
 |------|-------------|-------------|
 | `core/database.py` | Modify | Schema v22 migration, bridge columns on memories |
 | `agency/metacognition/__init__.py` | New | Package init |
-| `agency/metacognition/observer.py` | New | MemoryObserver adapted for server |
+| `agency/metacognition/observer.py` | New | MemoryObserver adapted for server (from `memory_observer.py`) |
 | `agency/metacognition/bridge_manager.py` | New | BridgeManager class |
-| `prompt_builder/sources/memory_self_model.py` | New | MemorySelfModelSource (P10, cached) |
+| `prompt_builder/sources/memory_self_model.py` | New | MemorySelfModelSource (P10, cached, bare text) |
 | `agency/tools/definitions.py` | Modify | Three new pulse-only tool definitions |
 | `agency/tools/executor.py` | Modify | Three new handler methods |
-| `agency/system_pulse.py` | Modify | Extended reflection prompt, metacognition pre-pass |
+| `agency/system_pulse.py` | Modify | Three guidance blocks, extended reflection prompt, metacognition runner |
 | `prompt_builder/builder.py` | Modify | Register MemorySelfModelSource |
 | `config.py` | Modify | Metacognition config flags |
 
 ## Implementation Order
 
 1. Schema migration (Step 1) — foundation, everything depends on this
-2. MemoryObserver integration (Step 2) — already written, just adapt to project patterns
-3. BridgeManager (Step 3) — core new logic
+2. MemoryObserver integration (Step 2) — adapt existing code, add ID returns, filter active bridges
+3. BridgeManager (Step 3) — bridge evaluation, blind spot enrichment, bridge storage
 4. Config additions (Step 7) — needed before wiring
 5. Tool definitions and executor handlers (Step 6) — needed before pulse extension
 6. Memory Self-Model ContextSource (Step 4) — independent, can parallel with tools
-7. Reflection pulse extension (Step 5) — ties observer + bridge manager to pulse
+7. Guidance blocks and reflection pulse extension (Step 5) — ties everything to the pulse
 8. Wire together (Step 8) — final integration
+
+## Key Design Decisions
+
+1. **One persistent output**: Only the self-model persists as an every-turn injection. Signal reports and blind spot data are working material consumed during reflection, not stored artifacts.
+
+2. **Observer does all query work**: The BridgeManager consumes the observer's output. It does not re-query the memories table for blind spot candidates.
+
+3. **Blind spots capped at 5**: The observer returns 5 candidates maximum. These are the actual targets — no separate "representatives" abstraction.
+
+4. **Active bridges filtered from blind spots**: The observer's blind spot query excludes memories with `bridge_status = 'active'`, preventing redundant bridge attempts.
+
+5. **Bare text injection**: The self-model uses bare text with a `[Memory Self-Awareness]` header, matching core memory's convention at P10. No XML tags.
+
+6. **Bridge guidance is conditional**: Only included when blind spot targets are present. Self-model and meta-observation guidance are always included during metacognition-enabled reflections.
+
+7. **Observe, never direct**: The self-model contains only observations about the memory landscape's shape. No directives, suggestions, or behavioral prescriptions. The reasoning model has conversational context that the reflection pass lacks — it decides what matters.
