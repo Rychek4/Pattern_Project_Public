@@ -118,6 +118,11 @@ def get_tool_definitions(is_pulse: bool = False) -> List[Dict[str, Any]]:
         tools.append(SET_GROWTH_THREAD_TOOL)
         tools.append(REMOVE_GROWTH_THREAD_TOOL)
         tools.append(PROMOTE_GROWTH_THREAD_TOOL)
+        # Metacognition tools (reflective pulse only)
+        if getattr(config, 'METACOGNITION_ENABLED', True):
+            tools.append(STORE_BRIDGE_MEMORY_TOOL)
+            tools.append(STORE_META_OBSERVATION_TOOL)
+            tools.append(UPDATE_MEMORY_SELF_MODEL_TOOL)
 
     return tools
 
@@ -1753,5 +1758,79 @@ Use this if you want to take down a post without deleting it.""",
             }
         },
         "required": ["slug"]
+    }
+}
+
+# =============================================================================
+# METACOGNITION TOOLS (pulse-only)
+# =============================================================================
+
+STORE_BRIDGE_MEMORY_TOOL: Dict[str, Any] = {
+    "name": "store_bridge_memory",
+    "description": (
+        "Store a bridge memory that creates a new retrieval pathway to unreachable "
+        "knowledge. Write in first person, in associatively broad retrospective "
+        "language — how this topic would naturally come up in future conversation, "
+        "not the clinical language it was originally recorded in."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "content": {
+                "type": "string",
+                "description": "The bridge memory text"
+            },
+            "target_ids": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "description": "IDs of the unreachable memories this bridges to"
+            },
+            "importance": {
+                "type": "number",
+                "description": "Importance score 0.0-1.0"
+            }
+        },
+        "required": ["content", "target_ids", "importance"]
+    }
+}
+
+STORE_META_OBSERVATION_TOOL: Dict[str, Any] = {
+    "name": "store_meta_observation",
+    "description": (
+        "Store a meta-observation about the memory landscape as a regular memory "
+        "for demand-driven retrieval. Write as self-knowledge in natural register."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "content": {
+                "type": "string",
+                "description": "The meta-observation text"
+            },
+            "importance": {
+                "type": "number",
+                "description": "Importance score 0.0-1.0"
+            }
+        },
+        "required": ["content", "importance"]
+    }
+}
+
+UPDATE_MEMORY_SELF_MODEL_TOOL: Dict[str, Any] = {
+    "name": "update_memory_self_model",
+    "description": (
+        "Rewrite the compact memory self-model (~150-200 tokens). "
+        "Observations only, never directives. Natural self-knowledge register, "
+        "not statistics."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "content": {
+                "type": "string",
+                "description": "The new self-model text"
+            }
+        },
+        "required": ["content"]
     }
 }

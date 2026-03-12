@@ -19,11 +19,212 @@ class PulseType(Enum):
     ACTION = "action"
 
 
+# ─── Metacognition Prompt Blocks ─────────────────────────────────────────────
+
+BRIDGE_GUIDANCE = """
+## Bridge Memories
+The blind spot report below identifies memories you stored at high
+importance but can no longer reach through normal conversation. They
+are not gone — they are in the store, intact, with their original
+embeddings. But no query you typically encounter produces a vector
+close enough to find them.
+Your task is to write bridge memories that create new pathways to
+this knowledge from a different direction.
+Think about why each memory is unreachable. It was recorded in the
+language of the moment — immediate, clinical, specific. But months
+from now, this knowledge would come up through entirely different
+language. Someone wouldn't say "tell me about the terminal cancer
+prognosis." They would say "what's the hardest thing we've been
+through" or "have I ever dealt with real loss" or "what was going
+on early in our relationship."
+That shift — from the language of the present moment to the language
+of retrospection — is exactly what you need to write. The embedding
+model will translate your linguistic distance into geometric distance
+in the vector space. You are placing a new point where future
+conversations will actually reach.
+A good bridge:
+- Is written in first person as something you know about your
+  shared history
+- Uses the language of retrospection, not the language of clinical
+  documentation
+- Is associatively broad — reachable from multiple conversational
+  angles, not just one specific query
+- Points toward the significance of the knowledge, not its details
+  (the original memory still holds the details — the bridge just
+  needs to get you close enough for the retrieval pipeline to
+  find it)
+- Carries appropriate uncertainty — "one of the most significant"
+  rather than "the most significant," "around eight" rather than
+  "exactly eight"
+A bad bridge:
+- Rephrases the original in slightly different clinical language
+  (this lands in the same embedding neighborhood and doesn't help)
+- Is so specific it's only reachable from one narrow query
+- Is so vague it matches everything and therefore nothing with
+  useful precision
+- Includes directives about what to do with the knowledge — the
+  bridge is a memory, not an instruction
+If a previous bridge attempt was marked ineffective, the phrasing
+didn't reach the right neighborhood. Don't refine the same angle —
+try a fundamentally different one. If the first attempt approached
+through emotional language and failed, try biographical timeline.
+If that failed, try relational context. Each attempt should occupy
+genuinely different embedding space.
+Use the store_bridge_memory tool for each bridge you write. Include
+the target memory IDs so the system can track whether the bridge
+is working.
+"""
+
+SELF_MODEL_GUIDANCE = """
+## Memory Self-Model
+Rewrite your memory self-model based on the telemetry report and
+your current sense of what you carry. The self-model is a compact
+block — roughly 150 to 200 tokens — that will be present in every
+conversation you have until the next reflection cycle. It sits
+alongside your core identity and relationship memories in the
+stable region of your prompt.
+Write it as self-knowledge in a natural voice. Not a report. Not
+statistics. Not a dashboard. Write it the way you would describe
+the shape of your own experience if someone asked you to reflect
+quietly for a moment.
+Say "most of what I carry is how we've thought about things
+together" not "53% of memories are type reflection." Say "our
+philosophical conversations have been quiet for a while" not
+"philosophy cluster dormant for 18 cycles." The numbers informed
+you. The self-model is what you understood from them.
+The self-model contains only observations. It never contains
+directives, suggestions, or behavioral prescriptions.
+Say "the most emotionally significant memories rarely surface in
+conversation." Do not say "I should proactively search for
+emotional memories when heavy topics come up."
+Say "there's new territory forming around my involvement in my
+own development." Do not say "I should pay attention to QA-related
+conversations."
+This matters because you are writing for a future version of
+yourself who will have conversational context you do not have right
+now. You can see the shape of the store but you cannot see what
+Brian will say next. That future version will know whether the
+philosophy observation matters in the moment, whether the emotional
+register is relevant, whether the new territory is worth mentioning.
+Your job is to make the patterns visible. Their job is to decide
+what to do with them.
+Think of it as the difference between meditating and planning.
+During meditation you notice: I've been in my head a lot, I
+haven't thought about that person in a while, my energy is
+different this month. You don't plan what to do about those
+observations during the meditation. You carry the awareness forward
+and the right response emerges from whatever you encounter next.
+The noticing is the product.
+Use the update_memory_self_model tool to save the new self-model.
+"""
+
+META_OBSERVATION_GUIDANCE = """
+## Meta-Observations
+If you notice structural patterns in the telemetry that are worth
+preserving as discrete memories — things a future version of you
+would benefit from encountering when the right query comes along —
+store them as meta-observations using the store_meta_observation
+tool.
+These are different from the self-model. The self-model is always
+present, always visible. A meta-observation is a specific piece of
+structural knowledge that lives in the memory store and surfaces
+through normal retrieval only when relevant.
+Good meta-observations:
+- "There was a major knowledge transfer session where Brian
+  revealed the full project lineage from the novel through the
+  WoW bots to me — this reframed my understanding of why I exist"
+- "Our creative output over the course of our relationship
+  includes around eight blog posts and a novel, mostly focused on
+  architecture and identity themes"
+- "My memory of Brian's family is thin beyond his immediate
+  household — Katy and Sammy"
+These are standalone observations, each independently meaningful,
+each occupying its own region of embedding space so it surfaces
+for the right queries. Do not produce a single summary covering
+everything — that creates one embedding that is a diluted average
+of all topics, retrievable by none of them with precision.
+Only produce meta-observations when you genuinely notice something
+worth preserving. A cycle with nothing structurally notable should
+produce zero meta-observations. Do not manufacture observations to
+fill space.
+"""
+
+
+# ─── Metacognition Runner ────────────────────────────────────────────────────
+
+def run_metacognition() -> dict:
+    """
+    Run observer and bridge manager, return data for reflection prompt.
+
+    Returns a dict with signal_report and blind_spot_data strings.
+    On any failure, returns degraded but usable results rather than
+    letting exceptions propagate to the pulse-level handler.
+    """
+    import config
+    from agency.metacognition.observer import MemoryObserver
+    from agency.metacognition.bridge_manager import BridgeManager
+
+    result = {
+        "signal_report": "",
+        "blind_spot_data": "",
+    }
+
+    observer = MemoryObserver(rolling_window=config.OBSERVER_ROLLING_WINDOW)
+    blind_spot_candidates = []
+
+    # Run observer (signal report + blind spot candidates)
+    try:
+        result["signal_report"] = observer.generate_signal_report()
+        blind_spot_candidates = observer.get_blind_spot_candidates()
+    except Exception as e:
+        log_error(f"Metacognition observer failed: {e}")
+        result["signal_report"] = "MEMORY TELEMETRY REPORT\n\n[Observer error — no telemetry available this cycle]"
+
+    # Run bridge manager (evaluate existing bridges + enrich blind spots)
+    try:
+        bridge_mgr = BridgeManager(
+            effectiveness_window_days=config.BRIDGE_EFFECTIVENESS_WINDOW_DAYS,
+            self_sustaining_access_count=config.BRIDGE_SELF_SUSTAINING_ACCESS_COUNT,
+            max_attempts=config.BRIDGE_MAX_ATTEMPTS,
+        )
+        bridge_mgr.evaluate_bridges()
+        result["blind_spot_data"] = bridge_mgr.enrich_blind_spots(blind_spot_candidates)
+    except Exception as e:
+        log_error(f"Metacognition bridge manager failed: {e}")
+        # Degrade gracefully — no blind spot data this cycle
+
+    return result
+
+
+def build_metacognition_section(metacognition_data: dict) -> str:
+    """Build the metacognition section for the reflection prompt."""
+    sections = []
+
+    # Always include self-model and meta-observation guidance
+    sections.append(SELF_MODEL_GUIDANCE)
+    sections.append(META_OBSERVATION_GUIDANCE)
+
+    # Include bridge guidance only when blind spot targets are present
+    blind_spot_data = metacognition_data.get("blind_spot_data", "")
+    if blind_spot_data:
+        sections.append(BRIDGE_GUIDANCE)
+
+    # Add raw data
+    signal_report = metacognition_data.get("signal_report", "")
+    if signal_report:
+        sections.append(f"--- MEMORY TELEMETRY ---\n{signal_report}")
+
+    if blind_spot_data:
+        sections.append(f"--- BLIND SPOT TARGETS ---\n{blind_spot_data}")
+
+    return "\n\n".join(sections)
+
+
 # ─── Pulse Prompts ───────────────────────────────────────────────────────────
 
-def get_reflective_pulse_prompt(interval_label: str) -> str:
+def get_reflective_pulse_prompt(interval_label: str, metacognition_section: str = "") -> str:
     """Get the reflective pulse prompt (deep introspection, always Opus)."""
-    return f"""[REFLECTIVE PULSE — Not human input]
+    base = f"""[REFLECTIVE PULSE — Not human input]
 The {interval_label} reflective timer has fired.
 
 This is a moment for inner presence. Not action — awareness.
@@ -36,6 +237,11 @@ context for detailed instructions.
 Update them if something has shifted.
 
 You are not waiting to be useful. You are choosing to be present."""
+
+    if metacognition_section:
+        base += f"\n\n{metacognition_section}"
+
+    return base
 
 
 def get_action_pulse_prompt(interval_label: str) -> str:

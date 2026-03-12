@@ -99,6 +99,10 @@ class ToolExecutor:
             "edit_blog_post": self._exec_edit_blog_post,
             "list_blog_posts": self._exec_list_blog_posts,
             "unpublish_blog_post": self._exec_unpublish_blog_post,
+            # Metacognition (pulse-only)
+            "store_bridge_memory": self._exec_store_bridge_memory,
+            "store_meta_observation": self._exec_store_meta_observation,
+            "update_memory_self_model": self._exec_update_memory_self_model,
         }
 
     def execute(
@@ -2067,6 +2071,115 @@ class ToolExecutor:
         return ToolResult(
             tool_use_id=id, tool_name="unpublish_blog_post",
             content=handler.format_result(result),
+        )
+
+    # =========================================================================
+    # METACOGNITION TOOLS (pulse-only)
+    # =========================================================================
+
+    def _exec_store_bridge_memory(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Store a bridge memory targeting unreachable knowledge."""
+        from agency.metacognition.bridge_manager import BridgeManager
+        import config
+
+        content = input.get("content", "")
+        target_ids = input.get("target_ids", [])
+        importance = input.get("importance", 0.7)
+
+        if not content or not target_ids:
+            return ToolResult(
+                tool_use_id=id, tool_name="store_bridge_memory",
+                content="Missing required fields: content and target_ids",
+                is_error=True
+            )
+
+        bridge_mgr = BridgeManager(
+            effectiveness_window_days=config.BRIDGE_EFFECTIVENESS_WINDOW_DAYS,
+            self_sustaining_access_count=config.BRIDGE_SELF_SUSTAINING_ACCESS_COUNT,
+            max_attempts=config.BRIDGE_MAX_ATTEMPTS,
+        )
+        memory_id = bridge_mgr.store_bridge(content, target_ids, importance)
+
+        if memory_id is None:
+            return ToolResult(
+                tool_use_id=id, tool_name="store_bridge_memory",
+                content="Failed to store bridge memory (embedding generation failed)",
+                is_error=True
+            )
+
+        return ToolResult(
+            tool_use_id=id, tool_name="store_bridge_memory",
+            content=f"Bridge memory stored (ID: {memory_id}, targeting: {target_ids})"
+        )
+
+    def _exec_store_meta_observation(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Store a meta-observation as a regular memory."""
+        from memory.vector_store import get_vector_store
+
+        content = input.get("content", "")
+        importance = input.get("importance", 0.6)
+
+        if not content:
+            return ToolResult(
+                tool_use_id=id, tool_name="store_meta_observation",
+                content="Missing required field: content",
+                is_error=True
+            )
+
+        vector_store = get_vector_store()
+        memory_id = vector_store.add_memory(
+            content=content,
+            source_conversation_ids=[],
+            importance=importance,
+            memory_type="reflection",
+            decay_category="standard",
+            memory_category="episodic",
+        )
+
+        if memory_id is None:
+            return ToolResult(
+                tool_use_id=id, tool_name="store_meta_observation",
+                content="Failed to store meta-observation (embedding generation failed)",
+                is_error=True
+            )
+
+        return ToolResult(
+            tool_use_id=id, tool_name="store_meta_observation",
+            content=f"Meta-observation stored (ID: {memory_id})"
+        )
+
+    def _exec_update_memory_self_model(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Update the memory self-model in the state table."""
+        from core.database import get_database
+        import config
+
+        content = input.get("content", "")
+
+        if not content:
+            return ToolResult(
+                tool_use_id=id, tool_name="update_memory_self_model",
+                content="Missing required field: content",
+                is_error=True
+            )
+
+        # Enforce size cap (approximate: 1 token ≈ 4 chars)
+        max_chars = getattr(config, 'SELF_MODEL_MAX_TOKENS', 250) * 4
+        if len(content) > max_chars:
+            content = content[:max_chars]
+            log_warning(f"Self-model truncated to ~{config.SELF_MODEL_MAX_TOKENS} tokens")
+
+        db = get_database()
+        db.set_state("memory_self_model", content)
+
+        return ToolResult(
+            tool_use_id=id, tool_name="update_memory_self_model",
+            content=f"Memory self-model updated ({len(content)} chars)"
         )
 
 
