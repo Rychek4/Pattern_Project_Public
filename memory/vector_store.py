@@ -166,7 +166,9 @@ class VectorStore:
 
             # Creation-time dedup for factual memories:
             # If a very similar fact already exists, refresh it instead of creating a duplicate.
-            if memory_category == "factual":
+            # Skip dedup for metacognition-generated memories (bridges, observations) —
+            # they must always create new entries with their own metadata.
+            if memory_category == "factual" and not meta_source:
                 existing_id = self._find_duplicate_factual(db, embedding)
                 if existing_id is not None:
                     # Refresh existing memory: update timestamp and bump importance if higher
@@ -432,6 +434,7 @@ class VectorStore:
             return
         try:
             placeholders = ",".join("?" * len(memory_ids))
+            # TODO (minor): add fetch=False for consistency with other UPDATE calls
             db.execute(
                 f"""
                 UPDATE memories

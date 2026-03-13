@@ -555,6 +555,7 @@ class MemoryObserver:
                 AND decay_category = 'permanent'
                 AND (last_accessed_at IS NULL OR last_accessed_at < ?)
                 AND (bridge_status IS NULL OR bridge_status != 'active')
+                AND meta_source IS NULL
                 ORDER BY importance DESC
                 LIMIT 5
             """, (self.blind_spot_importance, cutoff))
@@ -605,6 +606,7 @@ class MemoryObserver:
                 AND decay_category = 'permanent'
                 AND (last_accessed_at IS NULL OR last_accessed_at < ?)
                 AND (bridge_status IS NULL OR bridge_status != 'active')
+                AND meta_source IS NULL
                 ORDER BY importance DESC
                 LIMIT 5
             """, (self.blind_spot_importance, cutoff))
@@ -642,6 +644,12 @@ class MemoryObserver:
     # -------------------------------------------------------------------
     # Report generation
     # -------------------------------------------------------------------
+    # TODO (minor optimizations, not urgent):
+    #   - detect_retrieval_blind_spots() and get_blind_spot_candidates() run
+    #     near-identical SQL; share results or cache after first call.
+    #   - _has_bridge_status_column() is called twice per cycle; cache on instance.
+    #   - Z-score detectors use np.std/np.var with ddof=0 (population); ddof=1
+    #     (sample) would be more correct at low session counts (<10).
 
     def generate_signal_report(self, include_tier3: bool = False) -> str:
         """Run all detection methods and compile a structured signal report."""

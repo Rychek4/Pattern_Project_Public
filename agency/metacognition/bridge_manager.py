@@ -170,6 +170,9 @@ class BridgeManager:
     # -------------------------------------------------------------------
     # 3b: Enrich Blind Spot Data
     # -------------------------------------------------------------------
+    # TODO (minor): enrich_blind_spots and _get_next_attempt_number both
+    # scan all bridges and filter in Python. At scale, query once and
+    # build a lookup dict, or add a bridge_targets junction table.
 
     def enrich_blind_spots(self, candidates: List[Dict[str, Any]]) -> str:
         """
