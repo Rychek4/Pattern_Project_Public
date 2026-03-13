@@ -889,7 +889,7 @@ class WebServer:
 
         @app.get("/health")
         async def health():
-            return {"status": "healthy", "service": "pattern-project-web"}
+            return {"status": "healthy", "service": "pattern-project"}
 
         # --- WebSocket ---
 
@@ -970,11 +970,6 @@ class WebServer:
         # --- Voice API (migrated from Flask) ---
         from voice.api import voice_router
         app.include_router(voice_router)
-
-        # --- Health endpoint (for Guardian watchdog) ---
-        @app.get("/health")
-        async def health():
-            return {"status": "healthy", "service": "pattern-project"}
 
         # --- REST API ---
 
