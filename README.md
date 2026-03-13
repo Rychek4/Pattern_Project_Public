@@ -59,7 +59,7 @@ Pattern uses Claude's native tool use (no text-pattern parsing):
 - Automatic citation tracking
 
 ### 🔊 Text-to-Speech
-- ElevenLabs integration (Turbo v2.5 model)
+- OpenAI TTS integration (tts-1 / tts-1-hd models)
 - Streaming audio with proper sequencing
 - Voice selection and user preferences
 
@@ -190,8 +190,8 @@ AI_NAME=Isaac
 telegram_bot=your_bot_token
 TELEGRAM_CHAT_ID=your_chat_id
 
-# TTS (optional)
-Eleven_Labs_API=your_api_key
+# TTS (optional — uses OpenAI TTS)
+OPENAI_API_KEY=your_openai_api_key
 
 # Visual (optional)
 VISUAL_ENABLED=true

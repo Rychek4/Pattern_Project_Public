@@ -35,8 +35,7 @@ faster-whisper>=0.9.0
 python-telegram-bot>=21.0
 
 # Visual Capture (optional)
-# Uncomment if using visual features
-# pillow>=10.0.0
+pillow>=10.0.0
 # opencv-python>=4.8.0
 # google-generativeai>=0.3.0
 

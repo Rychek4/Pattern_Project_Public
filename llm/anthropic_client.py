@@ -3,10 +3,10 @@ Pattern Project - Anthropic Claude Client
 Client for Claude API (frontier reasoning)
 """
 
-from typing import Optional, List, Dict, Any, Generator, Iterator
+from typing import Optional, List, Dict, Any, Generator
 from dataclasses import dataclass, field
 
-from core.logger import log_info, log_error, log_success, log_warning
+from core.logger import log_info, log_error, log_warning
 
 
 @dataclass
