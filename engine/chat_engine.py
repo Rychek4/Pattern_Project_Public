@@ -622,13 +622,18 @@ class ChatEngine:
     def process_pulse(self, pulse_type: str):
         """Process a system pulse (reflective or action).
 
+        Reflective pulses run in three phases to keep each LLM call focused:
+          Phase 1 (presence): intentions, growth threads, active thoughts
+          Phase 2 (bridges):  write bridge memories for blind spots (if any)
+          Phase 3 (self-model): rewrite self-model + meta-observations
+
         Args:
             pulse_type: "reflective" or "action"
         """
         from agency.system_pulse import (
             get_action_pulse_prompt, ACTION_PULSE_STORED_MESSAGE,
             get_reflective_pulse_prompt, REFLECTIVE_PULSE_STORED_MESSAGE,
-            run_metacognition, build_metacognition_section
+            run_metacognition, get_bridge_phase_prompt, get_self_model_phase_prompt
         )
         from prompt_builder.sources.system_pulse import get_interval_label
 
@@ -642,25 +647,11 @@ class ChatEngine:
         try:
             self._pause_timers()
 
-            # Determine prompt and task type based on pulse type
             if pulse_type == "reflective":
-                interval = self._pulse_manager.reflective_timer.interval if self._pulse_manager else 43200
-                task_type = TaskType.PULSE_REFLECTIVE
-                stored_message = REFLECTIVE_PULSE_STORED_MESSAGE
-
-                # Run metacognition pre-pass if enabled
-                metacognition_section = ""
-                if getattr(config, 'METACOGNITION_ENABLED', False):
-                    try:
-                        metacognition_data = run_metacognition()
-                        metacognition_section = build_metacognition_section(metacognition_data)
-                        log_info("Metacognition pre-pass complete", prefix="🧠")
-                    except Exception as e:
-                        log_error(f"Metacognition pre-pass failed (continuing without): {e}")
-
-                pulse_prompt = get_reflective_pulse_prompt(
-                    get_interval_label(interval),
-                    metacognition_section=metacognition_section
+                self._process_reflective_pulse(
+                    run_metacognition, get_reflective_pulse_prompt,
+                    get_bridge_phase_prompt, get_self_model_phase_prompt,
+                    get_interval_label, REFLECTIVE_PULSE_STORED_MESSAGE
                 )
             else:
                 interval = self._pulse_manager.action_timer.interval if self._pulse_manager else 7200
@@ -668,91 +659,63 @@ class ChatEngine:
                 stored_message = ACTION_PULSE_STORED_MESSAGE
                 pulse_prompt = get_action_pulse_prompt(get_interval_label(interval))
 
-            self._emit(EngineEventType.STATUS_UPDATE,
-                       text=f"{label} pulse...", type="thinking")
-
-            # Store abbreviated pulse message
-            self._conversation_mgr.add_turn(
-                role="system",
-                content=stored_message,
-                input_type="system"
-            )
-
-            # Build prompt
-            assembled = self._prompt_builder.build(
-                user_input=pulse_prompt,
-                system_prompt="",
-                additional_context={"is_pulse": True}
-            )
-            self._emit(EngineEventType.PROMPT_ASSEMBLED,
-                       blocks=[], token_estimate=len(assembled.full_system_prompt) // 4)
-
-            history = self._conversation_mgr.get_api_messages()
-            history.append({"role": "user", "content": pulse_prompt})
-
-            tools = get_tool_definitions(is_pulse=True, pulse_type=pulse_type)
-
-            # Signal round start so the web process panel creates a round group
-            self._emit(EngineEventType.STREAM_START)
-
-            # LLM call (non-streaming for pulses)
-            response = self._llm_router.chat(
-                messages=history,
-                system_prompt=assembled.full_system_prompt,
-                task_type=task_type,
-                temperature=0.7,
-                tools=tools,
-                thinking_enabled=True
-            )
-
-            log_info(f"PULSE: Router returned, success={response.success}", prefix="⏱️")
-
-            if response.success:
-                self._emit(EngineEventType.STREAM_COMPLETE,
-                           text=response.text,
-                           tokens_in=getattr(response, 'tokens_in', 0),
-                           tokens_out=getattr(response, 'tokens_out', 0),
-                           stop_reason=getattr(response, 'stop_reason', ''))
-
-                result = process_with_tools(
-                    llm_router=self._llm_router,
-                    response=response,
-                    history=history,
-                    system_prompt=assembled.full_system_prompt,
-                    max_passes=getattr(config, 'COMMAND_MAX_PASSES', 40),
-                    pulse_callback=self._on_pulse_interval_change,
-                    tools=tools,
-                    dev_mode_callbacks=self._build_dev_callbacks(),
-                    thinking_enabled=True,
-                    task_type=task_type
-                )
-
-                final_text = result.final_text
-                log_info(f"PULSE: Processed in {result.passes_executed} pass(es)", prefix="⏱️")
+                self._emit(EngineEventType.STATUS_UPDATE,
+                           text="Action pulse...", type="thinking")
 
                 self._conversation_mgr.add_turn(
-                    role="assistant",
-                    content=final_text,
-                    input_type="text"
+                    role="system", content=stored_message, input_type="system"
                 )
 
-                self._emit(EngineEventType.RESPONSE_COMPLETE,
-                           text=final_text, source="pulse", provider=result.final_provider,
-                           pulse_type=pulse_type)
+                assembled = self._prompt_builder.build(
+                    user_input=pulse_prompt,
+                    system_prompt="",
+                    additional_context={"is_pulse": True}
+                )
 
-                if result.clarification_requested and result.clarification_data:
-                    self._emit(EngineEventType.CLARIFICATION_REQUESTED,
-                               data=result.clarification_data)
-            else:
-                error_msg = f"{label} pulse API error: {response.error}"
-                log_error(f"PULSE: API call failed - {error_msg}")
-                self._emit(EngineEventType.PROCESSING_ERROR,
-                           error=response.error, error_type="api_error")
+                history = self._conversation_mgr.get_api_messages()
+                history.append({"role": "user", "content": pulse_prompt})
+
+                tools = get_tool_definitions(is_pulse=True, pulse_type=pulse_type)
+
+                self._emit(EngineEventType.STREAM_START)
+
+                response = self._llm_router.chat(
+                    messages=history,
+                    system_prompt=assembled.full_system_prompt,
+                    task_type=task_type,
+                    temperature=0.7,
+                    tools=tools,
+                    thinking_enabled=True
+                )
+
+                if response.success:
+                    result = process_with_tools(
+                        llm_router=self._llm_router,
+                        response=response,
+                        history=history,
+                        system_prompt=assembled.full_system_prompt,
+                        max_passes=getattr(config, 'COMMAND_MAX_PASSES', 40),
+                        pulse_callback=self._on_pulse_interval_change,
+                        tools=tools,
+                        dev_mode_callbacks=self._build_dev_callbacks(),
+                        thinking_enabled=True,
+                        task_type=task_type
+                    )
+
+                    self._conversation_mgr.add_turn(
+                        role="assistant", content=result.final_text, input_type="text"
+                    )
+                    self._emit(EngineEventType.RESPONSE_COMPLETE,
+                               text=result.final_text, source="pulse",
+                               provider=result.final_provider, pulse_type=pulse_type)
+                else:
+                    log_error(f"PULSE: Action pulse API error: {response.error}")
+                    self._emit(EngineEventType.PROCESSING_ERROR,
+                               error=response.error, error_type="api_error")
 
         except Exception as e:
-            error_msg = f"{label} pulse exception: {str(e)}"
             tb = traceback.format_exc()
-            log_error(f"PULSE: Exception - {error_msg}")
+            log_error(f"PULSE: {label} pulse exception: {e}")
             log_error(f"PULSE: Traceback:\n{tb}")
             self._emit(EngineEventType.PROCESSING_ERROR,
                        error=str(e), error_type=None)
@@ -764,6 +727,188 @@ class ChatEngine:
             self._emit(EngineEventType.PROCESSING_COMPLETE)
             self._resume_timers()
             self._is_processing = False
+
+    def _process_reflective_pulse(
+        self, run_metacognition, get_reflective_pulse_prompt,
+        get_bridge_phase_prompt, get_self_model_phase_prompt,
+        get_interval_label, stored_message
+    ):
+        """Run reflective pulse in three focused phases.
+
+        Phase 1: Presence — intentions, growth threads, active thoughts
+                 Uses full conversation history + growth tools (no metacognition tools)
+        Phase 2: Bridges — write bridge memories for blind spots
+                 Uses minimal history + bridge tool only. Skipped if no blind spots.
+        Phase 3: Self-model — rewrite self-model + meta-observations
+                 Uses minimal history + self-model/observation tools.
+        """
+        from agency.tools.definitions import (
+            STORE_BRIDGE_MEMORY_TOOL, STORE_META_OBSERVATION_TOOL,
+            UPDATE_MEMORY_SELF_MODEL_TOOL
+        )
+
+        interval = self._pulse_manager.reflective_timer.interval if self._pulse_manager else 43200
+        task_type = TaskType.PULSE_REFLECTIVE
+
+        # Run metacognition pre-pass (observer + bridge evaluation)
+        metacognition_data = None
+        if getattr(config, 'METACOGNITION_ENABLED', False):
+            try:
+                metacognition_data = run_metacognition()
+                log_info("Metacognition pre-pass complete", prefix="🧠")
+            except Exception as e:
+                log_error(f"Metacognition pre-pass failed (continuing without): {e}")
+
+        # ── Phase 1: Presence ────────────────────────────────────────────
+        log_info("Phase 1/3: Presence (intentions, growth, thoughts)", prefix="🧠")
+        self._emit(EngineEventType.STATUS_UPDATE,
+                   text="Reflective pulse — presence...", type="thinking")
+
+        self._conversation_mgr.add_turn(
+            role="system", content=stored_message, input_type="system"
+        )
+
+        # Phase 1 prompt: base reflective only, no metacognition
+        phase1_prompt = get_reflective_pulse_prompt(get_interval_label(interval))
+
+        assembled = self._prompt_builder.build(
+            user_input=phase1_prompt,
+            system_prompt="",
+            additional_context={"is_pulse": True}
+        )
+        system_prompt = assembled.full_system_prompt
+
+        phase1_history = self._conversation_mgr.get_api_messages()
+        phase1_history.append({"role": "user", "content": phase1_prompt})
+
+        # Phase 1 tools: pulse tools WITHOUT metacognition tools
+        # (pulse_type="action" gives growth threads but not metacognition)
+        phase1_tools = get_tool_definitions(is_pulse=True, pulse_type="action")
+
+        self._emit(EngineEventType.STREAM_START)
+
+        response = self._llm_router.chat(
+            messages=phase1_history,
+            system_prompt=system_prompt,
+            task_type=task_type,
+            temperature=0.7,
+            tools=phase1_tools,
+            thinking_enabled=True
+        )
+
+        if not response.success:
+            log_error(f"PULSE Phase 1: API error: {response.error}")
+            self._emit(EngineEventType.PROCESSING_ERROR,
+                       error=response.error, error_type="api_error")
+            return
+
+        result = process_with_tools(
+            llm_router=self._llm_router,
+            response=response,
+            history=phase1_history,
+            system_prompt=system_prompt,
+            max_passes=getattr(config, 'COMMAND_MAX_PASSES', 40),
+            pulse_callback=self._on_pulse_interval_change,
+            tools=phase1_tools,
+            dev_mode_callbacks=self._build_dev_callbacks(),
+            thinking_enabled=True,
+            task_type=task_type
+        )
+
+        # Store Phase 1 response in conversation (the visible reflection)
+        self._conversation_mgr.add_turn(
+            role="assistant", content=result.final_text, input_type="text"
+        )
+        self._emit(EngineEventType.RESPONSE_COMPLETE,
+                   text=result.final_text, source="pulse",
+                   provider=result.final_provider, pulse_type="reflective")
+
+        log_info(f"Phase 1 complete ({result.passes_executed} pass(es))", prefix="🧠")
+
+        # ── Phase 2: Bridges (conditional) ───────────────────────────────
+        if not metacognition_data:
+            log_info("Metacognition disabled or failed — skipping phases 2-3", prefix="🧠")
+            return
+
+        signal_report = metacognition_data.get("signal_report", "")
+        blind_spot_data = metacognition_data.get("blind_spot_data", "")
+
+        if blind_spot_data:
+            log_info("Phase 2/3: Bridges (writing retrieval pathways)", prefix="🧠")
+            self._emit(EngineEventType.STATUS_UPDATE,
+                       text="Reflective pulse — bridges...", type="thinking")
+
+            phase2_prompt = get_bridge_phase_prompt(signal_report, blind_spot_data)
+            phase2_history = [{"role": "user", "content": phase2_prompt}]
+            phase2_tools = get_tool_definitions(is_pulse=True, pulse_type="action")
+            phase2_tools.append(STORE_BRIDGE_MEMORY_TOOL)
+
+            try:
+                response = self._llm_router.chat(
+                    messages=phase2_history,
+                    system_prompt=system_prompt,
+                    task_type=task_type,
+                    temperature=0.7,
+                    tools=phase2_tools,
+                    thinking_enabled=True
+                )
+
+                if response.success:
+                    result = process_with_tools(
+                        llm_router=self._llm_router,
+                        response=response,
+                        history=phase2_history,
+                        system_prompt=system_prompt,
+                        max_passes=10,
+                        tools=phase2_tools,
+                        thinking_enabled=True,
+                        task_type=task_type
+                    )
+                    log_info(f"Phase 2 complete ({result.passes_executed} pass(es))", prefix="🧠")
+                else:
+                    log_error(f"PULSE Phase 2: API error: {response.error}")
+            except Exception as e:
+                log_error(f"PULSE Phase 2 failed (continuing to phase 3): {e}")
+        else:
+            log_info("Phase 2/3: No blind spots — skipping bridge phase", prefix="🧠")
+
+        # ── Phase 3: Self-model + meta-observations ──────────────────────
+        log_info("Phase 3/3: Self-model + meta-observations", prefix="🧠")
+        self._emit(EngineEventType.STATUS_UPDATE,
+                   text="Reflective pulse — self-model...", type="thinking")
+
+        phase3_prompt = get_self_model_phase_prompt(signal_report)
+        phase3_history = [{"role": "user", "content": phase3_prompt}]
+        phase3_tools = get_tool_definitions(is_pulse=True, pulse_type="action")
+        phase3_tools.append(UPDATE_MEMORY_SELF_MODEL_TOOL)
+        phase3_tools.append(STORE_META_OBSERVATION_TOOL)
+
+        try:
+            response = self._llm_router.chat(
+                messages=phase3_history,
+                system_prompt=system_prompt,
+                task_type=task_type,
+                temperature=0.7,
+                tools=phase3_tools,
+                thinking_enabled=True
+            )
+
+            if response.success:
+                result = process_with_tools(
+                    llm_router=self._llm_router,
+                    response=response,
+                    history=phase3_history,
+                    system_prompt=system_prompt,
+                    max_passes=10,
+                    tools=phase3_tools,
+                    thinking_enabled=True,
+                    task_type=task_type
+                )
+                log_info(f"Phase 3 complete ({result.passes_executed} pass(es))", prefix="🧠")
+            else:
+                log_error(f"PULSE Phase 3: API error: {response.error}")
+        except Exception as e:
+            log_error(f"PULSE Phase 3 failed: {e}")
 
     # ------------------------------------------------------------------
     # Reminder
