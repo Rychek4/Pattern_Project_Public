@@ -17,7 +17,8 @@ def get_tool_definitions(is_pulse: bool = False, pulse_type: str = None) -> List
 
     Args:
         is_pulse: If True, include pulse-only tools (growth threads, promote_growth_thread)
-        pulse_type: "reflective" or "action" — metacognition tools require "reflective"
+        pulse_type: "reflective" or "action" (currently informational; metacognition
+                    tools are passed directly in _process_reflective_pulse phases)
 
     Returns:
         List of tool definition dicts for the Anthropic API
@@ -119,11 +120,10 @@ def get_tool_definitions(is_pulse: bool = False, pulse_type: str = None) -> List
         tools.append(SET_GROWTH_THREAD_TOOL)
         tools.append(REMOVE_GROWTH_THREAD_TOOL)
         tools.append(PROMOTE_GROWTH_THREAD_TOOL)
-        # Metacognition tools (reflective pulse only)
-        if pulse_type == "reflective" and getattr(config, 'METACOGNITION_ENABLED', False):
-            tools.append(STORE_BRIDGE_MEMORY_TOOL)
-            tools.append(STORE_META_OBSERVATION_TOOL)
-            tools.append(UPDATE_MEMORY_SELF_MODEL_TOOL)
+        # Note: Metacognition tools (store_bridge_memory, store_meta_observation,
+        # update_memory_self_model) are NOT registered here. They are passed
+        # directly to Phases 1 and 2 of the reflective pulse via manually
+        # constructed tool lists in _process_reflective_pulse().
 
     return tools
 

@@ -85,6 +85,7 @@ class MemoryObserver:
         self.blind_spot_importance = blind_spot_importance
         self.density_high_threshold = density_high_threshold
         self.density_low_threshold = density_low_threshold
+        self._bridge_col_exists: Optional[bool] = None
 
     def _db(self):
         """Get the project database instance."""
@@ -126,9 +127,12 @@ class MemoryObserver:
         row = self._execute(
             "SELECT MIN(created_at) as oldest, MAX(created_at) as newest FROM memories"
         )
-        if row:
+        if row and row[0]["oldest"] is not None:
             stats["oldest_memory"] = row[0]["oldest"]
             stats["newest_memory"] = row[0]["newest"]
+        else:
+            stats["oldest_memory"] = None
+            stats["newest_memory"] = None
 
         row = self._execute(
             "SELECT COUNT(DISTINCT source_session_id) as cnt FROM memories WHERE source_session_id IS NOT NULL"
@@ -136,17 +140,20 @@ class MemoryObserver:
         stats["source_sessions"] = row[0]["cnt"] if row else 0
 
         row = self._execute("SELECT AVG(importance) as avg_imp FROM memories")
-        stats["avg_importance"] = round(row[0]["avg_imp"], 3) if row and row[0]["avg_imp"] else 0
+        avg = row[0]["avg_imp"] if row else None
+        stats["avg_importance"] = round(avg, 3) if avg is not None else 0
 
         return stats
 
     def _format_store_stats(self, stats: dict) -> str:
+        oldest = stats.get('oldest_memory') or 'N/A'
+        newest = stats.get('newest_memory') or 'N/A'
         lines = [
             f"  Total memories: {stats['total']}",
             f"  By category: {stats['by_category']}",
             f"  By type: {stats['by_type']}",
             f"  By decay: {stats['by_decay']}",
-            f"  Temporal range: {stats.get('oldest_memory', 'N/A')} to {stats.get('newest_memory', 'N/A')}",
+            f"  Temporal range: {oldest} to {newest}",
             f"  Source sessions: {stats.get('source_sessions', 0)}",
             f"  Average importance: {stats['avg_importance']}",
         ]
@@ -634,12 +641,27 @@ class MemoryObserver:
         ]
 
     def _has_bridge_status_column(self) -> bool:
-        """Check if bridge_status column exists on memories table."""
+        """Check if bridge_status column exists on memories table.
+
+        Cached per observer instance (one per metacognition cycle).
+        Only treats OperationalError as 'column missing'; other
+        exceptions are logged and treated as missing to avoid crashing
+        the caller, but the log makes them visible for debugging.
+        """
+        if self._bridge_col_exists is not None:
+            return self._bridge_col_exists
+
         try:
             self._execute("SELECT bridge_status FROM memories LIMIT 1")
-            return True
-        except Exception:
-            return False
+            self._bridge_col_exists = True
+        except Exception as e:
+            # OperationalError for missing column is expected on
+            # pre-migration databases; anything else is unexpected.
+            if "bridge_status" not in str(e).lower():
+                log_error(f"Unexpected error checking bridge_status column: {e}")
+            self._bridge_col_exists = False
+
+        return self._bridge_col_exists
 
     # -------------------------------------------------------------------
     # Report generation
@@ -647,13 +669,18 @@ class MemoryObserver:
     # TODO (minor optimizations, not urgent):
     #   - detect_retrieval_blind_spots() and get_blind_spot_candidates() run
     #     near-identical SQL; share results or cache after first call.
-    #   - _has_bridge_status_column() is called twice per cycle; cache on instance.
     #   - Z-score detectors use np.std/np.var with ddof=0 (population); ddof=1
     #     (sample) would be more correct at low session counts (<10).
 
     def generate_signal_report(self, include_tier3: bool = False) -> str:
         """Run all detection methods and compile a structured signal report."""
-        stats = self.get_store_stats()
+        try:
+            stats = self.get_store_stats()
+            stats_section = self._format_store_stats(stats)
+        except Exception as e:
+            log_error(f"get_store_stats() failed: {e}")
+            stats_section = "  [Store stats unavailable — database error]"
+
         all_signals: List[Signal] = []
 
         detectors = [
@@ -687,7 +714,7 @@ class MemoryObserver:
             f"Analysis window: {self.rolling_window} sessions\n"
             f"Signals detected: {len(all_signals)}\n"
             f"\nSTORE OVERVIEW:\n"
-            f"{self._format_store_stats(stats)}"
+            f"{stats_section}"
         )
 
         if not all_signals:
