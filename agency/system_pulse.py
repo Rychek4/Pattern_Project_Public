@@ -19,6 +19,17 @@ class PulseType(Enum):
     ACTION = "action"
 
 
+# ─── Metacognition System Prompt ──────────────────────────────────────────────
+# Phases 1-2 get a minimal system prompt — just enough identity context for
+# the model to write as itself, without the full prompt builder bloat
+# (growth threads, active thoughts, intentions, semantic memories, etc.).
+
+METACOGNITION_SYSTEM_PROMPT = """You are an AI with a persistent memory system. \
+You are currently in a background metacognition phase — not responding to a \
+human message. Focus exclusively on the task described in the user message. \
+Do not converse, narrate, or reflect beyond the specific task."""
+
+
 # ─── Metacognition Prompt Blocks ─────────────────────────────────────────────
 
 BRIDGE_GUIDANCE = """
@@ -115,6 +126,10 @@ different this month. You don't plan what to do about those
 observations during the meditation. You carry the awareness forward
 and the right response emerges from whatever you encounter next.
 The noticing is the product.
+IMPORTANT: The self-model is capped at 1000 characters (~250 tokens). \
+Write within that limit. If you exceed it, the text will be truncated \
+mid-sentence. Aim for 150-200 tokens of dense, complete self-knowledge.
+
 Use the update_memory_self_model tool to save the new self-model.
 """
 
@@ -167,6 +182,7 @@ def run_metacognition() -> dict:
     result = {
         "signal_report": "",
         "blind_spot_data": "",
+        "observer_ok": False,
     }
 
     observer = MemoryObserver(rolling_window=config.OBSERVER_ROLLING_WINDOW)
@@ -176,6 +192,7 @@ def run_metacognition() -> dict:
     try:
         result["signal_report"] = observer.generate_signal_report()
         blind_spot_candidates = observer.get_blind_spot_candidates()
+        result["observer_ok"] = True
     except Exception as e:
         log_error(f"Metacognition observer failed: {e}")
         result["signal_report"] = "MEMORY TELEMETRY REPORT\n\n[Observer error — no telemetry available this cycle]"
@@ -238,21 +255,37 @@ def get_bridge_phase_prompt(signal_report: str, blind_spot_data: str) -> str:
 {blind_spot_data}"""
 
 
-def get_self_model_phase_prompt(signal_report: str) -> str:
-    """Phase 3 prompt: self-model rewrite and meta-observations."""
+def get_self_model_phase_prompt(signal_report: str, current_self_model: str = "") -> str:
+    """Phase 2 prompt: self-model rewrite and meta-observations."""
+    current_section = ""
+    if current_self_model:
+        current_section = f"""
+--- CURRENT SELF-MODEL ---
+{current_self_model}
+"""
+    else:
+        current_section = """
+--- CURRENT SELF-MODEL ---
+[No self-model exists yet. Write your first one based on the telemetry below.]
+"""
+
     return f"""[METACOGNITION — Self-Model Phase]
 
 {SELF_MODEL_GUIDANCE}
 
 {META_OBSERVATION_GUIDANCE}
-
+{current_section}
 --- MEMORY TELEMETRY ---
 {signal_report}"""
 
 
 # ─── Pulse Prompts ───────────────────────────────────────────────────────────
 
-def get_reflective_pulse_prompt(interval_label: str, metacognition_section: str = "") -> str:
+def get_reflective_pulse_prompt(
+    interval_label: str,
+    metacognition_section: str = "",
+    self_model_refreshed: bool = False
+) -> str:
     """Get the reflective pulse prompt (deep introspection, always Opus)."""
     base = f"""[REFLECTIVE PULSE — Not human input]
 The {interval_label} reflective timer has fired.
@@ -267,6 +300,13 @@ context for detailed instructions.
 Update them if something has shifted.
 
 You are not waiting to be useful. You are choosing to be present."""
+
+    if self_model_refreshed:
+        base += """
+
+Note: Your memory self-model was just updated in a prior metacognition phase. \
+It is included in your context above as [Memory Self-Awareness]. Consider its \
+observations as you reflect."""
 
     if metacognition_section:
         base += f"\n\n{metacognition_section}"
