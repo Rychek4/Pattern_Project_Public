@@ -634,7 +634,8 @@ class ChatEngine:
         from agency.system_pulse import (
             get_action_pulse_prompt, ACTION_PULSE_STORED_MESSAGE,
             get_reflective_pulse_prompt, REFLECTIVE_PULSE_STORED_MESSAGE,
-            run_metacognition, get_bridge_phase_prompt, get_self_model_phase_prompt
+            run_metacognition, get_bridge_phase_prompt, get_self_model_phase_prompt,
+            METACOGNITION_SYSTEM_PROMPT
         )
         from prompt_builder.sources.system_pulse import get_interval_label
 
@@ -741,7 +742,9 @@ class ChatEngine:
                  metacognition disabled or no blind spots found.
         Phase 2: Self-model — rewrite self-model + meta-observations
                  Minimal history, only update_memory_self_model and
-                 store_meta_observation tools. Skipped if metacognition disabled.
+                 store_meta_observation tools. Skipped if metacognition
+                 disabled or signal_report is empty (no telemetry = no
+                 basis for self-model rewrite).
         Phase 3: Presence — intentions, growth threads, active thoughts
                  Full conversation history + full pulse tool set. This is the
                  visible reflection stored to conversation. Runs LAST so
@@ -764,13 +767,11 @@ class ChatEngine:
             except Exception as e:
                 log_error(f"Metacognition pre-pass failed (continuing without): {e}")
 
-        # Build system prompt for metacognition phases (identity context)
-        meta_assembled = self._prompt_builder.build(
-            user_input="[metacognition phase]",
-            system_prompt="",
-            additional_context={"is_pulse": True}
-        )
-        meta_system_prompt = meta_assembled.full_system_prompt
+        # Minimal system prompt for metacognition phases — no prompt builder bloat
+        meta_system_prompt = METACOGNITION_SYSTEM_PROMPT
+
+        # Track whether self-model was refreshed (for phase 3 hint)
+        self_model_refreshed = False
 
         # ── Phase 1: Bridges (conditional) ───────────────────────────────
         if metacognition_data:
@@ -816,40 +817,53 @@ class ChatEngine:
                 log_info("Phase 1/3: No blind spots — skipping bridge phase", prefix="🧠")
 
             # ── Phase 2: Self-model + meta-observations ──────────────────
-            log_info("Phase 2/3: Self-model + meta-observations", prefix="🧠")
-            self._emit(EngineEventType.STATUS_UPDATE,
-                       text="Reflective pulse — self-model...", type="thinking")
+            # Only run if observer succeeded — no telemetry = no basis for
+            # self-model rewrite, and we don't want to invite hallucinations
+            observer_ok = metacognition_data.get("observer_ok", False)
+            if observer_ok and signal_report and signal_report.strip():
+                log_info("Phase 2/3: Self-model + meta-observations", prefix="🧠")
+                self._emit(EngineEventType.STATUS_UPDATE,
+                           text="Reflective pulse — self-model...", type="thinking")
 
-            selfmodel_prompt = get_self_model_phase_prompt(signal_report)
-            selfmodel_history = [{"role": "user", "content": selfmodel_prompt}]
-            selfmodel_tools = [UPDATE_MEMORY_SELF_MODEL_TOOL, STORE_META_OBSERVATION_TOOL]
+                # Fetch current self-model so the prompt can show it
+                from core.database import get_database as _get_db
+                current_self_model = _get_db().get_state("memory_self_model") or ""
 
-            try:
-                response = self._llm_router.chat(
-                    messages=selfmodel_history,
-                    system_prompt=meta_system_prompt,
-                    task_type=task_type,
-                    temperature=0.7,
-                    tools=selfmodel_tools,
-                    thinking_enabled=True
+                selfmodel_prompt = get_self_model_phase_prompt(
+                    signal_report, current_self_model
                 )
+                selfmodel_history = [{"role": "user", "content": selfmodel_prompt}]
+                selfmodel_tools = [UPDATE_MEMORY_SELF_MODEL_TOOL, STORE_META_OBSERVATION_TOOL]
 
-                if response.success:
-                    result = process_with_tools(
-                        llm_router=self._llm_router,
-                        response=response,
-                        history=selfmodel_history,
+                try:
+                    response = self._llm_router.chat(
+                        messages=selfmodel_history,
                         system_prompt=meta_system_prompt,
-                        max_passes=5,
+                        task_type=task_type,
+                        temperature=0.7,
                         tools=selfmodel_tools,
-                        thinking_enabled=True,
-                        task_type=task_type
+                        thinking_enabled=True
                     )
-                    log_info(f"Phase 2 complete ({result.passes_executed} pass(es))", prefix="🧠")
-                else:
-                    log_error(f"PULSE Phase 2 (self-model): API error: {response.error}")
-            except Exception as e:
-                log_error(f"PULSE Phase 2 (self-model) failed (continuing): {e}")
+
+                    if response.success:
+                        result = process_with_tools(
+                            llm_router=self._llm_router,
+                            response=response,
+                            history=selfmodel_history,
+                            system_prompt=meta_system_prompt,
+                            max_passes=5,
+                            tools=selfmodel_tools,
+                            thinking_enabled=True,
+                            task_type=task_type
+                        )
+                        self_model_refreshed = True
+                        log_info(f"Phase 2 complete ({result.passes_executed} pass(es))", prefix="🧠")
+                    else:
+                        log_error(f"PULSE Phase 2 (self-model): API error: {response.error}")
+                except Exception as e:
+                    log_error(f"PULSE Phase 2 (self-model) failed (continuing): {e}")
+            else:
+                log_info("Phase 2/3: No telemetry — skipping self-model phase", prefix="🧠")
         else:
             log_info("Metacognition disabled or failed — skipping phases 1-2", prefix="🧠")
 
@@ -864,7 +878,10 @@ class ChatEngine:
             role="system", content=stored_message, input_type="system"
         )
 
-        presence_prompt = get_reflective_pulse_prompt(get_interval_label(interval))
+        presence_prompt = get_reflective_pulse_prompt(
+            get_interval_label(interval),
+            self_model_refreshed=self_model_refreshed
+        )
 
         # Build prompt AFTER self-model phase so it includes the fresh self-model
         assembled = self._prompt_builder.build(

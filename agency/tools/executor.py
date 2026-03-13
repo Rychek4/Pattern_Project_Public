@@ -2171,16 +2171,34 @@ class ToolExecutor:
 
         # Enforce size cap (approximate: 1 token ≈ 4 chars)
         max_chars = getattr(config, 'SELF_MODEL_MAX_TOKENS', 250) * 4
+        was_truncated = False
         if len(content) > max_chars:
-            content = content[:max_chars]
-            log_warning(f"Self-model truncated to ~{config.SELF_MODEL_MAX_TOKENS} tokens")
+            was_truncated = True
+            truncated = content[:max_chars]
+            # Find last sentence boundary (period or newline) before the cap
+            last_period = truncated.rfind('.')
+            last_newline = truncated.rfind('\n')
+            cut_point = max(last_period, last_newline)
+            if cut_point > max_chars // 2:
+                content = truncated[:cut_point + 1].rstrip()
+            else:
+                # Fall back to word boundary
+                last_space = truncated.rfind(' ')
+                if last_space > max_chars // 2:
+                    content = truncated[:last_space].rstrip()
+                else:
+                    content = truncated
+            log_warning(f"Self-model truncated to {len(content)} chars (~{len(content)//4} tokens)")
 
         db = get_database()
         db.set_state("memory_self_model", content)
 
+        msg = f"Memory self-model updated ({len(content)} chars)"
+        if was_truncated:
+            msg += f". WARNING: Content exceeded {max_chars} char limit and was truncated at the nearest sentence boundary."
         return ToolResult(
             tool_use_id=id, tool_name="update_memory_self_model",
-            content=f"Memory self-model updated ({len(content)} chars)"
+            content=msg
         )
 
 
