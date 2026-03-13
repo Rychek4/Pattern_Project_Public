@@ -13,18 +13,6 @@ from agency.commands.errors import ToolError, ToolErrorType
 class PublishBlogPostHandler(CommandHandler):
     """Create and immediately publish a blog post."""
 
-    @property
-    def command_name(self) -> str:
-        return "PUBLISH_BLOG_POST"
-
-    @property
-    def pattern(self) -> str:
-        return r""
-
-    @property
-    def needs_continuation(self) -> bool:
-        return True
-
     def execute(self, query: str, context: dict) -> CommandResult:
         from blog.blog_manager import create_post
 
@@ -66,9 +54,6 @@ class PublishBlogPostHandler(CommandHandler):
             display_text=f"Blog post published: {title}",
         )
 
-    def get_instructions(self) -> str:
-        return ""
-
     def format_result(self, result: CommandResult) -> str:
         if result.error:
             return result.get_error_message()
@@ -78,18 +63,6 @@ class PublishBlogPostHandler(CommandHandler):
 
 class SaveBlogDraftHandler(CommandHandler):
     """Save a blog post as a draft."""
-
-    @property
-    def command_name(self) -> str:
-        return "SAVE_BLOG_DRAFT"
-
-    @property
-    def pattern(self) -> str:
-        return r""
-
-    @property
-    def needs_continuation(self) -> bool:
-        return True
 
     def execute(self, query: str, context: dict) -> CommandResult:
         from blog.blog_manager import create_post
@@ -132,9 +105,6 @@ class SaveBlogDraftHandler(CommandHandler):
             display_text=f"Blog draft saved: {title}",
         )
 
-    def get_instructions(self) -> str:
-        return ""
-
     def format_result(self, result: CommandResult) -> str:
         if result.error:
             return result.get_error_message()
@@ -144,18 +114,6 @@ class SaveBlogDraftHandler(CommandHandler):
 
 class EditBlogPostHandler(CommandHandler):
     """Edit an existing blog post."""
-
-    @property
-    def command_name(self) -> str:
-        return "EDIT_BLOG_POST"
-
-    @property
-    def pattern(self) -> str:
-        return r""
-
-    @property
-    def needs_continuation(self) -> bool:
-        return True
 
     def execute(self, query: str, context: dict) -> CommandResult:
         from blog.blog_manager import edit_post
@@ -192,9 +150,6 @@ class EditBlogPostHandler(CommandHandler):
             display_text=f"Blog post edited: {slug}",
         )
 
-    def get_instructions(self) -> str:
-        return ""
-
     def format_result(self, result: CommandResult) -> str:
         if result.error:
             return result.get_error_message()
@@ -204,18 +159,6 @@ class EditBlogPostHandler(CommandHandler):
 
 class ListBlogPostsHandler(CommandHandler):
     """List blog posts."""
-
-    @property
-    def command_name(self) -> str:
-        return "LIST_BLOG_POSTS"
-
-    @property
-    def pattern(self) -> str:
-        return r""
-
-    @property
-    def needs_continuation(self) -> bool:
-        return True
 
     def execute(self, query: str, context: dict) -> CommandResult:
         from blog.blog_manager import list_posts
@@ -230,9 +173,6 @@ class ListBlogPostsHandler(CommandHandler):
             data=posts, needs_continuation=True,
             display_text=f"Found {len(posts)} blog post(s)",
         )
-
-    def get_instructions(self) -> str:
-        return ""
 
     def format_result(self, result: CommandResult) -> str:
         if result.error:
@@ -253,18 +193,6 @@ class ListBlogPostsHandler(CommandHandler):
 
 class UnpublishBlogPostHandler(CommandHandler):
     """Revert a published post to draft."""
-
-    @property
-    def command_name(self) -> str:
-        return "UNPUBLISH_BLOG_POST"
-
-    @property
-    def pattern(self) -> str:
-        return r""
-
-    @property
-    def needs_continuation(self) -> bool:
-        return True
 
     def execute(self, query: str, context: dict) -> CommandResult:
         from blog.blog_manager import unpublish_post
@@ -293,9 +221,6 @@ class UnpublishBlogPostHandler(CommandHandler):
             data=result, needs_continuation=True,
             display_text=f"Blog post unpublished: {slug}",
         )
-
-    def get_instructions(self) -> str:
-        return ""
 
     def format_result(self, result: CommandResult) -> str:
         if result.error:

@@ -61,7 +61,6 @@ class ToolExecutor:
             "set_active_thoughts": self._exec_set_active_thoughts,
             "set_pulse_interval": self._exec_set_pulse_interval,
             "advance_curiosity": self._exec_advance_curiosity,
-            "resolve_curiosity": self._exec_resolve_curiosity,
             "manage_fetch_domains": self._exec_manage_fetch_domains,
             "list_fetch_domains": self._exec_list_fetch_domains,
             # Reddit tools
@@ -918,90 +917,6 @@ class ToolExecutor:
         except Exception:
             pass  # Don't let DEV window issues break tool execution
 
-    def _exec_resolve_curiosity(
-        self, input: Dict, id: str, ctx: Dict
-    ) -> ToolResult:
-        """
-        Resolve the current curiosity goal and select a new one.
-
-        This records the outcome of the AI's curiosity exploration and
-        automatically rotates to a new curiosity topic.
-
-        For "explored" outcomes, enforces minimum interaction count to
-        ensure topics are actually explored, not just mentioned once.
-        """
-        from agency.curiosity import get_curiosity_engine, is_curiosity_enabled
-        from agency.curiosity.ledger import GoalStatus, get_curiosity_ledger
-
-        if not is_curiosity_enabled():
-            return ToolResult(
-                tool_use_id=id,
-                tool_name="resolve_curiosity",
-                content="Curiosity system is disabled",
-                is_error=True
-            )
-
-        outcome_str = input.get("outcome", "")
-        notes = input.get("notes", "")
-
-        # Map string to GoalStatus enum
-        status_map = {
-            "explored": GoalStatus.EXPLORED,
-            "deferred": GoalStatus.DEFERRED,
-            "declined": GoalStatus.DECLINED,
-        }
-
-        if outcome_str not in status_map:
-            return ToolResult(
-                tool_use_id=id,
-                tool_name="resolve_curiosity",
-                content=f"Invalid outcome '{outcome_str}'. Valid options: explored, deferred, declined",
-                is_error=True
-            )
-
-        status = status_map[outcome_str]
-
-        try:
-            engine = get_curiosity_engine()
-            ledger = get_curiosity_ledger()
-
-            # For "explored" outcomes, check minimum interaction requirement
-            if status == GoalStatus.EXPLORED:
-                current_goal = ledger.get_active_goal()
-                if current_goal:
-                    min_interactions = getattr(config, 'CURIOSITY_MIN_INTERACTIONS', 2)
-                    interaction_count = current_goal.interaction_count
-
-                    if interaction_count < min_interactions:
-                        # Not enough interactions - refuse to mark as explored
-                        return ToolResult(
-                            tool_use_id=id,
-                            tool_name="resolve_curiosity",
-                            content=(
-                                f"Cannot mark as 'explored' yet - only {interaction_count} interaction(s) "
-                                f"recorded (minimum: {min_interactions}). Continue exploring this topic, "
-                                f"or use 'deferred' if the user wants to discuss something else."
-                            ),
-                            is_error=True
-                        )
-
-            new_goal = engine.resolve_current_goal(status, notes)
-
-            # Return confirmation with new goal preview
-            return ToolResult(
-                tool_use_id=id,
-                tool_name="resolve_curiosity",
-                content=f"Curiosity resolved as '{outcome_str}'. New curiosity: {new_goal.content[:80]}..."
-            )
-
-        except Exception as e:
-            log_error(f"Error resolving curiosity: {e}")
-            return ToolResult(
-                tool_use_id=id,
-                tool_name="resolve_curiosity",
-                content=f"Error resolving curiosity: {str(e)}",
-                is_error=True
-            )
 
     # =========================================================================
     # WEB FETCH DOMAIN MANAGEMENT TOOLS

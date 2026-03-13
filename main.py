@@ -43,7 +43,6 @@ from memory.conversation import init_conversation_manager, get_conversation_mana
 from memory.vector_store import init_vector_store
 from memory.extractor import init_memory_extractor
 from interface.cli import init_cli, get_cli
-from interface.http_api import init_http_server, get_http_server
 # Visual capture is now stateless - no init/start/stop lifecycle needed.
 # Capture happens on-demand via capture_all_visuals() in the engine.
 # Import availability checker for startup logging only.
@@ -198,10 +197,6 @@ def initialize_system() -> bool:
     # Initialize subprocess manager
     init_subprocess_manager()
 
-    # Initialize HTTP server if enabled
-    if config.HTTP_ENABLED:
-        init_http_server(host=config.HTTP_HOST, port=config.HTTP_PORT)
-
     # Initialize CLI
     init_cli()
 
@@ -316,12 +311,6 @@ def start_background_services() -> None:
     subprocess_mgr = get_subprocess_manager()
     subprocess_mgr.start_monitor()
     log_subsection("Subprocess monitor started")
-
-    # Start HTTP server if enabled
-    if config.HTTP_ENABLED:
-        http_server = get_http_server()
-        http_server.start()
-        log_subsection(f"HTTP API started on http://{config.HTTP_HOST}:{config.HTTP_PORT}")
 
     # Start Telegram listener if enabled (callback set by CLI)
     if config.TELEGRAM_ENABLED:

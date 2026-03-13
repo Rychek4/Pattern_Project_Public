@@ -967,7 +967,16 @@ class WebServer:
         # Dev static files (CSS/JS) are served via the existing /static mount
         # since dev/ is a subdirectory of web/ → /static/dev/dev-common.js etc.
 
-        # --- REST API (ported from http_api.py) ---
+        # --- Voice API (migrated from Flask) ---
+        from voice.api import voice_router
+        app.include_router(voice_router)
+
+        # --- Health endpoint (for Guardian watchdog) ---
+        @app.get("/health")
+        async def health():
+            return {"status": "healthy", "service": "pattern-project"}
+
+        # --- REST API ---
 
         @app.get("/api/stats")
         async def stats():

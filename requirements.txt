@@ -16,9 +16,6 @@ sentence-transformers>=2.2.0
 # CLI Interface
 rich>=13.0.0
 
-# HTTP API (legacy Flask API, still used when HTTP_ENABLED=true)
-flask>=3.0.0
-
 # Web UI (FastAPI + WebSocket, default interface)
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0

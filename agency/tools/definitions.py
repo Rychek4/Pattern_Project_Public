@@ -65,7 +65,6 @@ def get_tool_definitions(is_pulse: bool = False, pulse_type: str = None) -> List
         tools.append(SET_PULSE_INTERVAL_TOOL)
 
     # Curiosity tools (if curiosity system enabled)
-    # Note: resolve_curiosity is deprecated - advance_curiosity now handles resolution
     if getattr(config, 'CURIOSITY_ENABLED', True):
         tools.append(ADVANCE_CURIOSITY_TOOL)
 
@@ -689,41 +688,6 @@ outcome="explored", next_topic="User's other dog Nuk - they seem excited to shar
             }
         },
         "required": []
-    }
-}
-
-RESOLVE_CURIOSITY_TOOL: Dict[str, Any] = {
-    "name": "resolve_curiosity",
-    "description": """Conclude your current curiosity topic and move to a new one.
-
-IMPORTANT: You must have at least 2 interactions (via advance_curiosity) before
-using "explored". The system will reject premature resolution.
-
-Outcomes:
-- explored: Topic was meaningfully discussed (requires 2+ interactions)
-- deferred: User said "not now" - short 2-hour cooldown
-- declined: User rejected the topic - 3-day cooldown
-
-Cooldown for "explored" scales with interaction depth:
-- 2 interactions: ~20 hour cooldown
-- 3 interactions: ~28 hour cooldown
-- 5+ interactions: ~48 hour cooldown (max)
-
-The system will automatically select your next curiosity after resolution.""",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "outcome": {
-                "type": "string",
-                "enum": ["explored", "deferred", "declined"],
-                "description": "How the curiosity exploration concluded"
-            },
-            "notes": {
-                "type": "string",
-                "description": "Brief note on what you learned or why it was deferred/declined"
-            }
-        },
-        "required": ["outcome"]
     }
 }
 

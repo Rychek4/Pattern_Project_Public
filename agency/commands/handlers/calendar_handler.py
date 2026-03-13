@@ -19,18 +19,6 @@ class ListCalendarEventsHandler(CommandHandler):
     Called by ToolExecutor when the AI invokes the list_calendar_events tool.
     """
 
-    @property
-    def command_name(self) -> str:
-        return "LIST_CALENDAR_EVENTS"
-
-    @property
-    def pattern(self) -> str:
-        return r'\[\[LIST_CALENDAR_EVENTS:\s*(.+?)\]\]'
-
-    @property
-    def needs_continuation(self) -> bool:
-        return True
-
     def execute(self, query: str, context: dict) -> CommandResult:
         """
         List calendar events in a date range.
@@ -164,14 +152,6 @@ class ListCalendarEventsHandler(CommandHandler):
                 )
             )
 
-    def get_instructions(self) -> str:
-        return """You can list calendar events by including this command in your response:
-  [[LIST_CALENDAR_EVENTS: start_date | end_date]]
-
-Use this when:
-- The user asks about their schedule or calendar
-- You need to check for scheduling conflicts before creating events"""
-
     def format_result(self, result: CommandResult) -> str:
         if result.error:
             return f"  {result.get_error_message()}"
@@ -205,18 +185,6 @@ class CreateCalendarEventHandler(CommandHandler):
 
     Called by ToolExecutor when the AI invokes the create_calendar_event tool.
     """
-
-    @property
-    def command_name(self) -> str:
-        return "CREATE_CALENDAR_EVENT"
-
-    @property
-    def pattern(self) -> str:
-        return r'\[\[CREATE_CALENDAR_EVENT:\s*(.+?)\]\]'
-
-    @property
-    def needs_continuation(self) -> bool:
-        return True
 
     def execute(self, query: str, context: dict) -> CommandResult:
         """
@@ -371,14 +339,6 @@ class CreateCalendarEventHandler(CommandHandler):
                 )
             )
 
-    def get_instructions(self) -> str:
-        return """You can create a calendar event by including this command in your response:
-  [[CREATE_CALENDAR_EVENT: title | start_time | end_time | description | location | recurrence]]
-
-Use this when:
-- The user asks you to add something to their calendar
-- You need to schedule a meeting, appointment, or reminder"""
-
     def format_result(self, result: CommandResult) -> str:
         if result.error:
             return f"  {result.get_error_message()}"
@@ -416,18 +376,6 @@ class UpdateCalendarEventHandler(CommandHandler):
 
     Called by ToolExecutor when the AI invokes the update_calendar_event tool.
     """
-
-    @property
-    def command_name(self) -> str:
-        return "UPDATE_CALENDAR_EVENT"
-
-    @property
-    def pattern(self) -> str:
-        return r'\[\[UPDATE_CALENDAR_EVENT:\s*(.+?)\]\]'
-
-    @property
-    def needs_continuation(self) -> bool:
-        return True
 
     def execute(self, query: str, context: dict) -> CommandResult:
         """
@@ -562,13 +510,6 @@ class UpdateCalendarEventHandler(CommandHandler):
                 )
             )
 
-    def get_instructions(self) -> str:
-        return """You can update a calendar event by including this command in your response:
-  [[UPDATE_CALENDAR_EVENT: event_id | fields to change]]
-
-Use this when:
-- The user wants to reschedule, rename, or modify an existing event"""
-
     def format_result(self, result: CommandResult) -> str:
         if result.error:
             return f"  {result.get_error_message()}"
@@ -593,18 +534,6 @@ class DeleteCalendarEventHandler(CommandHandler):
 
     Called by ToolExecutor when the AI invokes the delete_calendar_event tool.
     """
-
-    @property
-    def command_name(self) -> str:
-        return "DELETE_CALENDAR_EVENT"
-
-    @property
-    def pattern(self) -> str:
-        return r'\[\[DELETE_CALENDAR_EVENT:\s*(.+?)\]\]'
-
-    @property
-    def needs_continuation(self) -> bool:
-        return True
 
     def execute(self, query: str, context: dict) -> CommandResult:
         """
@@ -731,13 +660,6 @@ class DeleteCalendarEventHandler(CommandHandler):
                     example=None
                 )
             )
-
-    def get_instructions(self) -> str:
-        return """You can delete a calendar event by including this command in your response:
-  [[DELETE_CALENDAR_EVENT: event_id]]
-
-Use this when:
-- The user asks you to remove or cancel an event from their calendar"""
 
     def format_result(self, result: CommandResult) -> str:
         if result.error:

@@ -191,9 +191,6 @@ def _build_tool_detail(tool_name: str, tool_input: Any) -> str:
     # Curiosity tools
     if tool_name == "advance_curiosity" and "note" in tool_input:
         return f"{tool_name}: {tool_input['note'][:50]}"
-    if tool_name == "resolve_curiosity" and "status" in tool_input:
-        notes = tool_input.get("notes", "")[:40]
-        return f"{tool_name}: {tool_input['status']}" + (f" - {notes}" if notes else "")
 
     # Pulse tool
     if tool_name == "set_pulse_interval" and "interval" in tool_input:

@@ -4,7 +4,6 @@ Handles working memory updates via the set_active_thoughts native tool.
 """
 
 import json
-import re
 from typing import Optional
 
 from agency.commands.handlers.base import CommandHandler, CommandResult
@@ -22,21 +21,6 @@ class SetThoughtsHandler(CommandHandler):
 
     Called by ToolExecutor when the AI invokes the set_active_thoughts tool.
     """
-
-    @property
-    def command_name(self) -> str:
-        return "SET_THOUGHTS"
-
-    @property
-    def pattern(self) -> str:
-        # Match [[SET_THOUGHTS: followed by a JSON array, allowing for nested brackets
-        # Using a more permissive pattern that captures everything up to the closing ]]
-        return r'\[\[SET_THOUGHTS:\s*(\[[\s\S]*?\])\s*\]\]'
-
-    @property
-    def needs_continuation(self) -> bool:
-        # Fire-and-forget: AI doesn't need to see confirmation
-        return False
 
     def execute(self, query: str, context: dict) -> CommandResult:
         """
@@ -123,20 +107,3 @@ class SetThoughtsHandler(CommandHandler):
             # Don't fail command if dev window update fails
             pass
 
-    def get_instructions(self) -> str:
-        """Return instructions for the AI on how to use this command."""
-        return """Update your active thoughts - your private working memory:
-  [[SET_THOUGHTS: [{"rank":1,"slug":"slug","topic":"Topic","elaboration":"Your thinking..."},...]]]
-
-This is your compass for interacting with reality. Use it for:
-  - Identity anchors you want to keep front-of-mind
-  - Unresolved questions you're processing
-  - Long-term goals or aspirations
-  - Anything that deserves your ongoing attention
-
-Rules:
-  - Maximum 10 items, ranked 1 (most salient) to 10
-  - Each item needs: rank, slug, topic, elaboration
-  - Elaborations should be ~50-75 words - substantial but focused
-  - Send the full list each time (replaces existing)
-  - You control this completely: add, edit, rerank, delete as priorities shift"""

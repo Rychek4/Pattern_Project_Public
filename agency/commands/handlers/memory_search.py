@@ -30,21 +30,6 @@ class MemorySearchHandler(CommandHandler):
         self.default_limit = default_limit if default_limit is not None else COMMAND_SEARCH_LIMIT
         self.min_score = min_score if min_score is not None else COMMAND_SEARCH_MIN_SCORE
 
-    @property
-    def command_name(self) -> str:
-        return "SEARCH"
-
-    @property
-    def pattern(self) -> str:
-        # Matches [[SEARCH: anything here]]
-        # Non-greedy to handle multiple commands in one response
-        return r'\[\[SEARCH:\s*(.+?)\]\]'
-
-    @property
-    def needs_continuation(self) -> bool:
-        # AI needs to see search results to formulate response
-        return True
-
     def execute(self, query: str, context: dict) -> CommandResult:
         """
         Execute a memory search.
@@ -87,18 +72,6 @@ class MemorySearchHandler(CommandHandler):
                     example=None
                 )
             )
-
-    def get_instructions(self) -> str:
-        """Return instructions for the AI on how to use this command."""
-        return """You can search your memory archive by including this command in your response:
-  [[SEARCH: your query here]]
-
-Use this when:
-- The user asks about past conversations ("What did we discuss about...")
-- You need more context than the automatically-recalled memories provide
-- The user references something with "remember when..." or similar
-
-The search executes and results are provided for you to continue your response."""
 
     def format_result(self, result: CommandResult) -> str:
         """

@@ -346,13 +346,6 @@ GROWTH_THREADS_PRIORITY = 20
 GROWTH_THREAD_STAGES = ('seed', 'growing', 'integrating', 'dormant', 'abandoned')
 
 # =============================================================================
-# HTTP API CONFIGURATION
-# =============================================================================
-HTTP_ENABLED = True
-HTTP_HOST = os.getenv("HTTP_HOST", "127.0.0.1")
-HTTP_PORT = int(os.getenv("HTTP_PORT", "5000"))
-
-# =============================================================================
 # WEB UI CONFIGURATION
 # =============================================================================
 # FastAPI + WebSocket server for browser-based interface (--web mode).
