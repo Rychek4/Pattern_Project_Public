@@ -85,6 +85,7 @@ class MemoryObserver:
         self.blind_spot_importance = blind_spot_importance
         self.density_high_threshold = density_high_threshold
         self.density_low_threshold = density_low_threshold
+        self._bridge_col_exists: Optional[bool] = None
 
     def _db(self):
         """Get the project database instance."""
@@ -640,12 +641,27 @@ class MemoryObserver:
         ]
 
     def _has_bridge_status_column(self) -> bool:
-        """Check if bridge_status column exists on memories table."""
+        """Check if bridge_status column exists on memories table.
+
+        Cached per observer instance (one per metacognition cycle).
+        Only treats OperationalError as 'column missing'; other
+        exceptions are logged and treated as missing to avoid crashing
+        the caller, but the log makes them visible for debugging.
+        """
+        if self._bridge_col_exists is not None:
+            return self._bridge_col_exists
+
         try:
             self._execute("SELECT bridge_status FROM memories LIMIT 1")
-            return True
-        except Exception:
-            return False
+            self._bridge_col_exists = True
+        except Exception as e:
+            # OperationalError for missing column is expected on
+            # pre-migration databases; anything else is unexpected.
+            if "bridge_status" not in str(e).lower():
+                log_error(f"Unexpected error checking bridge_status column: {e}")
+            self._bridge_col_exists = False
+
+        return self._bridge_col_exists
 
     # -------------------------------------------------------------------
     # Report generation
@@ -653,7 +669,6 @@ class MemoryObserver:
     # TODO (minor optimizations, not urgent):
     #   - detect_retrieval_blind_spots() and get_blind_spot_candidates() run
     #     near-identical SQL; share results or cache after first call.
-    #   - _has_bridge_status_column() is called twice per cycle; cache on instance.
     #   - Z-score detectors use np.std/np.var with ddof=0 (population); ddof=1
     #     (sample) would be more correct at low session counts (<10).
 

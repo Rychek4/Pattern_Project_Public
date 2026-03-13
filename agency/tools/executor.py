@@ -2095,12 +2095,20 @@ class ToolExecutor:
                 is_error=True
             )
 
-        bridge_mgr = BridgeManager(
-            effectiveness_window_days=config.BRIDGE_EFFECTIVENESS_WINDOW_DAYS,
-            self_sustaining_access_count=config.BRIDGE_SELF_SUSTAINING_ACCESS_COUNT,
-            max_attempts=config.BRIDGE_MAX_ATTEMPTS,
-        )
-        memory_id = bridge_mgr.store_bridge(content, target_ids, importance)
+        try:
+            bridge_mgr = BridgeManager(
+                effectiveness_window_days=config.BRIDGE_EFFECTIVENESS_WINDOW_DAYS,
+                self_sustaining_access_count=config.BRIDGE_SELF_SUSTAINING_ACCESS_COUNT,
+                max_attempts=config.BRIDGE_MAX_ATTEMPTS,
+            )
+            memory_id = bridge_mgr.store_bridge(content, target_ids, importance)
+        except Exception as e:
+            log_error(f"store_bridge_memory failed: {e}")
+            return ToolResult(
+                tool_use_id=id, tool_name="store_bridge_memory",
+                content=f"Failed to store bridge memory: {e}",
+                is_error=True
+            )
 
         if memory_id is None:
             return ToolResult(
@@ -2130,16 +2138,24 @@ class ToolExecutor:
                 is_error=True
             )
 
-        vector_store = get_vector_store()
-        memory_id = vector_store.add_memory(
-            content=content,
-            source_conversation_ids=[],
-            importance=importance,
-            memory_type="reflection",
-            decay_category="standard",
-            memory_category="episodic",
-            meta_source="observation",
-        )
+        try:
+            vector_store = get_vector_store()
+            memory_id = vector_store.add_memory(
+                content=content,
+                source_conversation_ids=[],
+                importance=importance,
+                memory_type="reflection",
+                decay_category="standard",
+                memory_category="episodic",
+                meta_source="observation",
+            )
+        except Exception as e:
+            log_error(f"store_meta_observation failed: {e}")
+            return ToolResult(
+                tool_use_id=id, tool_name="store_meta_observation",
+                content=f"Failed to store meta-observation: {e}",
+                is_error=True
+            )
 
         if memory_id is None:
             return ToolResult(
@@ -2190,8 +2206,16 @@ class ToolExecutor:
                     content = truncated
             log_warning(f"Self-model truncated to {len(content)} chars (~{len(content)//4} tokens)")
 
-        db = get_database()
-        db.set_state("memory_self_model", content)
+        try:
+            db = get_database()
+            db.set_state("memory_self_model", content)
+        except Exception as e:
+            log_error(f"update_memory_self_model failed: {e}")
+            return ToolResult(
+                tool_use_id=id, tool_name="update_memory_self_model",
+                content=f"Failed to update memory self-model: {e}",
+                is_error=True
+            )
 
         msg = f"Memory self-model updated ({len(content)} chars)"
         if was_truncated:
