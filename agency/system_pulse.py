@@ -197,7 +197,12 @@ def run_metacognition() -> dict:
 
 
 def build_metacognition_section(metacognition_data: dict) -> str:
-    """Build the metacognition section for the reflection prompt."""
+    """Build the metacognition section for the reflection prompt.
+
+    DEPRECATED: Used when metacognition ran as a single combined call.
+    Kept for reference. New code uses get_bridge_phase_prompt() and
+    get_self_model_phase_prompt() for phased calls.
+    """
     sections = []
 
     # Always include self-model and meta-observation guidance
@@ -218,6 +223,31 @@ def build_metacognition_section(metacognition_data: dict) -> str:
         sections.append(f"--- BLIND SPOT TARGETS ---\n{blind_spot_data}")
 
     return "\n\n".join(sections)
+
+
+def get_bridge_phase_prompt(signal_report: str, blind_spot_data: str) -> str:
+    """Phase 2 prompt: bridge writing for unreachable memories."""
+    return f"""[METACOGNITION — Bridge Phase]
+
+{BRIDGE_GUIDANCE}
+
+--- MEMORY TELEMETRY ---
+{signal_report}
+
+--- BLIND SPOT TARGETS ---
+{blind_spot_data}"""
+
+
+def get_self_model_phase_prompt(signal_report: str) -> str:
+    """Phase 3 prompt: self-model rewrite and meta-observations."""
+    return f"""[METACOGNITION — Self-Model Phase]
+
+{SELF_MODEL_GUIDANCE}
+
+{META_OBSERVATION_GUIDANCE}
+
+--- MEMORY TELEMETRY ---
+{signal_report}"""
 
 
 # ─── Pulse Prompts ───────────────────────────────────────────────────────────
