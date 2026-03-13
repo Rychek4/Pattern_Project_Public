@@ -62,11 +62,25 @@ class BridgeManager:
             log_error(f"BridgeManager: Failed to query active bridges: {e}")
             return transitions
 
+        now = datetime.utcnow()
+
+        # Prune old retired/ineffective bridges to prevent unbounded growth.
+        # Retired = targets became self-sustaining; ineffective = bridge failed.
+        # 7-day grace period keeps recent transitions visible for debugging.
+        try:
+            prune_cutoff = (now - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+            self._execute("""
+                DELETE FROM memories
+                WHERE bridge_status IN ('retired', 'ineffective')
+                AND created_at < ?
+            """, (prune_cutoff,), fetch=False)
+        except Exception as e:
+            log_error(f"BridgeManager: Error pruning old bridges: {e}")
+
         if not active_bridges:
             return transitions
 
         window = timedelta(days=self.effectiveness_window_days)
-        now = datetime.utcnow()
 
         for bridge in active_bridges:
             try:
