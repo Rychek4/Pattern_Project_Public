@@ -896,7 +896,8 @@ class ChatEngine:
         presence_history.append({"role": "user", "content": presence_prompt})
 
         # Full pulse tool set for presence (growth threads, active thoughts, etc.)
-        presence_tools = get_tool_definitions(is_pulse=True, pulse_type="action")
+        # Metacognition tools are handled in Phases 1-2 with manual tool lists.
+        presence_tools = get_tool_definitions(is_pulse=True, pulse_type="reflective")
 
         self._emit(EngineEventType.STREAM_START)
 
