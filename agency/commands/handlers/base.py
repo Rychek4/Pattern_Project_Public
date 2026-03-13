@@ -67,43 +67,12 @@ class CommandHandler(ABC):
     (e.g., search_memories, create_reminder). Handlers are instantiated and
     called by the ToolExecutor in agency/tools/executor.py.
 
-    The legacy [[COMMAND: arg]] pattern-matching system has been removed.
-    The command_name, pattern, and get_instructions() properties are retained
-    for reference but are no longer used at runtime.
     """
 
     @property
-    @abstractmethod
     def command_name(self) -> str:
-        """
-        Command identifier (e.g., 'SEARCH').
-        Legacy property — no longer used at runtime.
-        """
-        pass
-
-    @property
-    @abstractmethod
-    def pattern(self) -> str:
-        """
-        Regex pattern to match the command in AI responses.
-        Include a capture group for the query if the command takes parameters.
-        Parameterless commands may omit the capture group.
-        Example with query: r'\\[\\[SEARCH:\\s*(.+?)\\]\\]'
-        Example parameterless: r'\\[\\[LIST_ITEMS\\]\\]'
-        """
-        pass
-
-    @property
-    def needs_continuation(self) -> bool:
-        """
-        Whether this command type requires a second LLM pass.
-
-        True for query commands (AI needs to see results).
-        False for fire-and-forget commands (like pulse timer).
-
-        Default: False
-        """
-        return False
+        """Handler name derived from class name."""
+        return self.__class__.__name__
 
     @abstractmethod
     def execute(self, query: str, context: dict) -> CommandResult:
@@ -116,16 +85,6 @@ class CommandHandler(ABC):
 
         Returns:
             CommandResult with execution outcome
-        """
-        pass
-
-    @abstractmethod
-    def get_instructions(self) -> str:
-        """
-        Return prompt instructions explaining this command to the AI.
-
-        Legacy method — no longer called at runtime. Native tool schemas
-        in agency/tools/definitions.py are self-documenting.
         """
         pass
 

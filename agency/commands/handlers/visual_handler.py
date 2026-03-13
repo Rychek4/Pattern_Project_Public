@@ -22,20 +22,6 @@ class ScreenshotHandler(CommandHandler):
     Called by ToolExecutor when the AI invokes the capture_screenshot tool.
     """
 
-    @property
-    def command_name(self) -> str:
-        return "SCREENSHOT"
-
-    @property
-    def pattern(self) -> str:
-        # Parameterless command: [[SCREENSHOT]]
-        return r'\[\[SCREENSHOT\]\]'
-
-    @property
-    def needs_continuation(self) -> bool:
-        # AI needs to see the captured image
-        return True
-
     def execute(self, query: str, context: dict) -> CommandResult:
         """
         Execute screenshot capture.
@@ -117,20 +103,6 @@ class ScreenshotHandler(CommandHandler):
                 )
             )
 
-    def get_instructions(self) -> str:
-        """Return prompt instructions for the AI."""
-        return """You can capture the current screen by including this command in your response:
-  [[SCREENSHOT]]
-
-Use this when:
-- The user asks about what's on their screen
-- You need to see what application they're using
-- Troubleshooting a visual issue
-- The user references something they can see
-
-The screenshot is captured and provided to you for analysis. Describe what you see
-and continue your response naturally."""
-
     def format_result(self, result: CommandResult) -> str:
         """Format result for continuation prompt text."""
         if result.error:
@@ -149,20 +121,6 @@ class WebcamHandler(CommandHandler):
 
     Called by ToolExecutor when the AI invokes the capture_webcam tool.
     """
-
-    @property
-    def command_name(self) -> str:
-        return "WEBCAM"
-
-    @property
-    def pattern(self) -> str:
-        # Parameterless command: [[WEBCAM]]
-        return r'\[\[WEBCAM\]\]'
-
-    @property
-    def needs_continuation(self) -> bool:
-        # AI needs to see the captured image
-        return True
 
     def execute(self, query: str, context: dict) -> CommandResult:
         """
@@ -244,20 +202,6 @@ class WebcamHandler(CommandHandler):
                     example=None
                 )
             )
-
-    def get_instructions(self) -> str:
-        """Return prompt instructions for the AI."""
-        return """You can capture a webcam image by including this command in your response:
-  [[WEBCAM]]
-
-Use this when:
-- The user asks you to see them
-- Checking on the user's presence or wellbeing
-- The user references their appearance or environment
-- You want to provide a more personal, aware response
-
-The webcam image is captured and provided to you. Be respectful of privacy -
-describe what you see generally without identifying details."""
 
     def format_result(self, result: CommandResult) -> str:
         """Format result for continuation prompt text."""

@@ -91,8 +91,7 @@ The project is **architecturally ready** for a single-instance VPS deployment. T
 
 | # | Issue | Risk | Recommendation |
 |---|-------|------|----------------|
-| H1 | **HTTP API (Flask, port 5000) has no auth** | `/chat`, `/stats`, `/extract` accessible to anyone on localhost | Bind to `127.0.0.1` only (current default) and do NOT expose via nginx |
-| H2 | **No HTTP security headers from FastAPI** | XSS, clickjacking, MIME sniffing | Add `Starlette` middleware for CSP, HSTS, etc. (nginx covers some, app should too) |
+| H1 | **No HTTP security headers from FastAPI** | XSS, clickjacking, MIME sniffing | Add `Starlette` middleware for CSP, HSTS, etc. (nginx covers some, app should too) |
 | H3 | **No fail2ban or SSH hardening documented** | Brute-force SSH attacks on VPS | Add fail2ban config for SSH + nginx auth |
 | H4 | **No firewall rules (ufw) in setup script** | All ports open by default on fresh droplet | Add `ufw allow 22,80,443/tcp` and `ufw enable` to `setup.sh` |
 | H5 | **WEB_HOST defaults to 0.0.0.0** | App directly exposed if nginx is down | Fine behind nginx, but add a note: never expose port 8080 via firewall |
@@ -145,13 +144,11 @@ The project is **architecturally ready** for a single-instance VPS deployment. T
 
 | Service | Bind Address | Port | Notes |
 |---------|-------------|------|-------|
-| FastAPI (web UI) | 0.0.0.0 | 8080 | Behind nginx |
-| Flask (HTTP API) | 127.0.0.1 | 5000 | Localhost only |
+| FastAPI (web UI + API) | 0.0.0.0 | 8080 | Behind nginx |
 | nginx | 0.0.0.0 | 80, 443 | Public-facing |
 
 **Cloud assessment:** Architecture is correct — nginx terminates TLS and proxies to localhost app. Need to ensure:
 - Port 8080 is NOT in the firewall allow-list (only 80, 443, 22)
-- Port 5000 stays bound to localhost
 
 ### 4. Authentication & Sessions
 

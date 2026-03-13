@@ -206,6 +206,23 @@ def bytes_to_embedding(data: bytes, dimensions: int = 384) -> np.ndarray:
     return np.frombuffer(data, dtype=np.float32).reshape(dimensions)
 
 
+def safe_bytes_to_embedding(
+    data: bytes, dimensions: int = 384
+) -> Optional[np.ndarray]:
+    """Convert bytes to embedding with validation.
+
+    Returns None if data is empty, corrupted, or has wrong dimensions.
+    Use this instead of bytes_to_embedding when the blob may be invalid
+    (e.g. when reading raw database rows for analysis).
+    """
+    if not data:
+        return None
+    arr = np.frombuffer(data, dtype=np.float32)
+    if len(arr) != dimensions:
+        return None
+    return arr
+
+
 def is_model_loaded() -> bool:
     """Check if the embedding model is loaded."""
     with _model_lock:

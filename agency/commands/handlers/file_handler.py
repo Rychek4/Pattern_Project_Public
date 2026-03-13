@@ -274,18 +274,6 @@ class ReadFileHandler(CommandHandler):
     Called by ToolExecutor when the AI invokes the read_file tool.
     """
 
-    @property
-    def command_name(self) -> str:
-        return "READ_FILE"
-
-    @property
-    def pattern(self) -> str:
-        return r'\[\[READ_FILE:\s*(.+?)\]\]'
-
-    @property
-    def needs_continuation(self) -> bool:
-        return True
-
     def execute(self, query: str, context: dict) -> CommandResult:
         """
         Read content from a file.
@@ -392,20 +380,6 @@ class ReadFileHandler(CommandHandler):
                 )
             )
 
-    def get_instructions(self) -> str:
-        return """You can read text files by including this command in your response:
-  [[READ_FILE: filename.txt]]
-
-Use this when:
-- The user asks you to check or read a file you previously saved
-- You need to retrieve stored information
-
-Rules:
-- Paths may include subdirectories (e.g., "projects/notes.txt")
-- No hidden files or directories (cannot start with ".")
-
-The file must exist in your file storage. Use [[LIST_FILES]] to see available files."""
-
     def format_result(self, result: CommandResult) -> str:
         if result.error:
             return f"  {result.get_error_message()}"
@@ -433,19 +407,6 @@ class WriteFileHandler(CommandHandler):
 
     Called by ToolExecutor when the AI invokes the write_file tool.
     """
-
-    @property
-    def command_name(self) -> str:
-        return "WRITE_FILE"
-
-    @property
-    def pattern(self) -> str:
-        # Match filename | content, non-greedy
-        return r'\[\[WRITE_FILE:\s*(.+?)\]\]'
-
-    @property
-    def needs_continuation(self) -> bool:
-        return True
 
     def execute(self, query: str, context: dict) -> CommandResult:
         """
@@ -535,22 +496,6 @@ class WriteFileHandler(CommandHandler):
                 )
             )
 
-    def get_instructions(self) -> str:
-        return """You can write text files by including this command in your response:
-  [[WRITE_FILE: filename.txt | content to write]]
-
-Use this when:
-- The user asks you to save something (notes, lists, information)
-- You want to store data for later retrieval
-
-Rules:
-- Paths may include subdirectories (e.g., "projects/notes.txt")
-- Must have an allowed extension (.txt, .md, .json, .csv)
-- No hidden files or directories (cannot start with ".")
-- Parent directories are created automatically
-
-Note: This overwrites any existing file with the same name. Use [[APPEND_FILE:]] to add to existing files."""
-
     def format_result(self, result: CommandResult) -> str:
         if result.error:
             return f"  {result.get_error_message()}"
@@ -572,18 +517,6 @@ class AppendFileHandler(CommandHandler):
 
     Called by ToolExecutor when the AI invokes the append_file tool.
     """
-
-    @property
-    def command_name(self) -> str:
-        return "APPEND_FILE"
-
-    @property
-    def pattern(self) -> str:
-        return r'\[\[APPEND_FILE:\s*(.+?)\]\]'
-
-    @property
-    def needs_continuation(self) -> bool:
-        return True
 
     def execute(self, query: str, context: dict) -> CommandResult:
         """
@@ -695,22 +628,6 @@ class AppendFileHandler(CommandHandler):
                 )
             )
 
-    def get_instructions(self) -> str:
-        return """You can append to text files by including this command in your response:
-  [[APPEND_FILE: filename.txt | content to add]]
-
-Use this when:
-- Adding items to an existing list
-- Adding new entries to a log or notes file
-- You want to preserve existing content and add more
-
-Rules:
-- Paths may include subdirectories (e.g., "projects/log.txt")
-- Must have an allowed extension (.txt, .md, .json, .csv)
-- No hidden files or directories (cannot start with ".")
-
-If the file doesn't exist, it will be created. Parent directories are created automatically."""
-
     def format_result(self, result: CommandResult) -> str:
         if result.error:
             return f"  {result.get_error_message()}"
@@ -735,18 +652,6 @@ class ListFilesHandler(CommandHandler):
 
     Called by ToolExecutor when the AI invokes the list_files tool.
     """
-
-    @property
-    def command_name(self) -> str:
-        return "LIST_FILES"
-
-    @property
-    def pattern(self) -> str:
-        return r'\[\[LIST_FILES\]\]'
-
-    @property
-    def needs_continuation(self) -> bool:
-        return True
 
     def execute(self, query: str, context: dict) -> CommandResult:
         """
@@ -866,17 +771,6 @@ class ListFilesHandler(CommandHandler):
                     example=None
                 )
             )
-
-    def get_instructions(self) -> str:
-        return """You can list available files and directories:
-  [[LIST_FILES]]
-
-Use this when:
-- You need to know what files and directories are available
-- The user asks what files you have stored
-- Before attempting to read a file you're unsure exists
-
-Supports an optional path to list subdirectory contents."""
 
     def format_result(self, result: CommandResult) -> str:
         if result.error:

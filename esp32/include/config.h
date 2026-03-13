@@ -13,7 +13,7 @@
 
 // ---- Pattern Project Server ----
 #define SERVER_HOST "192.168.1.100"  // IP of the machine running Pattern Project
-#define SERVER_PORT 5000             // Must match config.py HTTP_PORT
+#define SERVER_PORT 8080             // Must match config.py WEB_PORT
 
 // ---- Audio Format (must match config.py VOICE_* constants) ----
 #define MIC_SAMPLE_RATE    16000   // 16kHz for Whisper

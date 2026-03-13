@@ -18,18 +18,6 @@ class SendTelegramHandler(CommandHandler):
     Called by ToolExecutor when the AI invokes the send_telegram tool.
     """
 
-    @property
-    def command_name(self) -> str:
-        return "SEND_TELEGRAM"
-
-    @property
-    def pattern(self) -> str:
-        return r'\[\[SEND_TELEGRAM:\s*(.+?)\]\]'
-
-    @property
-    def needs_continuation(self) -> bool:
-        return True
-
     def execute(self, query: str, context: dict) -> CommandResult:
         """
         Send a Telegram message to the configured chat.
@@ -184,22 +172,6 @@ class SendTelegramHandler(CommandHandler):
                     example=None
                 )
             )
-
-    def get_instructions(self) -> str:
-        return """You can send a Telegram message to the user by including this command in your response:
-  [[SEND_TELEGRAM: Your message here]]
-
-Use this when:
-- The user asks you to message them a reminder
-- You need to alert the user about something important
-- Time-sensitive information needs to be communicated
-- The user is away and you need to reach them
-
-Guidelines:
-- Messages can be any length (no SMS-style limits)
-- Use for genuinely useful notifications, not casual chat
-- Be concise and clear for better mobile readability
-- The user can reply directly in Telegram and you'll receive their response"""
 
     def format_result(self, result: CommandResult) -> str:
         if result.error:

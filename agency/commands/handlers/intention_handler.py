@@ -26,20 +26,6 @@ class RemindHandler(CommandHandler):
     Called by ToolExecutor when the AI invokes the create_reminder tool.
     """
 
-    @property
-    def command_name(self) -> str:
-        return "REMIND"
-
-    @property
-    def pattern(self) -> str:
-        # Matches [[REMIND: when | what]] or [[REMIND: when | what | context]]
-        return r'\[\[REMIND:\s*(.+?)\]\]'
-
-    @property
-    def needs_continuation(self) -> bool:
-        # Fire-and-forget: AI doesn't need to see confirmation
-        return False
-
     def execute(self, query: str, context: dict) -> CommandResult:
         """
         Create a reminder from the command.
@@ -97,8 +83,9 @@ class RemindHandler(CommandHandler):
         try:
             tracker = get_temporal_tracker()
             session_id = tracker.session_id
-        except Exception:
-            pass
+        except Exception as e:
+            from core.logger import log_warning
+            log_warning(f"Could not get session ID for intention: {e}")
 
         # Create the intention
         intention_id = manager.create_intention(
@@ -134,22 +121,6 @@ class RemindHandler(CommandHandler):
                 )
             )
 
-    def get_instructions(self) -> str:
-        """Return instructions for the AI on how to use this command."""
-        return """You can create reminders to follow up on things:
-  [[REMIND: when | what to remember]]
-  [[REMIND: when | what | context]]
-
-Examples:
-  [[REMIND: in 2 hours | ask how their meeting went]]
-  [[REMIND: tomorrow morning | check on sleep quality]]
-  [[REMIND: next session | follow up on anxiety discussion]]
-
-Time formats: "in X minutes/hours", "tomorrow", "tomorrow morning/evening", "next session"
-
-Use this when you notice something worth following up on. Your reminders are
-private — the user won't see them, but you'll be reminded at the right time."""
-
 
 class CompleteHandler(CommandHandler):
     """
@@ -157,18 +128,6 @@ class CompleteHandler(CommandHandler):
 
     Called by ToolExecutor when the AI invokes the complete_reminder tool.
     """
-
-    @property
-    def command_name(self) -> str:
-        return "COMPLETE"
-
-    @property
-    def pattern(self) -> str:
-        return r'\[\[COMPLETE:\s*(.+?)\]\]'
-
-    @property
-    def needs_continuation(self) -> bool:
-        return False
 
     def execute(self, query: str, context: dict) -> CommandResult:
         """
@@ -287,30 +246,11 @@ class CompleteHandler(CommandHandler):
             # Don't fail the complete if memory creation fails
             pass
 
-    def get_instructions(self) -> str:
-        return """Mark an intention as completed:
-  [[COMPLETE: I-id | outcome note]]
-  [[COMPLETE: I-id]]
-
-The outcome becomes part of your memory."""
-
 
 class DismissHandler(CommandHandler):
     """
     Handles intention dismissal via the dismiss_reminder native tool.
     """
-
-    @property
-    def command_name(self) -> str:
-        return "DISMISS"
-
-    @property
-    def pattern(self) -> str:
-        return r'\[\[DISMISS:\s*(.+?)\]\]'
-
-    @property
-    def needs_continuation(self) -> bool:
-        return False
 
     def execute(self, query: str, context: dict) -> CommandResult:
         """Dismiss an intention."""
@@ -361,30 +301,11 @@ class DismissHandler(CommandHandler):
                 )
             )
 
-    def get_instructions(self) -> str:
-        return """Cancel an intention without completing it:
-  [[DISMISS: I-id]]
-
-Use when an intention is no longer relevant."""
-
 
 class ListIntentionsHandler(CommandHandler):
     """
     Handles listing active intentions via the list_reminders native tool.
     """
-
-    @property
-    def command_name(self) -> str:
-        return "LIST_INTENTIONS"
-
-    @property
-    def pattern(self) -> str:
-        return r'\[\[LIST_INTENTIONS\]\]'
-
-    @property
-    def needs_continuation(self) -> bool:
-        # AI needs to see the full list to act on it
-        return True
 
     def execute(self, query: str, context: dict) -> CommandResult:
         """Get all active intentions."""
@@ -437,8 +358,3 @@ class ListIntentionsHandler(CommandHandler):
 
         return "\n".join(lines)
 
-    def get_instructions(self) -> str:
-        return """Review all your active intentions:
-  [[LIST_INTENTIONS]]
-
-Results are provided for you to decide what to do with them."""

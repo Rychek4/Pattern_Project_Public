@@ -1,5 +1,5 @@
 """
-Voice pipeline Flask blueprint.
+Voice pipeline FastAPI routes.
 
 Endpoints for ESP32-S3 Push-to-Talk integration:
   POST /voice/stt         - Transcribe raw PCM audio to text
@@ -9,21 +9,23 @@ Endpoints for ESP32-S3 Push-to-Talk integration:
 
 import queue
 from datetime import datetime
-from flask import Blueprint, request, jsonify, Response
+
+from fastapi import APIRouter, Request, HTTPException
+from fastapi.responses import JSONResponse, Response
 
 import config
 from core.logger import log_info, log_warning, log_error
 from core.user_settings import get_user_settings
 
-voice_blueprint = Blueprint("voice", __name__)
+voice_router = APIRouter(prefix="/voice", tags=["voice"])
 
 # Thread-safe queue for GUI to pick up voice transcripts.
 # The GUI polls this queue on a QTimer to display voice turns in the chat.
 voice_event_queue = queue.Queue()
 
 
-@voice_blueprint.route("/health", methods=["GET"])
-def voice_health():
+@voice_router.get("/health")
+async def voice_health():
     """
     Voice pipeline health check.
 
@@ -51,15 +53,15 @@ def voice_health():
 
     if not settings.voice_pipeline_enabled:
         status["status"] = "disabled"
-        return jsonify(status), 503
+        return JSONResponse(status, status_code=503)
 
     status["status"] = "ready" if is_stt_loaded() else "stt_not_loaded"
     code = 200 if is_stt_loaded() else 503
-    return jsonify(status), code
+    return JSONResponse(status, status_code=code)
 
 
-@voice_blueprint.route("/stt", methods=["POST"])
-def voice_stt():
+@voice_router.post("/stt")
+async def voice_stt(request: Request):
     """
     Transcribe raw PCM audio to text.
 
@@ -72,28 +74,28 @@ def voice_stt():
     """
     settings = get_user_settings()
     if not settings.voice_pipeline_enabled or not settings.stt_enabled:
-        return jsonify({"error": "Voice pipeline or STT is disabled"}), 503
+        return JSONResponse({"error": "Voice pipeline or STT is disabled"}, status_code=503)
 
-    audio_bytes = request.get_data()
+    audio_bytes = await request.body()
     if not audio_bytes:
-        return jsonify({"error": "No audio data received"}), 400
+        return JSONResponse({"error": "No audio data received"}, status_code=400)
 
     from stt.transcriber import transcribe, is_stt_loaded
 
     if not is_stt_loaded():
-        return jsonify({"error": "STT model not loaded"}), 503
+        return JSONResponse({"error": "STT model not loaded"}, status_code=503)
 
     text = transcribe(audio_bytes, sample_rate=config.VOICE_STT_SAMPLE_RATE)
 
-    return jsonify({
+    return {
         "text": text,
         "success": True,
         "audio_bytes": len(audio_bytes),
-    })
+    }
 
 
-@voice_blueprint.route("/talk", methods=["POST"])
-def voice_talk():
+@voice_router.post("/talk")
+async def voice_talk(request: Request):
     """
     Full voice loop: audio → STT → Isaac → TTS → audio response.
 
@@ -112,21 +114,21 @@ def voice_talk():
     """
     settings = get_user_settings()
     if not settings.voice_pipeline_enabled:
-        return jsonify({"error": "Voice pipeline is disabled"}), 503
+        return JSONResponse({"error": "Voice pipeline is disabled"}, status_code=503)
 
-    audio_bytes = request.get_data()
+    audio_bytes = await request.body()
     if not audio_bytes:
-        return jsonify({"error": "No audio data received"}), 400
+        return JSONResponse({"error": "No audio data received"}, status_code=400)
 
     # Step 1: STT
     from stt.transcriber import transcribe, is_stt_loaded
 
     if not is_stt_loaded():
-        return jsonify({"error": "STT model not loaded"}), 503
+        return JSONResponse({"error": "STT model not loaded"}, status_code=503)
 
     user_text = transcribe(audio_bytes, sample_rate=config.VOICE_STT_SAMPLE_RATE)
     if not user_text:
-        return jsonify({"error": "Could not transcribe audio", "text": ""}), 200
+        return {"error": "Could not transcribe audio", "text": ""}
 
     log_info(f"Voice input: {user_text}", prefix="[Voice]")
 
@@ -150,10 +152,10 @@ def voice_talk():
         )
 
         if not response.success:
-            return jsonify({
+            return JSONResponse({
                 "error": f"LLM error: {response.error}",
                 "transcription": user_text,
-            }), 500
+            }, status_code=500)
 
         isaac_text = strip_temporal_echoes(response.text)
 
@@ -162,7 +164,7 @@ def voice_talk():
 
     except Exception as e:
         log_error(f"Voice chat error: {e}", prefix="[Voice]")
-        return jsonify({"error": str(e), "transcription": user_text}), 500
+        return JSONResponse({"error": str(e), "transcription": user_text}, status_code=500)
 
     # Notify GUI of the voice exchange (non-blocking)
     voice_event_queue.put({
@@ -182,19 +184,23 @@ def voice_talk():
             )
 
             if tts_bytes:
-                resp = Response(tts_bytes, mimetype="audio/pcm")
-                resp.headers["X-Transcription"] = user_text
-                resp.headers["X-Isaac-Text"] = isaac_text[:500]
-                resp.headers["X-Sample-Rate"] = str(config.VOICE_TTS_SAMPLE_RATE)
-                return resp
+                return Response(
+                    content=tts_bytes,
+                    media_type="audio/pcm",
+                    headers={
+                        "X-Transcription": user_text,
+                        "X-Isaac-Text": isaac_text[:500],
+                        "X-Sample-Rate": str(config.VOICE_TTS_SAMPLE_RATE),
+                    },
+                )
 
         except Exception as e:
             log_error(f"Voice TTS error: {e}", prefix="[Voice]")
             # Fall through to text-only response
 
     # Text-only response (TTS disabled or failed)
-    return jsonify({
+    return {
         "transcription": user_text,
         "response": isaac_text,
         "tts_available": False,
-    })
+    }

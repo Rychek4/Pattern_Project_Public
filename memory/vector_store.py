@@ -445,7 +445,9 @@ class VectorStore:
                 (now.isoformat(), *memory_ids)
             )
         except Exception as e:
-            log_error(f"Failed to record memory access: {e}")
+            log_error(f"Failed to record memory access for {memory_ids}: {e}")
+            # NOTE: This failure silently skews freshness scoring.
+            # access_count and last_accessed_at remain stale for these memories.
 
     @db_retry()
     def get_memory(self, memory_id: int) -> Optional[Memory]:

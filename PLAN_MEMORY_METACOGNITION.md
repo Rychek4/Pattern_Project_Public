@@ -3,7 +3,7 @@
 ## Overview
 
 Three components giving Isaac structural self-awareness about his memory store:
-1. **MemoryObserver** — statistical signal detection (already written, `memory_observer.py`)
+1. **MemoryObserver** — statistical signal detection (already written, `agency/metacognition/observer.py`)
 2. **BridgeManager** — bridge memory lifecycle management
 3. **Memory Self-Model** — ambient structural awareness injected every turn
 
@@ -49,7 +49,7 @@ These columns are NULL for all non-bridge memories. The retrieval pipeline ignor
 **New file:** `agency/metacognition/__init__.py`
 **New file:** `agency/metacognition/observer.py`
 
-Adapt the existing `memory_observer.py` (project root) for server-side execution:
+Adapt the existing `agency/metacognition/observer.py` for server-side execution:
 
 - Change from direct `sqlite3.connect(db_path)` to using the project's `get_database()` pattern with `db_retry` decorator
 - Remove `close()` method — the project manages connection lifecycle
@@ -543,7 +543,7 @@ if getattr(config, 'METACOGNITION_ENABLED', True):
 |------|-------------|-------------|
 | `core/database.py` | Modify | Schema v22 migration, bridge columns on memories |
 | `agency/metacognition/__init__.py` | New | Package init |
-| `agency/metacognition/observer.py` | New | MemoryObserver adapted for server (from `memory_observer.py`) |
+| `agency/metacognition/observer.py` | New | MemoryObserver adapted for server |
 | `agency/metacognition/bridge_manager.py` | New | BridgeManager class |
 | `prompt_builder/sources/memory_self_model.py` | New | MemorySelfModelSource (P10, cached, bare text) |
 | `agency/tools/definitions.py` | Modify | Three new pulse-only tool definitions |

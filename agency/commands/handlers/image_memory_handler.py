@@ -72,18 +72,6 @@ def load_image_for_memory(image_file_id: int) -> Optional["ImageContent"]:
 class SaveImageHandler(CommandHandler):
     """Save the current turn's image to long-term visual memory."""
 
-    @property
-    def command_name(self) -> str:
-        return "SAVE_IMAGE"
-
-    @property
-    def pattern(self) -> str:
-        return r'\[\[SAVE_IMAGE:.*?\]\]'
-
-    @property
-    def needs_continuation(self) -> bool:
-        return True
-
     def execute(self, query: str, context: dict) -> CommandResult:
         """
         Save an image to permanent storage and create a memory record.
@@ -266,9 +254,6 @@ class SaveImageHandler(CommandHandler):
                     example=None
                 )
             )
-
-    def get_instructions(self) -> str:
-        return "Save an image to visual memory with a description."
 
     def format_result(self, result: CommandResult) -> str:
         if result.error:

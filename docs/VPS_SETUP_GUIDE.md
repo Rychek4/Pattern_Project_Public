@@ -140,9 +140,8 @@ ufw status
 
 You should see three ALLOW rules and everything else denied.
 
-> **Important:** Ports 5000 (Flask HTTP API) and 8080 (FastAPI web server) are intentionally
-> NOT opened. They are accessed only through nginx on localhost. The firewall ensures they
-> are never exposed to the internet.
+> **Important:** Port 8080 (FastAPI web server) is intentionally NOT opened. It is accessed
+> only through nginx on localhost. The firewall ensures it is never exposed to the internet.
 
 ### 3.3 fail2ban
 
@@ -294,8 +293,6 @@ VISUAL_WEBCAM_MODE=disabled
 # ==========================================================================
 # WEB_HOST=0.0.0.0
 # WEB_PORT=8080
-# HTTP_HOST=127.0.0.1
-# HTTP_PORT=5000
 # LOG_LEVEL=INFO
 
 # ==========================================================================
@@ -570,8 +567,8 @@ Adjust paths and settings for your VPS deployment:
 project_dir = "/opt/pattern"
 launch_command = "python main.py"
 virtualenv_activate = "/opt/pattern/venv/bin/activate"
-health_url = "http://127.0.0.1:5000/health"
-stats_url = "http://127.0.0.1:5000/stats"
+health_url = "http://127.0.0.1:8080/health"
+stats_url = "http://127.0.0.1:8080/api/stats"
 startup_grace_seconds = 60
 
 [guardian]
@@ -708,9 +705,6 @@ All should show `active (running)`.
 # FastAPI health (internal — via localhost)
 curl http://127.0.0.1:8080/health
 
-# Flask API health (internal — via localhost)
-curl http://127.0.0.1:5000/health
-
 # Public HTTPS (via nginx)
 curl -I https://your-domain.com
 ```
@@ -736,7 +730,6 @@ sudo ufw status
 # Confirm internal ports are NOT reachable from outside
 # (Run this from your LOCAL machine, not the server)
 curl http://<YOUR_DROPLET_IP>:8080   # Should timeout/refuse
-curl http://<YOUR_DROPLET_IP>:5000   # Should timeout/refuse
 ```
 
 ### 9.6 Guardian Heartbeat (if installed)
@@ -1065,7 +1058,7 @@ sudo journalctl -u pattern-guardian -n 50
 cat /opt/pattern/data/guardian_heartbeat.json
 
 # Verify Guardian can reach Pattern's health endpoint
-curl http://127.0.0.1:5000/health
+curl http://127.0.0.1:8080/health
 ```
 
 ### Out of disk space
@@ -1122,8 +1115,7 @@ ls -la /opt/pattern/backups/
 | 22 | SSH | Yes (via UFW) |
 | 80 | HTTP (redirects to 443) | Yes (via UFW) |
 | 443 | HTTPS (nginx → Pattern) | Yes (via UFW) |
-| 5000 | Flask HTTP API | No (localhost only) |
-| 8080 | FastAPI Web UI | No (localhost only, via nginx) |
+| 8080 | FastAPI (Web UI + API) | No (localhost only, via nginx) |
 
 ### Architecture Diagram
 

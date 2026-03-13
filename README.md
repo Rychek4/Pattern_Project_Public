@@ -151,13 +151,6 @@ python main.py --dev   # With dev mode debug tools
 | `/addcore <text>` | Add core memory |
 | `/pulse` | View pulse status |
 
-### HTTP API (Flask)
-- `/health` — Health check
-- `/chat` — Send message
-- `/memories/search` — Search memories
-- `/stats` — System statistics
-- `/session/new`, `/session/end` — Session control
-
 ---
 
 ## Quick Start
@@ -257,7 +250,7 @@ Pattern_Project/
 │   └── email_gateway.py
 ├── interface/              # User interfaces
 │   ├── cli.py              # Rich terminal
-│   └── http_api.py         # Flask REST
+│   └── web_server.py       # FastAPI + WebSocket
 ├── core/                   # Infrastructure
 │   ├── database.py         # SQLite + WAL
 │   └── embeddings.py       # Sentence-transformers

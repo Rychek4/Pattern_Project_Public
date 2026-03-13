@@ -294,30 +294,13 @@ Pattern uses Claude's native tool use API. Tools are conditionally registered ba
 | `/addcore <text>` | Add core memory |
 | `/pulse` | View pulse status |
 
-### 7.2 HTTP REST API (Flask)
-
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/health` | GET | Health check |
-| `/chat` | POST | Send message |
-| `/memories/search` | POST | Search memories |
-| `/stats` | GET | System statistics |
-| `/session/new` | POST | Start new session |
-| `/session/end` | POST | End session |
-| `/extract` | POST | Trigger extraction |
-
-**Configuration**:
-- `HTTP_ENABLED`: true/false
-- `HTTP_HOST`: 127.0.0.1
-- `HTTP_PORT`: 5000
-
-### 7.3 Web Interface (Recommended)
+### 7.2 Web Interface (Recommended)
 - **Features**: Browser-based chat, streaming, image upload, process panel
 - **Server**: FastAPI + WebSocket (`python main.py`, default mode)
 - **Auth**: Optional password via `WEB_AUTH_PASSWORD`
 - **Config**: `WEB_HOST` (0.0.0.0), `WEB_PORT` (8080)
 
-### 7.4 Dev Tools
+### 7.3 Dev Tools
 Debug interface showing internal operations:
 - Prompt assembly and context blocks
 - Tool execution and results
@@ -427,7 +410,6 @@ Each prompt is built fresh from registered sources, sorted by priority, producin
 | Clipboard | ✅ Enabled | `CLIPBOARD_ENABLED` |
 | Clarification | ✅ Enabled | `CLARIFICATION_ENABLED` |
 | Web UI | ✅ Default | Default mode, `WEB_AUTH_PASSWORD` |
-| HTTP API | ⚙️ Configurable | `HTTP_ENABLED` |
 
 ---
 

@@ -95,10 +95,10 @@ class MemoryObserver:
         """Execute a query through the project database."""
         return self._db().execute(sql, params, fetch=fetch)
 
-    def _deserialize_embedding(self, blob: bytes) -> Optional[np.ndarray]:
-        if not blob:
-            return None
-        return np.frombuffer(blob, dtype=np.float32)
+    @staticmethod
+    def _deserialize_embedding(blob: bytes) -> Optional[np.ndarray]:
+        from core.embeddings import safe_bytes_to_embedding
+        return safe_bytes_to_embedding(blob)
 
     # -------------------------------------------------------------------
     # Store overview
