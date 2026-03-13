@@ -623,9 +623,10 @@ class ChatEngine:
         """Process a system pulse (reflective or action).
 
         Reflective pulses run in three phases to keep each LLM call focused:
-          Phase 1 (presence): intentions, growth threads, active thoughts
-          Phase 2 (bridges):  write bridge memories for blind spots (if any)
-          Phase 3 (self-model): rewrite self-model + meta-observations
+          Phase 1 (bridges):    write bridge memories for blind spots (if any)
+          Phase 2 (self-model): rewrite self-model + meta-observations
+          Phase 3 (presence):   intentions, growth threads, active thoughts
+                                Runs last so it picks up the fresh self-model.
 
         Args:
             pulse_type: "reflective" or "action"
@@ -735,12 +736,16 @@ class ChatEngine:
     ):
         """Run reflective pulse in three focused phases.
 
-        Phase 1: Presence — intentions, growth threads, active thoughts
-                 Uses full conversation history + growth tools (no metacognition tools)
-        Phase 2: Bridges — write bridge memories for blind spots
-                 Uses minimal history + bridge tool only. Skipped if no blind spots.
-        Phase 3: Self-model — rewrite self-model + meta-observations
-                 Uses minimal history + self-model/observation tools.
+        Phase 1: Bridges — write bridge memories for blind spots (if any)
+                 Minimal history, only store_bridge_memory tool. Skipped if
+                 metacognition disabled or no blind spots found.
+        Phase 2: Self-model — rewrite self-model + meta-observations
+                 Minimal history, only update_memory_self_model and
+                 store_meta_observation tools. Skipped if metacognition disabled.
+        Phase 3: Presence — intentions, growth threads, active thoughts
+                 Full conversation history + full pulse tool set. This is the
+                 visible reflection stored to conversation. Runs LAST so
+                 prompt_builder picks up the freshly written self-model.
         """
         from agency.tools.definitions import (
             STORE_BRIDGE_MEMORY_TOOL, STORE_META_OBSERVATION_TOOL,
@@ -759,97 +764,73 @@ class ChatEngine:
             except Exception as e:
                 log_error(f"Metacognition pre-pass failed (continuing without): {e}")
 
-        # ── Phase 1: Presence ────────────────────────────────────────────
-        log_info("Phase 1/3: Presence (intentions, growth, thoughts)", prefix="🧠")
-        self._emit(EngineEventType.STATUS_UPDATE,
-                   text="Reflective pulse — presence...", type="thinking")
-
-        self._conversation_mgr.add_turn(
-            role="system", content=stored_message, input_type="system"
-        )
-
-        # Phase 1 prompt: base reflective only, no metacognition
-        phase1_prompt = get_reflective_pulse_prompt(get_interval_label(interval))
-
-        assembled = self._prompt_builder.build(
-            user_input=phase1_prompt,
+        # Build system prompt for metacognition phases (identity context)
+        meta_assembled = self._prompt_builder.build(
+            user_input="[metacognition phase]",
             system_prompt="",
             additional_context={"is_pulse": True}
         )
-        system_prompt = assembled.full_system_prompt
+        meta_system_prompt = meta_assembled.full_system_prompt
 
-        phase1_history = self._conversation_mgr.get_api_messages()
-        phase1_history.append({"role": "user", "content": phase1_prompt})
+        # ── Phase 1: Bridges (conditional) ───────────────────────────────
+        if metacognition_data:
+            signal_report = metacognition_data.get("signal_report", "")
+            blind_spot_data = metacognition_data.get("blind_spot_data", "")
 
-        # Phase 1 tools: pulse tools WITHOUT metacognition tools
-        # (pulse_type="action" gives growth threads but not metacognition)
-        phase1_tools = get_tool_definitions(is_pulse=True, pulse_type="action")
+            if blind_spot_data:
+                log_info("Phase 1/3: Bridges (writing retrieval pathways)", prefix="🧠")
+                self._emit(EngineEventType.STATUS_UPDATE,
+                           text="Reflective pulse — bridges...", type="thinking")
 
-        self._emit(EngineEventType.STREAM_START)
+                bridge_prompt = get_bridge_phase_prompt(signal_report, blind_spot_data)
+                bridge_history = [{"role": "user", "content": bridge_prompt}]
+                bridge_tools = [STORE_BRIDGE_MEMORY_TOOL]
 
-        response = self._llm_router.chat(
-            messages=phase1_history,
-            system_prompt=system_prompt,
-            task_type=task_type,
-            temperature=0.7,
-            tools=phase1_tools,
-            thinking_enabled=True
-        )
+                try:
+                    response = self._llm_router.chat(
+                        messages=bridge_history,
+                        system_prompt=meta_system_prompt,
+                        task_type=task_type,
+                        temperature=0.7,
+                        tools=bridge_tools,
+                        thinking_enabled=True
+                    )
 
-        if not response.success:
-            log_error(f"PULSE Phase 1: API error: {response.error}")
-            self._emit(EngineEventType.PROCESSING_ERROR,
-                       error=response.error, error_type="api_error")
-            return
+                    if response.success:
+                        result = process_with_tools(
+                            llm_router=self._llm_router,
+                            response=response,
+                            history=bridge_history,
+                            system_prompt=meta_system_prompt,
+                            max_passes=5,
+                            tools=bridge_tools,
+                            thinking_enabled=True,
+                            task_type=task_type
+                        )
+                        log_info(f"Phase 1 complete ({result.passes_executed} pass(es))", prefix="🧠")
+                    else:
+                        log_error(f"PULSE Phase 1 (bridges): API error: {response.error}")
+                except Exception as e:
+                    log_error(f"PULSE Phase 1 (bridges) failed (continuing): {e}")
+            else:
+                log_info("Phase 1/3: No blind spots — skipping bridge phase", prefix="🧠")
 
-        result = process_with_tools(
-            llm_router=self._llm_router,
-            response=response,
-            history=phase1_history,
-            system_prompt=system_prompt,
-            max_passes=getattr(config, 'COMMAND_MAX_PASSES', 40),
-            pulse_callback=self._on_pulse_interval_change,
-            tools=phase1_tools,
-            dev_mode_callbacks=self._build_dev_callbacks(),
-            thinking_enabled=True,
-            task_type=task_type
-        )
-
-        # Store Phase 1 response in conversation (the visible reflection)
-        self._conversation_mgr.add_turn(
-            role="assistant", content=result.final_text, input_type="text"
-        )
-        self._emit(EngineEventType.RESPONSE_COMPLETE,
-                   text=result.final_text, source="pulse",
-                   provider=result.final_provider, pulse_type="reflective")
-
-        log_info(f"Phase 1 complete ({result.passes_executed} pass(es))", prefix="🧠")
-
-        # ── Phase 2: Bridges (conditional) ───────────────────────────────
-        if not metacognition_data:
-            log_info("Metacognition disabled or failed — skipping phases 2-3", prefix="🧠")
-            return
-
-        signal_report = metacognition_data.get("signal_report", "")
-        blind_spot_data = metacognition_data.get("blind_spot_data", "")
-
-        if blind_spot_data:
-            log_info("Phase 2/3: Bridges (writing retrieval pathways)", prefix="🧠")
+            # ── Phase 2: Self-model + meta-observations ──────────────────
+            log_info("Phase 2/3: Self-model + meta-observations", prefix="🧠")
             self._emit(EngineEventType.STATUS_UPDATE,
-                       text="Reflective pulse — bridges...", type="thinking")
+                       text="Reflective pulse — self-model...", type="thinking")
 
-            phase2_prompt = get_bridge_phase_prompt(signal_report, blind_spot_data)
-            phase2_history = [{"role": "user", "content": phase2_prompt}]
-            phase2_tools = get_tool_definitions(is_pulse=True, pulse_type="action")
-            phase2_tools.append(STORE_BRIDGE_MEMORY_TOOL)
+            selfmodel_prompt = get_self_model_phase_prompt(signal_report)
+            selfmodel_history = [{"role": "user", "content": selfmodel_prompt}]
+            selfmodel_tools = [UPDATE_MEMORY_SELF_MODEL_TOOL, STORE_META_OBSERVATION_TOOL]
 
             try:
                 response = self._llm_router.chat(
-                    messages=phase2_history,
-                    system_prompt=system_prompt,
+                    messages=selfmodel_history,
+                    system_prompt=meta_system_prompt,
                     task_type=task_type,
                     temperature=0.7,
-                    tools=phase2_tools,
+                    tools=selfmodel_tools,
                     thinking_enabled=True
                 )
 
@@ -857,58 +838,87 @@ class ChatEngine:
                     result = process_with_tools(
                         llm_router=self._llm_router,
                         response=response,
-                        history=phase2_history,
-                        system_prompt=system_prompt,
-                        max_passes=10,
-                        tools=phase2_tools,
+                        history=selfmodel_history,
+                        system_prompt=meta_system_prompt,
+                        max_passes=5,
+                        tools=selfmodel_tools,
                         thinking_enabled=True,
                         task_type=task_type
                     )
                     log_info(f"Phase 2 complete ({result.passes_executed} pass(es))", prefix="🧠")
                 else:
-                    log_error(f"PULSE Phase 2: API error: {response.error}")
+                    log_error(f"PULSE Phase 2 (self-model): API error: {response.error}")
             except Exception as e:
-                log_error(f"PULSE Phase 2 failed (continuing to phase 3): {e}")
+                log_error(f"PULSE Phase 2 (self-model) failed (continuing): {e}")
         else:
-            log_info("Phase 2/3: No blind spots — skipping bridge phase", prefix="🧠")
+            log_info("Metacognition disabled or failed — skipping phases 1-2", prefix="🧠")
 
-        # ── Phase 3: Self-model + meta-observations ──────────────────────
-        log_info("Phase 3/3: Self-model + meta-observations", prefix="🧠")
+        # ── Phase 3: Presence (always runs) ──────────────────────────────
+        # Runs LAST so prompt_builder.build() picks up the freshly written
+        # self-model from Phase 2. This is the visible reflection.
+        log_info("Phase 3/3: Presence (intentions, growth, thoughts)", prefix="🧠")
         self._emit(EngineEventType.STATUS_UPDATE,
-                   text="Reflective pulse — self-model...", type="thinking")
+                   text="Reflective pulse — presence...", type="thinking")
 
-        phase3_prompt = get_self_model_phase_prompt(signal_report)
-        phase3_history = [{"role": "user", "content": phase3_prompt}]
-        phase3_tools = get_tool_definitions(is_pulse=True, pulse_type="action")
-        phase3_tools.append(UPDATE_MEMORY_SELF_MODEL_TOOL)
-        phase3_tools.append(STORE_META_OBSERVATION_TOOL)
+        self._conversation_mgr.add_turn(
+            role="system", content=stored_message, input_type="system"
+        )
 
-        try:
-            response = self._llm_router.chat(
-                messages=phase3_history,
-                system_prompt=system_prompt,
-                task_type=task_type,
-                temperature=0.7,
-                tools=phase3_tools,
-                thinking_enabled=True
-            )
+        presence_prompt = get_reflective_pulse_prompt(get_interval_label(interval))
 
-            if response.success:
-                result = process_with_tools(
-                    llm_router=self._llm_router,
-                    response=response,
-                    history=phase3_history,
-                    system_prompt=system_prompt,
-                    max_passes=10,
-                    tools=phase3_tools,
-                    thinking_enabled=True,
-                    task_type=task_type
-                )
-                log_info(f"Phase 3 complete ({result.passes_executed} pass(es))", prefix="🧠")
-            else:
-                log_error(f"PULSE Phase 3: API error: {response.error}")
-        except Exception as e:
-            log_error(f"PULSE Phase 3 failed: {e}")
+        # Build prompt AFTER self-model phase so it includes the fresh self-model
+        assembled = self._prompt_builder.build(
+            user_input=presence_prompt,
+            system_prompt="",
+            additional_context={"is_pulse": True}
+        )
+        system_prompt = assembled.full_system_prompt
+
+        presence_history = self._conversation_mgr.get_api_messages()
+        presence_history.append({"role": "user", "content": presence_prompt})
+
+        # Full pulse tool set for presence (growth threads, active thoughts, etc.)
+        presence_tools = get_tool_definitions(is_pulse=True, pulse_type="action")
+
+        self._emit(EngineEventType.STREAM_START)
+
+        response = self._llm_router.chat(
+            messages=presence_history,
+            system_prompt=system_prompt,
+            task_type=task_type,
+            temperature=0.7,
+            tools=presence_tools,
+            thinking_enabled=True
+        )
+
+        if not response.success:
+            log_error(f"PULSE Phase 3 (presence): API error: {response.error}")
+            self._emit(EngineEventType.PROCESSING_ERROR,
+                       error=response.error, error_type="api_error")
+            return
+
+        result = process_with_tools(
+            llm_router=self._llm_router,
+            response=response,
+            history=presence_history,
+            system_prompt=system_prompt,
+            max_passes=getattr(config, 'COMMAND_MAX_PASSES', 40),
+            pulse_callback=self._on_pulse_interval_change,
+            tools=presence_tools,
+            dev_mode_callbacks=self._build_dev_callbacks(),
+            thinking_enabled=True,
+            task_type=task_type
+        )
+
+        # Store presence response in conversation (the visible reflection)
+        self._conversation_mgr.add_turn(
+            role="assistant", content=result.final_text, input_type="text"
+        )
+        self._emit(EngineEventType.RESPONSE_COMPLETE,
+                   text=result.final_text, source="pulse",
+                   provider=result.final_provider, pulse_type="reflective")
+
+        log_info(f"Phase 3 complete ({result.passes_executed} pass(es))", prefix="🧠")
 
     # ------------------------------------------------------------------
     # Reminder
