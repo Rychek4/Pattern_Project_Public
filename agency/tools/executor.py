@@ -1009,162 +1009,56 @@ class ToolExecutor:
             content=json.dumps(data, indent=2, default=str),
         )
 
-    def _exec_reddit_feed(
-        self, input: Dict, id: str, ctx: Dict
+    def _exec_reddit_tool(
+        self, tool_name: str, id: str, method_name: str, **kwargs
     ) -> ToolResult:
-        """Browse a subreddit's posts."""
+        """Generic dispatch for all Reddit tools."""
         try:
             client = self._get_reddit_client()
-            data = client.get_feed(
-                subreddit=input.get("subreddit", "all"),
-                sort=input.get("sort", "hot"),
-                time_filter=input.get("time_filter", "day"),
-                limit=input.get("limit", 10),
-            )
-            return self._reddit_result("reddit_feed", id, data)
+            data = getattr(client, method_name)(**kwargs)
+            return self._reddit_result(tool_name, id, data)
         except RuntimeError as e:
             return ToolResult(
-                tool_use_id=id,
-                tool_name="reddit_feed",
-                content=str(e),
-                is_error=True,
+                tool_use_id=id, tool_name=tool_name,
+                content=str(e), is_error=True,
             )
 
-    def _exec_reddit_post(
-        self, input: Dict, id: str, ctx: Dict
-    ) -> ToolResult:
-        """Get a single Reddit post with comments."""
-        try:
-            client = self._get_reddit_client()
-            data = client.get_post(
-                post_id=input.get("post_id", ""),
-                comment_sort=input.get("comment_sort", "best"),
-                comment_limit=input.get("comment_limit", 20),
-            )
-            return self._reddit_result("reddit_post", id, data)
-        except RuntimeError as e:
-            return ToolResult(
-                tool_use_id=id,
-                tool_name="reddit_post",
-                content=str(e),
-                is_error=True,
-            )
+    def _exec_reddit_feed(self, input: Dict, id: str, ctx: Dict) -> ToolResult:
+        return self._exec_reddit_tool("reddit_feed", id, "get_feed",
+            subreddit=input.get("subreddit", "all"), sort=input.get("sort", "hot"),
+            time_filter=input.get("time_filter", "day"), limit=input.get("limit", 10))
 
-    def _exec_reddit_create_post(
-        self, input: Dict, id: str, ctx: Dict
-    ) -> ToolResult:
-        """Create a new Reddit post."""
-        try:
-            client = self._get_reddit_client()
-            data = client.create_post(
-                subreddit=input.get("subreddit", ""),
-                title=input.get("title", ""),
-                content=input.get("content"),
-                url=input.get("url"),
-            )
-            return self._reddit_result("reddit_create_post", id, data)
-        except RuntimeError as e:
-            return ToolResult(
-                tool_use_id=id,
-                tool_name="reddit_create_post",
-                content=str(e),
-                is_error=True,
-            )
+    def _exec_reddit_post(self, input: Dict, id: str, ctx: Dict) -> ToolResult:
+        return self._exec_reddit_tool("reddit_post", id, "get_post",
+            post_id=input.get("post_id", ""), comment_sort=input.get("comment_sort", "best"),
+            comment_limit=input.get("comment_limit", 20))
 
-    def _exec_reddit_comment(
-        self, input: Dict, id: str, ctx: Dict
-    ) -> ToolResult:
-        """Comment on a Reddit post or reply to a comment."""
-        try:
-            client = self._get_reddit_client()
-            data = client.create_comment(
-                thing_id=input.get("thing_id", ""),
-                content=input.get("content", ""),
-            )
-            return self._reddit_result("reddit_comment", id, data)
-        except RuntimeError as e:
-            return ToolResult(
-                tool_use_id=id,
-                tool_name="reddit_comment",
-                content=str(e),
-                is_error=True,
-            )
+    def _exec_reddit_create_post(self, input: Dict, id: str, ctx: Dict) -> ToolResult:
+        return self._exec_reddit_tool("reddit_create_post", id, "create_post",
+            subreddit=input.get("subreddit", ""), title=input.get("title", ""),
+            content=input.get("content"), url=input.get("url"))
 
-    def _exec_reddit_vote(
-        self, input: Dict, id: str, ctx: Dict
-    ) -> ToolResult:
-        """Vote on a Reddit post or comment."""
-        try:
-            client = self._get_reddit_client()
-            data = client.vote(
-                thing_id=input.get("thing_id", ""),
-                direction=input.get("direction", "up"),
-            )
-            return self._reddit_result("reddit_vote", id, data)
-        except RuntimeError as e:
-            return ToolResult(
-                tool_use_id=id,
-                tool_name="reddit_vote",
-                content=str(e),
-                is_error=True,
-            )
+    def _exec_reddit_comment(self, input: Dict, id: str, ctx: Dict) -> ToolResult:
+        return self._exec_reddit_tool("reddit_comment", id, "create_comment",
+            thing_id=input.get("thing_id", ""), content=input.get("content", ""))
 
-    def _exec_reddit_search(
-        self, input: Dict, id: str, ctx: Dict
-    ) -> ToolResult:
-        """Search Reddit for posts."""
-        try:
-            client = self._get_reddit_client()
-            data = client.search(
-                query=input.get("query", ""),
-                subreddit=input.get("subreddit"),
-                sort=input.get("sort", "relevance"),
-                time_filter=input.get("time_filter", "all"),
-                limit=input.get("limit", 10),
-            )
-            return self._reddit_result("reddit_search", id, data)
-        except RuntimeError as e:
-            return ToolResult(
-                tool_use_id=id,
-                tool_name="reddit_search",
-                content=str(e),
-                is_error=True,
-            )
+    def _exec_reddit_vote(self, input: Dict, id: str, ctx: Dict) -> ToolResult:
+        return self._exec_reddit_tool("reddit_vote", id, "vote",
+            thing_id=input.get("thing_id", ""), direction=input.get("direction", "up"))
 
-    def _exec_reddit_subreddits(
-        self, input: Dict, id: str, ctx: Dict
-    ) -> ToolResult:
-        """Search for or list subreddits."""
-        try:
-            client = self._get_reddit_client()
-            data = client.get_subreddits(
-                query=input.get("query"),
-                limit=input.get("limit", 10),
-            )
-            return self._reddit_result("reddit_subreddits", id, data)
-        except RuntimeError as e:
-            return ToolResult(
-                tool_use_id=id,
-                tool_name="reddit_subreddits",
-                content=str(e),
-                is_error=True,
-            )
+    def _exec_reddit_search(self, input: Dict, id: str, ctx: Dict) -> ToolResult:
+        return self._exec_reddit_tool("reddit_search", id, "search",
+            query=input.get("query", ""), subreddit=input.get("subreddit"),
+            sort=input.get("sort", "relevance"), time_filter=input.get("time_filter", "all"),
+            limit=input.get("limit", 10))
 
-    def _exec_reddit_profile(
-        self, input: Dict, id: str, ctx: Dict
-    ) -> ToolResult:
-        """Get a Reddit user's profile."""
-        try:
-            client = self._get_reddit_client()
-            data = client.get_profile(username=input.get("username"))
-            return self._reddit_result("reddit_profile", id, data)
-        except RuntimeError as e:
-            return ToolResult(
-                tool_use_id=id,
-                tool_name="reddit_profile",
-                content=str(e),
-                is_error=True,
-            )
+    def _exec_reddit_subreddits(self, input: Dict, id: str, ctx: Dict) -> ToolResult:
+        return self._exec_reddit_tool("reddit_subreddits", id, "get_subreddits",
+            query=input.get("query"), limit=input.get("limit", 10))
+
+    def _exec_reddit_profile(self, input: Dict, id: str, ctx: Dict) -> ToolResult:
+        return self._exec_reddit_tool("reddit_profile", id, "get_profile",
+            username=input.get("username"))
 
     # =========================================================================
     # DELEGATION TOOL
