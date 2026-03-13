@@ -7,7 +7,7 @@ import sqlite3
 import json
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, Any, List, Tuple
+from typing import Dict, Optional, Any, List, Tuple
 from contextlib import contextmanager
 
 from core.logger import log_info, log_success, log_error, log_config, log_section
@@ -1095,7 +1095,7 @@ class Database:
         sql: str,
         params: Tuple = (),
         fetch: bool = False
-    ) -> Optional[List[sqlite3.Row]]:
+    ) -> Optional[List[Dict[str, Any]]]:
         """
         Execute a SQL statement.
 
@@ -1110,7 +1110,7 @@ class Database:
         with self.get_connection() as conn:
             cursor = conn.execute(sql, params)
             if fetch:
-                return cursor.fetchall()
+                return [dict(row) for row in cursor.fetchall()]
             return None
 
     def execute_many(self, sql: str, params_list: List[Tuple]) -> None:
