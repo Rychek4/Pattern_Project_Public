@@ -378,7 +378,7 @@ class BridgeManager:
                         max_attempt = max(max_attempt, bridge["bridge_attempt_number"] or 0)
                 except (json.JSONDecodeError, TypeError):
                     continue
-        except Exception:
-            pass
+        except Exception as e:
+            log_error(f"Failed to look up bridge attempt number for targets {target_ids}: {e}")
 
         return max_attempt + 1

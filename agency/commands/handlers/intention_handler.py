@@ -83,8 +83,9 @@ class RemindHandler(CommandHandler):
         try:
             tracker = get_temporal_tracker()
             session_id = tracker.session_id
-        except Exception:
-            pass
+        except Exception as e:
+            from core.logger import log_warning
+            log_warning(f"Could not get session ID for intention: {e}")
 
         # Create the intention
         intention_id = manager.create_intention(
