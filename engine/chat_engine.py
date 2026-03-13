@@ -754,6 +754,7 @@ class ChatEngine:
             STORE_BRIDGE_MEMORY_TOOL, STORE_META_OBSERVATION_TOOL,
             UPDATE_MEMORY_SELF_MODEL_TOOL
         )
+        from agency.system_pulse import METACOGNITION_SYSTEM_PROMPT
 
         interval = self._pulse_manager.reflective_timer.interval if self._pulse_manager else 43200
         task_type = TaskType.PULSE_REFLECTIVE
