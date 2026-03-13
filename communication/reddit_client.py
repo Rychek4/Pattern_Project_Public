@@ -8,7 +8,7 @@ using a personal account with OAuth2 "script" app credentials.
 Authentication: OAuth2 via PRAW (client_id + client_secret + username + password)
 User-Agent: Required by Reddit API; descriptive format prevents throttling.
 
-See docs/reddit_setup.md for account setup instructions.
+See docs/guides/reddit_setup.md for account setup instructions.
 """
 
 from datetime import datetime, timedelta

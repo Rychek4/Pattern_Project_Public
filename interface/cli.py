@@ -3,7 +3,6 @@ Pattern Project - CLI Interface
 Rich terminal interface for conversation
 """
 
-import threading
 import queue
 from typing import Optional, Callable, Dict, Any
 
@@ -12,19 +11,14 @@ from rich.prompt import Prompt
 from rich.panel import Panel
 from rich.markdown import Markdown
 from rich.table import Table
-from rich.live import Live
-from rich.spinner import Spinner
-from rich.text import Text
 
 import config
-from core.logger import log_info, log_warning, log_error, log_success, get_timestamp
-from core.temporal import get_temporal_tracker, temporal_context_to_semantic
-from memory.conversation import get_conversation_manager
+from core.logger import log_error, get_timestamp
+from core.temporal import get_temporal_tracker
 from memory.vector_store import get_vector_store
 from memory.extractor import get_memory_extractor
-from llm.router import get_llm_router, TaskType
+from llm.router import TaskType
 from concurrency.locks import get_lock_manager
-from prompt_builder import get_prompt_builder
 from prompt_builder.sources.core_memory import get_core_memory_source
 
 

@@ -18,7 +18,7 @@ USAGE
 -----
   python scripts/reddit_setup.py
 
-See docs/reddit_setup.md for full setup instructions.
+See docs/guides/reddit_setup.md for full setup instructions.
 """
 
 import os
@@ -72,7 +72,7 @@ def main():
         for var in missing:
             print(f"  - {var}")
         print()
-        print("Add these to your .env file. See docs/reddit_setup.md for instructions.")
+        print("Add these to your .env file. See docs/guides/reddit_setup.md for instructions.")
         sys.exit(1)
 
     print(f"  Client ID:   {client_id[:8]}...")
@@ -128,7 +128,7 @@ def main():
         print("  - Account has 2FA enabled (use an app password or disable 2FA)")
         print("  - Invalid user_agent format")
         print()
-        print("See docs/reddit_setup.md for troubleshooting.")
+        print("See docs/guides/reddit_setup.md for troubleshooting.")
         sys.exit(1)
 
 

@@ -62,7 +62,7 @@ def ensure_tool_results(
     raw_content may contain a mix of plain dicts and SDK Pydantic objects
     (e.g. ToolUseBlock, ServerToolUseBlock).  Both are handled.
 
-    See docs/server_tool_use_bug.md for full history.
+    See docs/reference/server_tool_use_bug.md for full history.
 
     Args:
         raw_content: The assistant message's raw content blocks
