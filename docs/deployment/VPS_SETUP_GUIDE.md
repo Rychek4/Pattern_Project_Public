@@ -535,7 +535,7 @@ The included `deploy/nginx.conf` gives you:
 
 Guardian is a **separate, standalone process** that monitors Pattern's health and
 restarts it on failure. It's the reliability layer on top of systemd's built-in
-restart. A complete specification lives at `docs/GUARDIAN_SPEC.md` in the Pattern
+restart. A complete specification lives at `docs/reference/GUARDIAN_SPEC.md` in the Pattern
 repo.
 
 > **Note:** Guardian is designed as a separate project with zero external dependencies

@@ -612,7 +612,7 @@ class AnthropicClient:
             # model_dump() (SDK dropped server-side TypedDicts).  All failed
             # because they modified blocks the SDK needs to round-trip.
             #
-            # See docs/server_tool_use_bug.md for full history.
+            # See docs/reference/server_tool_use_bug.md for full history.
             raw_content_list = list(content_blocks)
 
             # Diagnostic: log block types for debugging server tool issues

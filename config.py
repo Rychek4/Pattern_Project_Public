@@ -607,7 +607,7 @@ WEB_FETCH_BETA_HEADER = True                    # Send beta header (disable when
 # 3. Copy the client ID and secret to your .env file
 # 4. Run scripts/reddit_setup.py to validate your credentials
 #
-# See docs/reddit_setup.md for detailed instructions.
+# See docs/guides/reddit_setup.md for detailed instructions.
 REDDIT_ENABLED = os.getenv("REDDIT_ENABLED", "false").lower() == "true"
 REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID", "")
 REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET", "")
