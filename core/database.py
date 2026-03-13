@@ -86,7 +86,11 @@ CREATE TABLE IF NOT EXISTS memories (
     -- Bridge memory tracking (NULL for non-bridge memories)
     bridge_target_ids JSON,
     bridge_status TEXT CHECK (bridge_status IN ('active', 'effective', 'ineffective', 'retired')),
-    bridge_attempt_number INTEGER
+    bridge_attempt_number INTEGER,
+    bridge_access_baseline JSON,
+
+    -- Metacognition source tag (NULL for organic memories)
+    meta_source TEXT
 );
 
 -- Saved image files for visual memory
@@ -841,6 +845,8 @@ ALTER TABLE memories ADD COLUMN bridge_status TEXT CHECK (
     bridge_status IN ('active', 'effective', 'ineffective', 'retired')
 );
 ALTER TABLE memories ADD COLUMN bridge_attempt_number INTEGER;
+ALTER TABLE memories ADD COLUMN bridge_access_baseline JSON;
+ALTER TABLE memories ADD COLUMN meta_source TEXT;
 CREATE INDEX IF NOT EXISTS idx_memories_bridge_status ON memories(bridge_status);
 """
 

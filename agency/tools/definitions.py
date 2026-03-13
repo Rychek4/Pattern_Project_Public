@@ -11,12 +11,13 @@ from typing import List, Dict, Any
 import config
 
 
-def get_tool_definitions(is_pulse: bool = False) -> List[Dict[str, Any]]:
+def get_tool_definitions(is_pulse: bool = False, pulse_type: str = None) -> List[Dict[str, Any]]:
     """
     Get all available tool definitions based on current config.
 
     Args:
         is_pulse: If True, include pulse-only tools (growth threads, promote_growth_thread)
+        pulse_type: "reflective" or "action" — metacognition tools require "reflective"
 
     Returns:
         List of tool definition dicts for the Anthropic API
@@ -119,7 +120,7 @@ def get_tool_definitions(is_pulse: bool = False) -> List[Dict[str, Any]]:
         tools.append(REMOVE_GROWTH_THREAD_TOOL)
         tools.append(PROMOTE_GROWTH_THREAD_TOOL)
         # Metacognition tools (reflective pulse only)
-        if getattr(config, 'METACOGNITION_ENABLED', True):
+        if pulse_type == "reflective" and getattr(config, 'METACOGNITION_ENABLED', False):
             tools.append(STORE_BRIDGE_MEMORY_TOOL)
             tools.append(STORE_META_OBSERVATION_TOOL)
             tools.append(UPDATE_MEMORY_SELF_MODEL_TOOL)

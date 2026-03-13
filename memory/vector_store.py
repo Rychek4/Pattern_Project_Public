@@ -117,7 +117,8 @@ class VectorStore:
         memory_type: Optional[str] = None,
         decay_category: str = "standard",
         memory_category: str = "episodic",
-        image_id: Optional[int] = None
+        image_id: Optional[int] = None,
+        meta_source: Optional[str] = None
     ) -> Optional[int]:
         """
         Add a new memory to the store.
@@ -197,8 +198,8 @@ class VectorStore:
                 (content, embedding, source_conversation_ids, source_session_id,
                  source_timestamp, importance, memory_type, decay_category,
                  memory_category, created_at, last_accessed_at, access_count,
-                 image_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 image_id, meta_source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     content,
@@ -213,7 +214,8 @@ class VectorStore:
                     now.isoformat(),
                     now.isoformat(),
                     0,
-                    image_id
+                    image_id,
+                    meta_source
                 )
             )
 

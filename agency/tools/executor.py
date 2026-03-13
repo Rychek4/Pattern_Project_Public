@@ -2138,6 +2138,7 @@ class ToolExecutor:
             memory_type="reflection",
             decay_category="standard",
             memory_category="episodic",
+            meta_source="observation",
         )
 
         if memory_id is None:
