@@ -1,5 +1,7 @@
 # Potential Issues & Process Analysis
 
+> **Historical Note:** This document describes the legacy `[[COMMAND: arg]]` text-pattern system which was removed in February 2026. The system was replaced by native Claude tool use (structured `tool_use` blocks). This document is retained for historical context only.
+
 > **NOTE (February 2026):** Some sections of this document reference the legacy
 > `[[COMMAND: arg]]` inline syntax, which was removed in February 2026. The system
 > now uses **native tool calling** via the Anthropic API. Tool availability is now

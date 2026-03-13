@@ -227,11 +227,10 @@ state           → Key-value runtime state
 ## Threading Model
 
 ```
-Main Thread        → CLI/GUI input loop
+Main Thread        → Web server (FastAPI) or CLI input loop
 Memory Extractor   → Every 60s, extracts & embeds
 System Pulse       → Configurable interval, AI-initiated speaking
 Visual Capture     → Every 30s, screenshots to Gemini (optional)
-HTTP Server        → Flask REST API (optional)
 ```
 
 All daemon threads - stop automatically on main exit.

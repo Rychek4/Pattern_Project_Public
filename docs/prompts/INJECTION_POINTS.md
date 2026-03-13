@@ -1,5 +1,7 @@
 # Injection Points Reference
 
+> **Historical Note:** This document describes the legacy `[[COMMAND: arg]]` text-pattern system which was removed in February 2026. The system was replaced by native Claude tool use (structured `tool_use` blocks). This document is retained for historical context only.
+
 > **NOTE (February 2026):** Sections 2, 3, and 4 (Intention, Pulse, and AI Commands
 > injection) reference the legacy `[[COMMAND: arg]]` inline syntax, which was removed
 > in February 2026. Phase 2 ("Continuation Injection Points") has been replaced by the

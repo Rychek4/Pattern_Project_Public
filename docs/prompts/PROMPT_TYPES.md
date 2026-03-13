@@ -1,5 +1,7 @@
 # Prompt Types
 
+> **Historical Note:** This document describes the legacy `[[COMMAND: arg]]` text-pattern system which was removed in February 2026. The system was replaced by native Claude tool use (structured `tool_use` blocks). This document is retained for historical context only.
+
 > **NOTE (February 2026):** This document references the legacy `[[COMMAND: arg]]`
 > inline syntax and the two-pass "CommandProcessor" continuation flow, which were
 > removed in February 2026. The system now uses **native tool calling** via the

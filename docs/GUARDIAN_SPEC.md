@@ -36,7 +36,7 @@ Guardian is a **minimal, independent watchdog process** that ensures Pattern Pro
 │  │   Guardian    │──watches───>│   Pattern Project    │  │
 │  │              │              │                      │  │
 │  │  - PID check │              │  main.py (Web/CLI)   │  │
-│  │  - Heartbeat │              │  HTTP API :5000      │  │
+│  │  - Heartbeat │              │  FastAPI :8080       │  │
 │  │  - Resources │              │  SQLite DB           │  │
 │  │  - DB safety │              │  Background threads  │  │
 │  │              │              │                      │  │
@@ -88,11 +88,11 @@ Pattern runs as a single Python process. Guardian should track its PID after lau
 
 **Layer 2: Application healthy (HTTP health endpoint)**
 
-Pattern runs an HTTP API on `127.0.0.1:5000` (configurable via `HTTP_HOST` and `HTTP_PORT` environment variables, but defaults are fine).
+Pattern runs a FastAPI web server on `0.0.0.0:8080` (configurable via `WEB_HOST` and `WEB_PORT` environment variables, but defaults are fine).
 
 Health endpoint:
 ```
-GET http://127.0.0.1:5000/health
+GET http://127.0.0.1:8080/health
 ```
 
 Response when healthy:
@@ -100,15 +100,15 @@ Response when healthy:
 {"status": "healthy", "service": "pattern-project"}
 ```
 
-**The health endpoint is lightweight.** It does not touch the database or do any computation. A 200 response means Flask is running and the application initialized successfully.
+**The health endpoint is lightweight.** It does not touch the database or do any computation. A 200 response means FastAPI is running and the application initialized successfully.
 
-**HTTP is enabled by default** (`HTTP_ENABLED = True` in config.py). If for some reason the HTTP server fails to start, Pattern still runs — it just won't have the health endpoint. Guardian should treat "process alive but no health response" differently from "process dead."
+**The web server is always enabled** when Pattern runs in web mode (the default). If for some reason the web server fails to start, Pattern still runs — it just won't have the health endpoint. Guardian should treat "process alive but no health response" differently from "process dead."
 
 **Layer 3: Application functional (stats endpoint)**
 
 For deeper health checking:
 ```
-GET http://127.0.0.1:5000/stats
+GET http://127.0.0.1:8080/api/stats
 ```
 
 Response:
@@ -143,7 +143,7 @@ Guardian should consider Pattern unhealthy if:
 
 1. **Process is dead** — PID no longer exists
 2. **Health endpoint unreachable** — After the startup grace period (60 seconds), `GET /health` fails for N consecutive checks (recommend N=3 with 30-second intervals = 90 seconds of failure before action)
-3. **Stats endpoint returns errors** — `GET /stats` returns 500 or invalid JSON repeatedly
+3. **Stats endpoint returns errors** — `GET /api/stats` returns 500 or invalid JSON repeatedly
 
 Guardian should NOT restart Pattern for:
 - Temporary API failures (Pattern handles its own LLM retry/failover internally)
@@ -205,7 +205,7 @@ Pattern runs everything in a single process with multiple daemon threads:
 | `PulseManager` | Reflective + action pulse timers | AI loses autonomous agency |
 | `ReminderScheduler` | Checks for due intentions every 30s | Reminders don't fire |
 | `SubprocessMonitor` | Health checks child processes every 30s | Child processes unmonitored |
-| `HTTPServer` | Flask on :5000 | Health endpoint unreachable |
+| `WebServer` | FastAPI on :8080 | Health endpoint unreachable |
 | `TelegramListener` | Optional: polls Telegram for messages | Telegram interface down |
 
 **All background threads are daemon threads.** If the main thread exits, they all stop immediately. This means Pattern shuts down completely when the main process exits — there are no orphan threads to worry about.
@@ -244,7 +244,7 @@ Pattern needs these environment variables (typically loaded from `.env`):
 **Optional but common:**
 - `OPENAI_API_KEY` — For TTS
 - `TELEGRAM_ENABLED`, `telegram_bot`, `TELEGRAM_CHAT_ID` — Telegram bot
-- `HTTP_HOST`, `HTTP_PORT` — HTTP API binding (defaults: 127.0.0.1:5000)
+- `WEB_HOST`, `WEB_PORT` — Web server binding (defaults: 0.0.0.0:8080)
 
 Guardian should preserve Pattern's environment. The simplest approach: launch Pattern from its project directory where `.env` lives, and let `python-dotenv` handle the rest.
 
@@ -270,8 +270,8 @@ launch_command = "python main.py --cli"
 virtualenv_activate = ""
 
 # Health check endpoint
-health_url = "http://127.0.0.1:5000/health"
-stats_url = "http://127.0.0.1:5000/stats"
+health_url = "http://127.0.0.1:8080/health"
+stats_url = "http://127.0.0.1:8080/api/stats"
 
 # How long to wait after starting Pattern before expecting health endpoint
 startup_grace_seconds = 60
@@ -623,7 +623,7 @@ Three layers of resilience with no human intervention.
 
 Guardian should be testable without a running Pattern instance:
 
-1. **Mock health endpoint:** A simple script that runs Flask on :5000 with /health returning 200. Test Guardian's detection, state transitions, and restart behavior.
+1. **Mock health endpoint:** A simple script that runs a web server on :8080 with /health returning 200. Test Guardian's detection, state transitions, and restart behavior.
 
 2. **Simulated failures:** Scripts that:
    - Start a process and immediately kill it (test PID detection)
@@ -645,23 +645,20 @@ Guardian should be testable without a running Pattern instance:
 
 ---
 
-## Appendix A: Pattern's Existing HTTP Endpoints (Full Reference)
+## Appendix A: Pattern's FastAPI Endpoints (Full Reference)
+
+All endpoints are served by FastAPI on port 8080.
 
 | Method | Path | Purpose | Response |
 |---|---|---|---|
 | GET | `/health` | Liveness check | `{"status": "healthy", "service": "pattern-project"}` |
-| GET | `/stats` | Full system statistics | Database counts, session info, extractor stats |
-| POST | `/chat` | Send a message | AI response with token counts |
-| POST | `/memories/search` | Search memories | Scored memory results |
-| POST | `/memories` | Add a memory directly | Memory ID |
-| POST | `/session/new` | Start new session | Session ID |
-| POST | `/session/end` | End current session | Session summary |
-| POST | `/extract` | Force memory extraction | Memories extracted count |
+| GET | `/api/stats` | Full system statistics | Database counts, session info, extractor stats |
+| POST | `/api/memories/search` | Search memories | Scored memory results |
 | GET | `/voice/health` | Voice pipeline status | STT/TTS availability |
 | POST | `/voice/stt` | Speech to text | Transcription |
 | POST | `/voice/talk` | Full voice loop | Audio response |
 
-**Guardian should only use `/health` and `/stats`.** The other endpoints are for Pattern's interfaces.
+**Guardian should only use `/health` and `/api/stats`.** The other endpoints are for Pattern's interfaces.
 
 ## Appendix B: Pattern's Directory Layout (Guardian-Relevant)
 
@@ -702,10 +699,9 @@ LOGS_DIR = PROJECT_ROOT / "logs"               # /home/user/Pattern_Project/logs
 DATABASE_PATH = DATA_DIR / "pattern.db"        # /home/user/Pattern_Project/data/pattern.db
 DIAGNOSTIC_LOG_PATH = LOGS_DIR / "diagnostic.log"
 
-# HTTP API (health endpoint)
-HTTP_ENABLED = True
-HTTP_HOST = "127.0.0.1"
-HTTP_PORT = 5000
+# Web server (health endpoint)
+WEB_HOST = "0.0.0.0"
+WEB_PORT = 8080
 
 # Database
 DB_BUSY_TIMEOUT_MS = 10000                     # 10 second busy timeout

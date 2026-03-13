@@ -11,10 +11,10 @@ Pattern is an AI companion system that doesn't just respond—it understands, re
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                     USER INTERFACES                             │
-│  ┌──────────────────┬──────────────────┬──────────────────────┐ │
-│  │  Web UI / CLI    │   HTTP API       │   Telegram           │ │
-│  │ (FastAPI / Rich) │  (Flask REST)    │   (Bot listener)     │ │
-│  └──────────────────┴──────────────────┴──────────────────────┘ │
+│  ┌──────────────────────────────┬──────────────────────────────┐ │
+│  │  Web UI / CLI               │   Telegram                   │ │
+│  │ (FastAPI / Rich)            │   (Bot listener)             │ │
+│  └──────────────────────────────┴──────────────────────────────┘ │
 └────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -61,7 +61,6 @@ Pattern is an AI companion system that doesn't just respond—it understands, re
 ### 1. Interfaces
 - **Web UI** (`interface/web_server.py`): Browser-based interface with FastAPI + WebSocket (default)
 - **CLI** (`interface/cli.py`): Rich terminal with slash commands
-- **HTTP API** (`interface/http_api.py`): REST endpoints for external integration
 - **Telegram** (`interface/telegram_listener.py`): Bot-based messaging interface
 
 ### 2. LLM Layer
@@ -261,7 +260,6 @@ Main Process
 ├── [Daemon] SystemPulseTimer - configurable interval (default 10 min)
 ├── [Daemon] ReminderScheduler - intention due-date checking
 ├── [Daemon] SubprocessMonitor - health checks
-├── [Daemon] HTTPServer - Flask (if enabled)
 └── [Daemon] TelegramListener - bot polling (if enabled)
 ```
 

@@ -1,5 +1,7 @@
 # Hardcoded Prompts Reference
 
+> **Historical Note:** This document describes the legacy `[[COMMAND: arg]]` text-pattern system which was removed in February 2026. The system was replaced by native Claude tool use (structured `tool_use` blocks). This document is retained for historical context only.
+
 > **NOTE (February 2026):** Sections 2-4 and 6 of this document reference the legacy
 > `[[COMMAND: arg]]` inline syntax and the `get_instructions()` / `CommandProcessor`
 > pattern-matching system, which was removed in February 2026. The system now uses
