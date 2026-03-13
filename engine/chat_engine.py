@@ -690,7 +690,7 @@ class ChatEngine:
             history = self._conversation_mgr.get_api_messages()
             history.append({"role": "user", "content": pulse_prompt})
 
-            tools = get_tool_definitions(is_pulse=True)
+            tools = get_tool_definitions(is_pulse=True, pulse_type=pulse_type)
 
             # Signal round start so the web process panel creates a round group
             self._emit(EngineEventType.STREAM_START)

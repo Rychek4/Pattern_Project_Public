@@ -54,9 +54,9 @@ class BridgeManager:
 
         try:
             active_bridges = self._execute("""
-                SELECT id, bridge_target_ids, created_at
+                SELECT id, bridge_target_ids, bridge_status, bridge_access_baseline, created_at
                 FROM memories
-                WHERE bridge_status = 'active'
+                WHERE bridge_status IN ('active', 'effective')
             """)
         except Exception as e:
             log_error(f"BridgeManager: Failed to query active bridges: {e}")
@@ -88,6 +88,18 @@ class BridgeManager:
                 if not targets:
                     continue
 
+                # Load baseline access counts (NULL for pre-baseline bridges → use 0)
+                baseline_raw = bridge.get("bridge_access_baseline")
+                if baseline_raw and isinstance(baseline_raw, str):
+                    try:
+                        access_baseline = json.loads(baseline_raw)
+                    except (json.JSONDecodeError, TypeError):
+                        access_baseline = {}
+                elif isinstance(baseline_raw, dict):
+                    access_baseline = baseline_raw
+                else:
+                    access_baseline = {}
+
                 any_accessed_since_bridge = False
                 any_self_sustaining = False
 
@@ -99,27 +111,44 @@ class BridgeManager:
                     if last_accessed and last_accessed > bridge_created:
                         any_accessed_since_bridge = True
 
-                    if (target["access_count"] or 0) >= self.self_sustaining_access_count:
+                    # Post-bridge access delta for retirement check
+                    current_count = target["access_count"] or 0
+                    baseline_count = access_baseline.get(str(target["id"]), 0)
+                    post_bridge_access = current_count - baseline_count
+                    if post_bridge_access >= self.self_sustaining_access_count:
                         any_self_sustaining = True
 
                 # Determine new status
                 if any_self_sustaining:
                     new_status = "retired"
-                    transitions["retired"] += 1
                 elif any_accessed_since_bridge:
                     new_status = "effective"
-                    transitions["effective"] += 1
                 elif now - bridge_created > window:
                     new_status = "ineffective"
-                    transitions["ineffective"] += 1
                 else:
                     continue  # Still within window, keep active
 
-                self._execute(
-                    "UPDATE memories SET bridge_status = ? WHERE id = ?",
-                    (new_status, bridge["id"]),
-                    fetch=False
-                )
+                # Skip if status hasn't changed (effective bridge re-evaluated as effective)
+                current_status = bridge.get("bridge_status", "active")
+                if new_status == current_status:
+                    continue
+
+                transitions[new_status] += 1
+
+                # Apply status transition with decay category changes
+                if new_status == "ineffective":
+                    # Ineffective bridges fade through normal freshness mechanism
+                    self._execute(
+                        "UPDATE memories SET bridge_status = ?, decay_category = 'ephemeral' WHERE id = ?",
+                        (new_status, bridge["id"]),
+                        fetch=False
+                    )
+                else:
+                    self._execute(
+                        "UPDATE memories SET bridge_status = ? WHERE id = ?",
+                        (new_status, bridge["id"]),
+                        fetch=False
+                    )
 
             except (json.JSONDecodeError, TypeError) as e:
                 log_error(f"BridgeManager: Bad bridge_target_ids on bridge #{bridge['id']}: {e}")
@@ -164,7 +193,7 @@ class BridgeManager:
             last_bridge_status = None
             try:
                 bridges = self._execute("""
-                    SELECT bridge_status, bridge_attempt_number
+                    SELECT bridge_target_ids, bridge_status, bridge_attempt_number
                     FROM memories
                     WHERE bridge_target_ids IS NOT NULL
                     AND bridge_status IS NOT NULL
@@ -239,6 +268,22 @@ class BridgeManager:
         # Determine attempt number for this bridge's targets
         attempt_number = self._get_next_attempt_number(target_ids)
 
+        # Capture baseline access counts for each target (for post-bridge retirement check)
+        access_baseline = {}
+        try:
+            placeholders = ",".join("?" * len(target_ids))
+            targets = self._execute(
+                f"SELECT id, access_count FROM memories WHERE id IN ({placeholders})",
+                tuple(target_ids)
+            )
+            for t in targets:
+                access_baseline[str(t["id"])] = t["access_count"] or 0
+        except Exception as e:
+            log_error(f"BridgeManager: Failed to capture access baseline: {e}")
+            # Fallback: assume 0 for all targets (equivalent to old behavior)
+            for tid in target_ids:
+                access_baseline[str(tid)] = 0
+
         # Store via normal memory pipeline (generates embedding)
         memory_id = vector_store.add_memory(
             content=content,
@@ -247,6 +292,7 @@ class BridgeManager:
             memory_type="reflection",
             decay_category="permanent",
             memory_category="factual",
+            meta_source="bridge",
         )
 
         if memory_id is None:
@@ -260,10 +306,11 @@ class BridgeManager:
                 UPDATE memories
                 SET bridge_target_ids = ?,
                     bridge_status = 'active',
-                    bridge_attempt_number = ?
+                    bridge_attempt_number = ?,
+                    bridge_access_baseline = ?
                 WHERE id = ?
                 """,
-                (json.dumps(target_ids), attempt_number, memory_id),
+                (json.dumps(target_ids), attempt_number, json.dumps(access_baseline), memory_id),
                 fetch=False
             )
             log_info(

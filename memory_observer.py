@@ -49,6 +49,7 @@ class SignalDirection(Enum):
     DENSE = "dense"
     SPARSE = "sparse"
     PERIODIC_BREAK = "periodic_break"
+    ERROR = "error"
 
 
 @dataclass
@@ -572,10 +573,11 @@ class MemoryObserver:
         if not hist_rows:
             return signals
 
-        hist_vectors = np.array([
-            self._deserialize_embedding(r["embedding"])
-            for r in hist_rows
-        ])
+        deserialized = [self._deserialize_embedding(r["embedding"]) for r in hist_rows]
+        valid_hist = [v for v in deserialized if v is not None]
+        if not valid_hist:
+            return signals
+        hist_vectors = np.array(valid_hist)
         hist_norms = np.linalg.norm(hist_vectors, axis=1, keepdims=True)
         hist_normalized = hist_vectors / np.where(
             hist_norms == 0, 1, hist_norms
@@ -698,10 +700,11 @@ class MemoryObserver:
             if len(members) < 3:
                 continue
 
-            vectors = np.array([
-                self._deserialize_embedding(m["embedding"])
-                for m in members
-            ])
+            deserialized_members = [self._deserialize_embedding(m["embedding"]) for m in members]
+            valid_members = [v for v in deserialized_members if v is not None]
+            if len(valid_members) < 3:
+                continue
+            vectors = np.array(valid_members)
             norms = np.linalg.norm(vectors, axis=1, keepdims=True)
             normalized = vectors / np.where(norms == 0, 1, norms)
 
@@ -954,21 +957,34 @@ class MemoryObserver:
         stats = self.get_store_stats()
         all_signals: List[Signal] = []
 
-        # Tier 1
-        all_signals.extend(self.detect_rate_anomalies())
-        all_signals.extend(self.detect_importance_drift())
-        all_signals.extend(self.detect_decay_distribution_shift())
-        all_signals.extend(self.detect_memory_type_shift())
+        detectors = [
+            # Tier 1
+            (self.detect_rate_anomalies, "RATE_ANOMALIES"),
+            (self.detect_importance_drift, "IMPORTANCE_DRIFT"),
+            (self.detect_decay_distribution_shift, "DECAY_DISTRIBUTION"),
+            (self.detect_memory_type_shift, "MEMORY_TYPE_SHIFT"),
+            # Tier 2
+            (self.detect_novel_clusters, "CLUSTER_NOVEL"),
+            (self.detect_retrieval_blind_spots, "RETRIEVAL_BLIND_SPOT"),
+        ]
 
-        # Tier 2
-        all_signals.extend(self.detect_novel_clusters())
-        all_signals.extend(self.detect_retrieval_blind_spots())
-
-        # Tier 3
         if include_tier3:
-            all_signals.extend(self.analyze_embedding_density())
-            all_signals.extend(self.detect_periodicity_breaks())
-            all_signals.extend(self.detect_topic_co_occurrence())
+            detectors.extend([
+                (self.analyze_embedding_density, "CLUSTER_DENSITY"),
+                (self.detect_periodicity_breaks, "PERIODICITY_BREAK"),
+                (self.detect_topic_co_occurrence, "CO_OCCURRENCE_BREAK"),
+            ])
+
+        for detector_fn, signal_name in detectors:
+            try:
+                all_signals.extend(detector_fn())
+            except Exception as e:
+                all_signals.append(Signal(
+                    signal_type=signal_name,
+                    direction=SignalDirection.ERROR,
+                    magnitude=0.0,
+                    description=f"Detector failed — {type(e).__name__}: {e}",
+                ))
 
         all_signals.sort(key=lambda s: s.magnitude, reverse=True)
 
