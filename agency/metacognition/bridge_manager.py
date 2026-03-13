@@ -86,6 +86,17 @@ class BridgeManager:
                 )
 
                 if not targets:
+                    # All target memories have been deleted — retire the bridge
+                    log_info(
+                        f"Bridge #{bridge['id']}: all targets deleted, retiring",
+                        prefix="🌉"
+                    )
+                    self._execute(
+                        "UPDATE memories SET bridge_status = 'retired' WHERE id = ?",
+                        (bridge["id"],),
+                        fetch=False
+                    )
+                    transitions["retired"] += 1
                     continue
 
                 # Load baseline access counts (NULL for pre-baseline bridges → use 0)
@@ -170,9 +181,9 @@ class BridgeManager:
     # -------------------------------------------------------------------
     # 3b: Enrich Blind Spot Data
     # -------------------------------------------------------------------
-    # TODO (minor): enrich_blind_spots and _get_next_attempt_number both
-    # scan all bridges and filter in Python. At scale, query once and
-    # build a lookup dict, or add a bridge_targets junction table.
+    # TODO (minor): _get_next_attempt_number still scans all bridges and
+    # filters in Python. At scale, could share the bridge lookup from
+    # enrich_blind_spots or add a bridge_targets junction table.
 
     def enrich_blind_spots(self, candidates: List[Dict[str, Any]]) -> str:
         """
@@ -187,32 +198,42 @@ class BridgeManager:
         if not candidates:
             return ""
 
+        # Build a lookup dict: target_memory_id → list of bridge info dicts.
+        # One query instead of one per candidate.
+        bridge_history: Dict[int, List[Dict[str, Any]]] = {}
+        try:
+            bridges = self._execute("""
+                SELECT bridge_target_ids, bridge_status, bridge_attempt_number
+                FROM memories
+                WHERE bridge_target_ids IS NOT NULL
+                AND bridge_status IS NOT NULL
+            """)
+
+            for bridge in bridges:
+                try:
+                    raw = bridge["bridge_target_ids"]
+                    target_ids = json.loads(raw) if isinstance(raw, str) else raw
+                    if not isinstance(target_ids, list):
+                        continue
+                    for tid in target_ids:
+                        bridge_history.setdefault(tid, []).append({
+                            "status": bridge["bridge_status"],
+                            "attempt": bridge["bridge_attempt_number"],
+                        })
+                except (json.JSONDecodeError, TypeError):
+                    continue
+
+        except Exception as e:
+            log_error(f"BridgeManager: Error querying bridge history: {e}")
+
         enriched = []
         for candidate in candidates:
             memory_id = candidate["id"]
 
-            # Count previous bridge attempts targeting this memory
-            attempt_count = 0
-            last_bridge_status = None
-            try:
-                bridges = self._execute("""
-                    SELECT bridge_target_ids, bridge_status, bridge_attempt_number
-                    FROM memories
-                    WHERE bridge_target_ids IS NOT NULL
-                    AND bridge_status IS NOT NULL
-                """)
-
-                for bridge in bridges:
-                    try:
-                        target_ids = json.loads(bridge["bridge_target_ids"]) if isinstance(bridge["bridge_target_ids"], str) else bridge["bridge_target_ids"]
-                        if memory_id in target_ids:
-                            attempt_count += 1
-                            last_bridge_status = bridge["bridge_status"]
-                    except (json.JSONDecodeError, TypeError):
-                        continue
-
-            except Exception as e:
-                log_error(f"BridgeManager: Error querying bridge history for memory #{memory_id}: {e}")
+            # Look up bridge history for this target
+            history = bridge_history.get(memory_id, [])
+            attempt_count = len(history)
+            last_bridge_status = history[-1]["status"] if history else None
 
             # Filter out candidates with too many attempts
             if attempt_count >= self.max_attempts:
