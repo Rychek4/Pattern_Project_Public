@@ -15,18 +15,20 @@ Events are returned in chronological order. Recurring events are automatically
 expanded into individual instances within the queried range, each with its own
 event_id (use this ID for updates/deletions of specific instances).
 
-Date format: ISO 8601 (e.g., "2025-03-15T00:00:00" or "2025-03-15").
-Omitting the time component defaults to midnight.""",
+Date format: Always use full ISO 8601 datetime with the time component
+(e.g., "2025-03-15T00:00:00"). Do NOT use bare date strings like "2025-03-15"
+— bare dates are interpreted as all-day event boundaries, not datetime values,
+and will produce incorrect query results.""",
     "input_schema": {
         "type": "object",
         "properties": {
             "start_date": {
                 "type": "string",
-                "description": "Start of date range in ISO 8601 format (e.g., '2025-03-01T00:00:00')"
+                "description": "Start of date range in full ISO 8601 datetime format (e.g., '2025-03-01T00:00:00'). Always include the time component."
             },
             "end_date": {
                 "type": "string",
-                "description": "End of date range in ISO 8601 format (e.g., '2025-03-31T23:59:59')"
+                "description": "End of date range in full ISO 8601 datetime format (e.g., '2025-03-31T23:59:59'). Always include the time component."
             },
             "max_results": {
                 "type": "integer",
@@ -54,7 +56,11 @@ Examples:
   "RRULE:FREQ=DAILY;COUNT=5" — daily for 5 days
   "RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR;UNTIL=20250630T000000Z" — MWF until June 30
 
-For all-day events, use date-only format (e.g., "2025-03-15") for start and end.
+For timed events, always use full ISO 8601 datetime (e.g., "2025-03-15T10:00:00").
+Do NOT use bare date strings like "2025-03-15" for timed events — bare dates create
+all-day events instead.
+
+For all-day events ONLY, use date-only format (e.g., "2025-03-15") for start and end.
 The end date for all-day events is exclusive (end="2025-03-16" means a single-day event on March 15).""",
     "input_schema": {
         "type": "object",
