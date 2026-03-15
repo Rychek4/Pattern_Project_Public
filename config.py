@@ -221,31 +221,22 @@ WARMTH_TOPIC_MAX_EXPANSION = 20     # Cap on topic-warm memories per turn
 MEMORY_OVERFETCH_MULTIPLIER = 2.4
 
 # -----------------------------------------------------------------------------
-# Multi-Topic Retrieval Settings
+# Query-Side Chunking Settings
 # -----------------------------------------------------------------------------
-# When a user message contains multiple topics (detected via paragraph breaks
-# and topic-shift markers), retrieval scales up: each topic chunk gets its own
-# retrieval pass with independent 5+5 budgets. Results are merged by memory ID
-# (keeping the highest score), deduplicated, and ranked through the standard
-# warmth pipeline. No hard cap — deduplication naturally limits total results.
+# Long user inputs produce unfocused embeddings (centroid blur). To keep each
+# retrieval vector semantically tight, inputs above a token threshold are split
+# into fixed-size chunks by token count — the same principle that makes corpus-
+# side chunking work in RAG, applied to the query.
 #
-# Minimum word count for a chunk to get its own retrieval pass.
-# Chunks below this threshold are merged into their neighbor to avoid
-# poor-quality embeddings from very short fragments.
-MEMORY_CHUNK_MIN_WORDS = 10
-
-# Topic-shift markers that signal a new topic within a single paragraph.
-# Only trigger when preceded by punctuation (. ! ? , ;) to avoid false
-# positives like "I also like gardening" (no preceding punctuation).
-MEMORY_TOPIC_SHIFT_MARKERS = [
-    "also",
-    "by the way",
-    "separately",
-    "another thing",
-    "on another note",
-    "additionally",
-    "one more thing",
-]
+# Each chunk gets its own retrieval pass with the standard per-query budget.
+# Results are merged by memory ID (keeping the max score), deduplicated, and
+# ranked through the standard warmth pipeline.
+#
+# Token counts are estimated via character heuristic (chars / 4).
+# The embedding sweet spot is roughly 30-150 tokens; 40-50 keeps each vector
+# focused without being so small that embeddings get noisy.
+MEMORY_CHUNK_TOKEN_SIZE = 45          # Target tokens per chunk (char heuristic: * 4 = ~180 chars)
+MEMORY_CHUNK_MIN_THRESHOLD = 45       # Below this token count, skip chunking entirely
 
 # =============================================================================
 # DECAY CATEGORY CONFIGURATION

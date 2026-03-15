@@ -29,11 +29,10 @@ from config import (
     MEMORY_DEDUP_ENABLED,
     MEMORY_DEDUP_THRESHOLD,
     MEMORY_OVERFETCH_MULTIPLIER,
-    MEMORY_CHUNK_MIN_WORDS,
-    MEMORY_TOPIC_SHIFT_MARKERS,
+    MEMORY_CHUNK_TOKEN_SIZE,
+    MEMORY_CHUNK_MIN_THRESHOLD,
 )
 from core.embeddings import cosine_similarity
-import re
 
 
 class SemanticMemorySource(ContextSource):
@@ -107,14 +106,14 @@ class SemanticMemorySource(ContextSource):
 
         Pipeline:
         1. Decay all warmth scores (per-turn decay)
-        1b. Split input into topic chunks (paragraphs + topic-shift markers)
-            - Single chunk: standard retrieval (steps 2-8 unchanged)
-            - Multiple chunks: per-chunk retrieval with scaled 5+5 budget
+        1b. Chunk long inputs by token count for focused retrieval vectors
+            - Short input (under threshold): embed as-is (single query)
+            - Long input: split into ~45-token chunks, retrieve per chunk
         2. Over-fetch memories (2.4x limit) from both categories (no floor — applied later)
         3. Apply warmth boosts (multiplicative) and re-rank by adjusted scores
         4. Filter by min_score on ADJUSTED score (warmth can rescue borderline memories)
         5. Deduplicate (using adjusted scores to preserve warmth ranking)
-        6. Take top N per category (scaled for multi-topic)
+        6. Take top N per category (scaled for multi-chunk)
         7. Update retrieval warmth for returned memories
         8. Expand topic warmth to associated memories
         """
@@ -128,12 +127,12 @@ class SemanticMemorySource(ContextSource):
         overfetch_episodic = int(self.max_episodic * MEMORY_OVERFETCH_MULTIPLIER)
         overfetch_factual = int(self.max_factual * MEMORY_OVERFETCH_MULTIPLIER)
 
-        # Step 1b: Split input into topic chunks for multi-topic retrieval
-        chunks = self._split_into_topic_chunks(user_input)
-        is_multi_topic = len(chunks) > 1
+        # Step 1b: Chunk long inputs by token count for focused retrieval vectors
+        chunks = self._chunk_by_token_count(user_input)
+        is_multi_chunk = len(chunks) > 1
 
-        if is_multi_topic:
-            # Step 2 (multi-topic): Retrieve per chunk, merge by memory ID.
+        if is_multi_chunk:
+            # Step 2 (multi-chunk): Retrieve per chunk, merge by memory ID.
             # Each chunk gets its own retrieval pass. When the same memory
             # appears across chunks, keep the version with the highest score.
             episodic_by_id: Dict[int, MemorySearchResult] = {}
@@ -166,11 +165,11 @@ class SemanticMemorySource(ContextSource):
             episodic_results = list(episodic_by_id.values())
             factual_results = list(factual_by_id.values())
 
-            # Budget scales with chunk count: 5+5 per topic chunk
+            # Budget scales with chunk count: 5+5 per chunk
             effective_max_episodic = self.max_episodic * len(chunks)
             effective_max_factual = self.max_factual * len(chunks)
         else:
-            # Step 2 (single-topic): Existing behavior, unchanged.
+            # Step 2 (single-chunk): Input is short enough for one focused embedding.
             # Over-fetch from both categories with NO floor.
             # The relevance floor is applied AFTER warmth boosting (step 4) so
             # that warm memories with base scores slightly below floor survive.
@@ -207,7 +206,7 @@ class SemanticMemorySource(ContextSource):
             episodic_with_warmth = self._deduplicate_results(episodic_with_warmth)
             factual_with_warmth = self._deduplicate_results(factual_with_warmth)
 
-        # Step 6: Take top N after warmth-based re-ranking (scaled for multi-topic)
+        # Step 6: Take top N after warmth-based re-ranking (scaled for multi-chunk)
         episodic_final = episodic_with_warmth[:effective_max_episodic]
         factual_final = factual_with_warmth[:effective_max_factual]
 
@@ -425,74 +424,40 @@ class SemanticMemorySource(ContextSource):
 
         return kept
 
-    def _split_into_topic_chunks(self, user_input: str) -> List[str]:
+    @staticmethod
+    def _chunk_by_token_count(user_input: str) -> List[str]:
         """
-        Split user input into topic-aligned chunks for multi-query retrieval.
+        Split user input into fixed-size token chunks for focused retrieval vectors.
 
-        Splitting strategy:
-        1. Split on paragraph boundaries (double newlines)
-        2. Within each paragraph, split on topic-shift markers preceded by punctuation
-        3. Merge runt chunks (below MEMORY_CHUNK_MIN_WORDS) into their neighbor
+        Long inputs produce unfocused embeddings (centroid blur). Splitting by
+        token count keeps each retrieval vector semantically tight — the same
+        principle that makes corpus-side chunking work in RAG, applied to the query.
 
-        Returns the original input as a single-item list if no meaningful splits
-        are found, preserving the existing single-topic retrieval path.
+        Token count is estimated via character heuristic (len / 4). Hard splits
+        with no overlap; even mid-thought fragments carry enough semantic signal
+        for retrieval, and downstream dedup merges overlapping results.
+
+        Returns the original input as a single-item list if under threshold.
         """
-        # Step 1: Split on paragraph boundaries
-        paragraphs = [p.strip() for p in user_input.split('\n\n') if p.strip()]
-        if not paragraphs:
+        # Estimate token count via character heuristic
+        estimated_tokens = len(user_input) / 4
+
+        if estimated_tokens <= MEMORY_CHUNK_MIN_THRESHOLD:
             return [user_input]
 
-        # Step 2: Within each paragraph, split on topic-shift markers
+        # Target character count per chunk (token target * 4)
+        chars_per_chunk = MEMORY_CHUNK_TOKEN_SIZE * 4
+
+        # Split into fixed-size character windows
         chunks = []
-        if MEMORY_TOPIC_SHIFT_MARKERS:
-            # Sort markers longest-first so "on another note" matches before "on"
-            sorted_markers = sorted(MEMORY_TOPIC_SHIFT_MARKERS, key=len, reverse=True)
-            marker_pattern = '|'.join(re.escape(m) for m in sorted_markers)
-            # Split at whitespace between punctuation and a topic-shift marker.
-            # Lookbehind ensures the marker follows sentence-ending punctuation
-            # or a comma, avoiding false positives like "I also like gardening".
-            shift_pattern = re.compile(
-                r'(?<=[.!?,;])\s+(?=(?:' + marker_pattern + r')\b)',
-                re.IGNORECASE
-            )
-            for paragraph in paragraphs:
-                parts = shift_pattern.split(paragraph)
-                chunks.extend(p.strip() for p in parts if p.strip())
-        else:
-            chunks = paragraphs
+        text = user_input
+        while text:
+            chunk = text[:chars_per_chunk].strip()
+            if chunk:
+                chunks.append(chunk)
+            text = text[chars_per_chunk:]
 
-        # Step 3: Merge runt chunks below minimum word count
-        if len(chunks) > 1:
-            chunks = self._merge_runt_chunks(chunks)
-
-        # If splitting produced only 1 chunk, return original input
         return chunks if len(chunks) > 1 else [user_input]
-
-    @staticmethod
-    def _merge_runt_chunks(chunks: List[str]) -> List[str]:
-        """
-        Merge chunks below MEMORY_CHUNK_MIN_WORDS into their neighbor.
-
-        Short fragments produce poor embeddings. This merges them into the
-        adjacent chunk to maintain embedding quality.
-        """
-        if len(chunks) <= 1:
-            return chunks
-
-        merged = []
-        for chunk in chunks:
-            if len(chunk.split()) < MEMORY_CHUNK_MIN_WORDS and merged:
-                # Too short — merge into previous chunk
-                merged[-1] = merged[-1] + " " + chunk
-            else:
-                merged.append(chunk)
-
-        # If the last chunk is also a runt, merge it backward
-        if len(merged) > 1 and len(merged[-1].split()) < MEMORY_CHUNK_MIN_WORDS:
-            merged[-2] = merged[-2] + " " + merged[-1]
-            merged.pop()
-
-        return merged
 
     def _get_type_indicator(self, memory_type: Optional[str]) -> str:
         """Get emoji indicator for memory type."""
