@@ -225,7 +225,7 @@ MEMORY_OVERFETCH_MULTIPLIER = 2.4
 # -----------------------------------------------------------------------------
 # Long user inputs produce unfocused embeddings (centroid blur). To keep each
 # retrieval vector semantically tight, inputs above a token threshold are split
-# into fixed-size chunks by token count — the same principle that makes corpus-
+# into overlapping chunks by token count — the same principle that makes corpus-
 # side chunking work in RAG, applied to the query.
 #
 # Each chunk gets its own retrieval pass with the standard per-query budget.
@@ -233,10 +233,14 @@ MEMORY_OVERFETCH_MULTIPLIER = 2.4
 # ranked through the standard warmth pipeline.
 #
 # Token counts are estimated via character heuristic (chars / 4).
-# The embedding sweet spot is roughly 30-150 tokens; 40-50 keeps each vector
-# focused without being so small that embeddings get noisy.
-MEMORY_CHUNK_TOKEN_SIZE = 45          # Target tokens per chunk (char heuristic: * 4 = ~180 chars)
-MEMORY_CHUNK_MIN_THRESHOLD = 45       # Below this token count, skip chunking entirely
+# The embedding sweet spot is roughly 30-150 tokens; 90 keeps each vector
+# focused with enough context for strong semantic signal.
+#
+# Chunks overlap by 25% on each boundary so concepts that straddle a split
+# appear fully in at least one chunk. Stride = chunk_size - overlap.
+MEMORY_CHUNK_TOKEN_SIZE = 90          # Target tokens per chunk (char heuristic: * 4 = ~360 chars)
+MEMORY_CHUNK_MIN_THRESHOLD = 90       # Below this token count, skip chunking entirely
+MEMORY_CHUNK_OVERLAP_RATIO = 0.25     # Fraction of chunk size to overlap at each boundary
 
 # =============================================================================
 # DECAY CATEGORY CONFIGURATION
