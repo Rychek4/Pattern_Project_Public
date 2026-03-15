@@ -230,7 +230,9 @@ MEMORY_OVERFETCH_MULTIPLIER = 2.4
 #
 # Each chunk gets its own retrieval pass with the standard per-query budget.
 # Results are merged by memory ID (keeping the max score), deduplicated, and
-# ranked through the standard warmth pipeline.
+# ranked through the standard warmth pipeline. The final cap grows sublinearly:
+# base budget (5+5) + EXTRA_BUDGET per additional chunk, so multi-topic inputs
+# get broader coverage without linearly inflating prompt size.
 #
 # Token counts are estimated via character heuristic (chars / 4).
 # The embedding sweet spot is roughly 30-150 tokens; 90 keeps each vector
@@ -241,6 +243,7 @@ MEMORY_OVERFETCH_MULTIPLIER = 2.4
 MEMORY_CHUNK_TOKEN_SIZE = 90          # Target tokens per chunk (char heuristic: * 4 = ~360 chars)
 MEMORY_CHUNK_MIN_THRESHOLD = 90       # Below this token count, skip chunking entirely
 MEMORY_CHUNK_OVERLAP_RATIO = 0.25     # Fraction of chunk size to overlap at each boundary
+MEMORY_CHUNK_EXTRA_BUDGET = 3         # Extra memories (across both categories) per additional chunk
 
 # =============================================================================
 # DECAY CATEGORY CONFIGURATION
