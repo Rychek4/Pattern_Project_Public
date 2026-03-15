@@ -31,6 +31,7 @@ from config import (
     MEMORY_OVERFETCH_MULTIPLIER,
     MEMORY_CHUNK_TOKEN_SIZE,
     MEMORY_CHUNK_MIN_THRESHOLD,
+    MEMORY_CHUNK_OVERLAP_RATIO,
 )
 from core.embeddings import cosine_similarity
 
@@ -427,15 +428,16 @@ class SemanticMemorySource(ContextSource):
     @staticmethod
     def _chunk_by_token_count(user_input: str) -> List[str]:
         """
-        Split user input into fixed-size token chunks for focused retrieval vectors.
+        Split user input into overlapping token chunks for focused retrieval vectors.
 
         Long inputs produce unfocused embeddings (centroid blur). Splitting by
         token count keeps each retrieval vector semantically tight — the same
         principle that makes corpus-side chunking work in RAG, applied to the query.
 
-        Token count is estimated via character heuristic (len / 4). Hard splits
-        with no overlap; even mid-thought fragments carry enough semantic signal
-        for retrieval, and downstream dedup merges overlapping results.
+        Token count is estimated via character heuristic (len / 4). Chunks overlap
+        by MEMORY_CHUNK_OVERLAP_RATIO at each boundary so concepts that straddle a
+        split appear fully in at least one chunk. Downstream merge-by-ID dedup
+        collapses duplicate retrievals across overlapping chunks.
 
         Returns the original input as a single-item list if under threshold.
         """
@@ -447,15 +449,18 @@ class SemanticMemorySource(ContextSource):
 
         # Target character count per chunk (token target * 4)
         chars_per_chunk = MEMORY_CHUNK_TOKEN_SIZE * 4
+        overlap_chars = int(chars_per_chunk * MEMORY_CHUNK_OVERLAP_RATIO)
+        stride = chars_per_chunk - overlap_chars
 
-        # Split into fixed-size character windows
+        # Split into overlapping character windows
         chunks = []
-        text = user_input
-        while text:
-            chunk = text[:chars_per_chunk].strip()
+        start = 0
+        text_len = len(user_input)
+        while start < text_len:
+            chunk = user_input[start:start + chars_per_chunk].strip()
             if chunk:
                 chunks.append(chunk)
-            text = text[chars_per_chunk:]
+            start += stride
 
         return chunks if len(chunks) > 1 else [user_input]
 
