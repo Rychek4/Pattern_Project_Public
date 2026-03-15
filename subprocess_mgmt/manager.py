@@ -154,6 +154,8 @@ class SubprocessManager:
             info.state = ProcessState.FAILED
             info.last_error = str(e)
             log_error(f"Failed to start {config.name}: {e}")
+            from core.health_ledger import record_health_event
+            record_health_event("subprocess", "error", f"Failed to start {config.name}: {e}")
             return False
 
     def _wait_for_health(self, info: ProcessInfo, timeout: Optional[float] = None) -> bool:
@@ -282,6 +284,8 @@ class SubprocessManager:
                 self._check_all_health()
             except Exception as e:
                 log_error(f"Monitor error: {e}")
+                from core.health_ledger import record_health_event
+                record_health_event("subprocess", "warning", f"Monitor error: {e}")
 
             self._stop_event.wait(self.health_check_interval)
 

@@ -395,6 +395,15 @@ LOG_TO_CONSOLE = True
 PROMPT_EXPORT_PATH = LOGS_DIR / "prompt_export.txt"  # Overwritten each time by prompt export
 
 # =============================================================================
+# HEALTH LEDGER CONFIGURATION
+# =============================================================================
+# Rotating JSONL error log for AI-accessible health monitoring.
+# The AI reads this via the health_check tool for infrastructure awareness.
+# Errors are also emitted to stderr for journalctl visibility.
+HEALTH_LEDGER_PATH = LOGS_DIR / "health_ledger.jsonl"
+HEALTH_LEDGER_MAX_LINES = int(os.getenv("HEALTH_LEDGER_MAX_LINES", "400"))
+
+# =============================================================================
 # CONCURRENCY CONFIGURATION
 # =============================================================================
 LOCK_STATS_INTERVAL = 300  # 5 minutes

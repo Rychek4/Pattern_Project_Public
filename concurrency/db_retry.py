@@ -54,6 +54,8 @@ def db_retry(
                             log_error(
                                 f"Database operation failed after {attempt + 1} attempts: {e}"
                             )
+                            from core.health_ledger import record_health_event
+                            record_health_event("database", "error", f"Retry exhausted after {attempt + 1} attempts: {e}")
                         raise
 
                     last_error = e
@@ -113,6 +115,8 @@ def execute_with_retry(
                 log_error(
                     f"Database operation failed after {attempt + 1} attempts: {e}"
                 )
+                from core.health_ledger import record_health_event
+                record_health_event("database", "error", f"Retry exhausted after {attempt + 1} attempts: {e}")
                 raise DatabaseRetryExhausted(
                     f"Max retries ({max_retries}) exhausted. Last error: {e}"
                 )

@@ -123,6 +123,9 @@ from agency.tools.definitions.metacognition_tools import (
     UPDATE_MEMORY_SELF_MODEL_TOOL,
 )
 
+# --- Health ---
+from agency.tools.definitions.health_tools import HEALTH_CHECK_TOOL
+
 
 def get_tool_definitions(is_pulse: bool = False, pulse_type: str = None) -> List[Dict[str, Any]]:
     """
@@ -141,6 +144,7 @@ def get_tool_definitions(is_pulse: bool = False, pulse_type: str = None) -> List
     # Always include core tools
     tools.append(SEARCH_MEMORIES_TOOL)
     tools.append(SET_ACTIVE_THOUGHTS_TOOL)
+    tools.append(HEALTH_CHECK_TOOL)
 
     # Intention/reminder tools (if enabled)
     if config.INTENTION_ENABLED:

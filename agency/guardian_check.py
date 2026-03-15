@@ -194,6 +194,8 @@ class GuardianChecker:
 
         except Exception as e:
             log_error(f"Error checking Guardian health: {e}")
+            from core.health_ledger import record_health_event
+            record_health_event("guardian", "error", f"Health check failed: {e}")
             result["action_taken"] = f"error: {e}"
             self._last_check_result = result
             return False

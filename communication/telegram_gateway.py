@@ -158,6 +158,8 @@ class TelegramGateway:
 
         except TelegramError as e:
             log_error(f"Telegram API error: {e}")
+            from core.health_ledger import record_health_event
+            record_health_event("telegram", "error", f"API error: {e}")
             self._log_to_database(
                 recipient=self.chat_id,
                 body=message,
@@ -173,6 +175,8 @@ class TelegramGateway:
 
         except Exception as e:
             log_error(f"Unexpected error sending Telegram message: {e}")
+            from core.health_ledger import record_health_event
+            record_health_event("telegram", "error", f"Send failed: {e}")
             self._log_to_database(
                 recipient=self.chat_id,
                 body=message,

@@ -924,6 +924,8 @@ class Database:
 
         except Exception as e:
             log_error(f"Database initialization failed: {e}")
+            from core.health_ledger import record_health_event
+            record_health_event("database", "critical", f"Initialization failed: {e}")
             return False
 
     def _apply_migrations(self, conn: sqlite3.Connection, from_version: int) -> None:
@@ -1062,6 +1064,8 @@ class Database:
         except Exception as e:
             # Fail hard - don't let the app continue with broken schema
             log_error(f"Migration failed (v{from_version} → v{SCHEMA_VERSION}): {e}")
+            from core.health_ledger import record_health_event
+            record_health_event("database", "critical", f"Migration failed (v{from_version} → v{SCHEMA_VERSION}): {e}")
             raise RuntimeError(
                 f"Database migration failed: {e}. "
                 f"Please fix the database or delete it to start fresh."
