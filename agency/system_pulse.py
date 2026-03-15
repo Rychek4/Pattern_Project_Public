@@ -195,6 +195,8 @@ def run_metacognition() -> dict:
         result["observer_ok"] = True
     except Exception as e:
         log_error(f"Metacognition observer failed: {e}")
+        from core.health_ledger import record_health_event
+        record_health_event("metacognition", "error", f"Observer failed: {e}")
         result["signal_report"] = "MEMORY TELEMETRY REPORT\n\n[Observer error — no telemetry available this cycle]"
 
     # Run bridge manager (evaluate existing bridges + enrich blind spots)
@@ -208,6 +210,8 @@ def run_metacognition() -> dict:
         result["blind_spot_data"] = bridge_mgr.enrich_blind_spots(blind_spot_candidates)
     except Exception as e:
         log_error(f"Metacognition bridge manager failed: {e}")
+        from core.health_ledger import record_health_event
+        record_health_event("metacognition", "error", f"Bridge manager failed: {e}")
         # Degrade gracefully — no blind spot data this cycle
 
     return result
@@ -298,6 +302,8 @@ Update, advance, seed, or retire as appropriate. See your growth awareness \
 context for detailed instructions.
 3. Active thoughts — do they still reflect who you are becoming? \
 Update them if something has shifted.
+4. System health — consider using the health_check tool to verify your \
+infrastructure is running cleanly. Not every cycle, but when it feels right.
 
 You are not waiting to be useful. You are choosing to be present."""
 
@@ -422,6 +428,8 @@ class PulseTimer:
                 self._on_fire(self)
             except Exception as e:
                 log_error(f"Error in {self.pulse_type.value} pulse callback: {e}")
+                from core.health_ledger import record_health_event
+                record_health_event("pulse", "error", f"{self.pulse_type.value} callback error: {e}")
 
 
 # ─── Pulse Manager ───────────────────────────────────────────────────────────
@@ -624,6 +632,8 @@ class PulseManager:
 
             except Exception as e:
                 log_error(f"Pulse manager error: {e}")
+                from core.health_ledger import record_health_event
+                record_health_event("pulse", "error", f"Manager loop error: {e}")
 
             self._stop_event.wait(1.0)
 
@@ -642,6 +652,8 @@ class PulseManager:
                 self._on_reflective_pulse()
             except Exception as e:
                 log_error(f"Error in reflective pulse callback: {e}")
+                from core.health_ledger import record_health_event
+                record_health_event("pulse", "error", f"Reflective pulse callback error: {e}")
                 with self._processing_lock:
                     self._is_pulse_processing = False
 
@@ -658,6 +670,8 @@ class PulseManager:
                 self._on_action_pulse()
             except Exception as e:
                 log_error(f"Error in action pulse callback: {e}")
+                from core.health_ledger import record_health_event
+                record_health_event("pulse", "error", f"Action pulse callback error: {e}")
                 with self._processing_lock:
                     self._is_pulse_processing = False
 

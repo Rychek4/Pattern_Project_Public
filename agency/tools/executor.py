@@ -102,6 +102,8 @@ class ToolExecutor:
             "store_bridge_memory": self._exec_store_bridge_memory,
             "store_meta_observation": self._exec_store_meta_observation,
             "update_memory_self_model": self._exec_update_memory_self_model,
+            # Health
+            "health_check": self._exec_health_check,
         }
 
     def execute(
@@ -1244,6 +1246,17 @@ class ToolExecutor:
         """Update the memory self-model in the state table."""
         from agency.commands.handlers.metacognition_exec_handler import exec_update_memory_self_model
         return exec_update_memory_self_model(input, id, ctx)
+
+    # =========================================================================
+    # HEALTH
+    # =========================================================================
+
+    def _exec_health_check(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Return system health summary from the health ledger."""
+        from agency.commands.handlers.health_handler import exec_health_check
+        return exec_health_check(input, id, ctx)
 
 
 # Global instance

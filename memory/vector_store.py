@@ -446,6 +446,8 @@ class VectorStore:
             )
         except Exception as e:
             log_error(f"Failed to record memory access for {memory_ids}: {e}")
+            from core.health_ledger import record_health_event
+            record_health_event("memory", "warning", f"Failed to record memory access: {e}")
             # NOTE: This failure silently skews freshness scoring.
             # access_count and last_accessed_at remain stale for these memories.
 

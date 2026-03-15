@@ -646,6 +646,8 @@ class AnthropicClient:
 
         except Exception as e:
             error_type, error_msg = self._classify_error(e)
+            from core.health_ledger import record_health_event
+            record_health_event("llm", "error", f"Chat API error ({error_type}): {error_msg}")
 
             return AnthropicResponse(
                 text="",
@@ -1072,6 +1074,9 @@ class AnthropicClient:
                 log_error(f"Streaming error ({error_type}): {error_msg}", prefix="[Stream]")
                 log_error(f"Exception type: {type(e).__name__}", prefix="[Stream]")
                 log_error(f"Full traceback:\n{full_traceback}", prefix="[Stream]")
+
+            from core.health_ledger import record_health_event
+            record_health_event("llm", "error", f"Stream error ({error_type}): {error_msg}")
 
             # Retry transient errors if no content has been yielded to caller yet
             import config as cfg

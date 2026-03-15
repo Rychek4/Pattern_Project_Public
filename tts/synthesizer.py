@@ -123,6 +123,8 @@ def synthesize_pcm(
 
     except Exception as e:
         log_error(f"Synthesis failed: {e}", prefix="[TTS-Synth]")
+        from core.health_ledger import record_health_event
+        record_health_event("tts", "error", f"PCM synthesis failed: {e}")
         return None
 
 
@@ -165,6 +167,8 @@ def synthesize_mp3(
 
     except Exception as e:
         log_error(f"MP3 synthesis failed: {e}", prefix="[TTS-Synth]")
+        from core.health_ledger import record_health_event
+        record_health_event("tts", "error", f"MP3 synthesis failed: {e}")
         return None
 
 

@@ -478,6 +478,8 @@ class MemoryExtractor:
             import traceback
             log_error(f"Error checking context overflow: {e}", prefix="🧠")
             log_error(f"Traceback:\n{traceback.format_exc()}", prefix="🧠")
+            from core.health_ledger import record_health_event
+            record_health_event("memory", "error", f"Context overflow check failed: {e}")
 
     def _run_extraction(self) -> None:
         """
@@ -525,6 +527,8 @@ class MemoryExtractor:
             log_error(f"=== EXTRACTION THREAD ERROR ({duration:.0f}ms) ===", prefix="🧠")
             log_error(f"Extraction error: {e}", prefix="🧠")
             log_error(f"Traceback:\n{traceback.format_exc()}", prefix="🧠")
+            from core.health_ledger import record_health_event
+            record_health_event("memory", "error", f"Extraction failed: {e}")
         finally:
             self._extraction_in_progress.clear()
             log_info("Extraction in-progress flag cleared", prefix="🧠")
