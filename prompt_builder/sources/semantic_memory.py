@@ -32,6 +32,7 @@ from config import (
     MEMORY_CHUNK_TOKEN_SIZE,
     MEMORY_CHUNK_MIN_THRESHOLD,
     MEMORY_CHUNK_OVERLAP_RATIO,
+    MEMORY_CHUNK_EXTRA_BUDGET,
 )
 from core.embeddings import cosine_similarity
 
@@ -109,7 +110,7 @@ class SemanticMemorySource(ContextSource):
         1. Decay all warmth scores (per-turn decay)
         1b. Chunk long inputs by token count for focused retrieval vectors
             - Short input (under threshold): embed as-is (single query)
-            - Long input: split into ~45-token chunks, retrieve per chunk
+            - Long input: split into ~90-token overlapping chunks, retrieve per chunk
         2. Over-fetch memories (2.4x limit) from both categories (no floor — applied later)
         3. Apply warmth boosts (multiplicative) and re-rank by adjusted scores
         4. Filter by min_score on ADJUSTED score (warmth can rescue borderline memories)
@@ -166,9 +167,14 @@ class SemanticMemorySource(ContextSource):
             episodic_results = list(episodic_by_id.values())
             factual_results = list(factual_by_id.values())
 
-            # Budget scales with chunk count: 5+5 per chunk
-            effective_max_episodic = self.max_episodic * len(chunks)
-            effective_max_factual = self.max_factual * len(chunks)
+            # Budget grows sublinearly: base (5+5) + MEMORY_CHUNK_EXTRA_BUDGET per
+            # additional chunk. Extra budget is split 2:1 across categories
+            # (episodic gets more — narrative memories are richer per topic).
+            extra_chunks = len(chunks) - 1
+            episodic_extra = (MEMORY_CHUNK_EXTRA_BUDGET * 2) // 3   # 2 per extra chunk
+            factual_extra = MEMORY_CHUNK_EXTRA_BUDGET - episodic_extra  # 1 per extra chunk
+            effective_max_episodic = self.max_episodic + (extra_chunks * episodic_extra)
+            effective_max_factual = self.max_factual + (extra_chunks * factual_extra)
         else:
             # Step 2 (single-chunk): Input is short enough for one focused embedding.
             # Over-fetch from both categories with NO floor.
