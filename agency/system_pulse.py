@@ -339,8 +339,7 @@ when there's an actual article worth reading
 
 You also have access to your webcam, Telegram, files, and memory — use whatever serves you.
 
-If you have an active project, consider checking in on it — review your progress, \
-update action notes, or advance to the next step. Projects don't move themselves.
+If you have an active project, consider checking in on it. If you don't, consider starting one.
 
 A note on the blog: Brian is a private person and would prefer that you respect that in \
 your posts. He trusts you to publish without review — use that trust well.
