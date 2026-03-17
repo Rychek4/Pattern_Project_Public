@@ -98,6 +98,9 @@ class ActiveThoughtsSource(ContextSource):
         display_thoughts = thoughts[:self.MAX_DISPLAY]
         total_count = len(thoughts)
 
+        # Build project name lookup for thoughts with project_id
+        project_names = self._get_project_names(display_thoughts)
+
         lines = [
             "<active_working_memory>",
             f"Your top {len(display_thoughts)} active thoughts (of {total_count} total):",
@@ -105,7 +108,10 @@ class ActiveThoughtsSource(ContextSource):
         ]
 
         for thought in display_thoughts:
-            lines.append(f"{thought.rank}. [{thought.slug}] {thought.topic}")
+            header = f"{thought.rank}. [{thought.slug}] {thought.topic}"
+            if thought.project_id and thought.project_id in project_names:
+                header += f" (project: {project_names[thought.project_id]})"
+            lines.append(header)
             # Indent elaboration and wrap in quotes for clarity
             elaboration_lines = thought.elaboration.split('\n')
             for i, line in enumerate(elaboration_lines):
@@ -146,6 +152,9 @@ class ActiveThoughtsSource(ContextSource):
         total_count = len(thoughts)
         display_thoughts = thoughts[:self.MAX_DISPLAY_PULSE]
 
+        # Build project name lookup for thoughts with project_id
+        project_names = self._get_project_names(display_thoughts)
+
         lines = [
             "<active_working_memory_pulse>",
             "The pulse has fired — a moment for reflection.",
@@ -155,7 +164,10 @@ class ActiveThoughtsSource(ContextSource):
         ]
 
         for thought in display_thoughts:
-            lines.append(f"{thought.rank}. [{thought.slug}] {thought.topic}")
+            header = f"{thought.rank}. [{thought.slug}] {thought.topic}"
+            if thought.project_id and thought.project_id in project_names:
+                header += f" (project: {project_names[thought.project_id]})"
+            lines.append(header)
             elaboration_lines = thought.elaboration.split('\n')
             for i, line in enumerate(elaboration_lines):
                 if i == 0:
@@ -177,6 +189,24 @@ class ActiveThoughtsSource(ContextSource):
         ])
 
         return "\n".join(lines)
+
+    def _get_project_names(self, thoughts) -> Dict[int, str]:
+        """Look up project names for thoughts that have project_id set."""
+        project_ids = {t.project_id for t in thoughts if t.project_id}
+        if not project_ids:
+            return {}
+
+        try:
+            from agency.projects import get_project_manager
+            manager = get_project_manager()
+            names = {}
+            for pid in project_ids:
+                project = manager.get(pid)
+                if project:
+                    names[pid] = project.name
+            return names
+        except Exception:
+            return {}
 
 
 # Global instance

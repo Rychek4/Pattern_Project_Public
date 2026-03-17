@@ -20,6 +20,7 @@ class ActiveThought:
     slug: str  # Short identifier
     topic: str  # One-line summary
     elaboration: str  # Detailed thinking
+    project_id: Optional[int]  # Optional pointer to a related project
     created_at: datetime
     updated_at: datetime
 
@@ -179,14 +180,15 @@ class ActiveThoughtsManager:
                     conn.execute(
                         """
                         INSERT INTO active_thoughts
-                        (rank, slug, topic, elaboration, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        (rank, slug, topic, elaboration, project_id, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             thought["rank"],
                             thought["slug"],
                             thought["topic"],
                             thought["elaboration"],
+                            thought.get("project_id"),
                             created_at,
                             updated_at
                         )
@@ -292,12 +294,19 @@ class ActiveThoughtsManager:
         if isinstance(updated_at, str):
             updated_at = datetime.fromisoformat(updated_at)
 
+        # project_id may not exist in older schemas before migration
+        try:
+            project_id = row["project_id"]
+        except (IndexError, KeyError):
+            project_id = None
+
         return ActiveThought(
             id=row["id"],
             rank=row["rank"],
             slug=row["slug"],
             topic=row["topic"],
             elaboration=row["elaboration"],
+            project_id=project_id,
             created_at=created_at,
             updated_at=updated_at
         )

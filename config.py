@@ -345,6 +345,19 @@ GROWTH_THREADS_PRIORITY = 20
 GROWTH_THREAD_STAGES = ('seed', 'growing', 'integrating', 'dormant', 'abandoned')
 
 # =============================================================================
+# PROJECTS CONFIGURATION
+# =============================================================================
+# Projects are structured multi-step plans with progress tracking.
+# The AI can create, update, and track projects with ordered actions.
+# Currently limited to one active project at a time (designed for future
+# concurrent support).
+PROJECTS_ENABLED = os.getenv("PROJECTS_ENABLED", "true").lower() == "true"
+
+# Maximum number of active (non-paused/completed/abandoned) projects at once.
+# Start with 1; increase when concurrent project support is added.
+PROJECTS_MAX_ACTIVE = 1
+
+# =============================================================================
 # WEB UI CONFIGURATION
 # =============================================================================
 # FastAPI + WebSocket server for browser-based interface (--web mode).
