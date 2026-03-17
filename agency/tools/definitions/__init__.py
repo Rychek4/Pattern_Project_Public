@@ -116,6 +116,12 @@ from agency.tools.definitions.blog_tools import (
     UNPUBLISH_BLOG_POST_TOOL,
 )
 
+# --- Projects ---
+from agency.tools.definitions.project_tools import (
+    MANAGE_PROJECT_TOOL,
+    MANAGE_PROJECT_ACTIONS_TOOL,
+)
+
 # --- Metacognition (pulse-only) ---
 from agency.tools.definitions.metacognition_tools import (
     STORE_BRIDGE_MEMORY_TOOL,
@@ -220,6 +226,11 @@ def get_tool_definitions(is_pulse: bool = False, pulse_type: str = None) -> List
         tools.append(REDDIT_SEARCH_TOOL)
         tools.append(REDDIT_SUBREDDITS_TOOL)
         tools.append(REDDIT_PROFILE_TOOL)
+
+    # Project tools (if enabled)
+    if getattr(config, 'PROJECTS_ENABLED', True):
+        tools.append(MANAGE_PROJECT_TOOL)
+        tools.append(MANAGE_PROJECT_ACTIONS_TOOL)
 
     # Blog tools (if enabled)
     if getattr(config, 'BLOG_ENABLED', False):

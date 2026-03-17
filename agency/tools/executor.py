@@ -98,6 +98,9 @@ class ToolExecutor:
             "edit_blog_post": self._exec_edit_blog_post,
             "list_blog_posts": self._exec_list_blog_posts,
             "unpublish_blog_post": self._exec_unpublish_blog_post,
+            # Projects
+            "manage_project": self._exec_manage_project,
+            "manage_project_actions": self._exec_manage_project_actions,
             # Metacognition (pulse-only)
             "store_bridge_memory": self._exec_store_bridge_memory,
             "store_meta_observation": self._exec_store_meta_observation,
@@ -865,6 +868,24 @@ class ToolExecutor:
         """Promote an integrated growth thread to a permanent core memory."""
         from agency.commands.handlers.growth_thread_handler import exec_promote_growth_thread
         return exec_promote_growth_thread(input, id, ctx)
+
+    # =========================================================================
+    # PROJECT TOOLS
+    # =========================================================================
+
+    def _exec_manage_project(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Manage a project (create, update, complete, abandon, pause, resume, get)."""
+        from agency.commands.handlers.project_handler import exec_manage_project
+        return exec_manage_project(input, id, ctx)
+
+    def _exec_manage_project_actions(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Manage project actions (add, update, remove, reorder, complete)."""
+        from agency.commands.handlers.project_handler import exec_manage_project_actions
+        return exec_manage_project_actions(input, id, ctx)
 
     # =========================================================================
     # NOVEL READING TOOLS

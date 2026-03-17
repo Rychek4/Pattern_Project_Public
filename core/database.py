@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from core.logger import log_info, log_success, log_error, log_config, log_section
 
 # Schema version for migrations
-SCHEMA_VERSION = 22
+SCHEMA_VERSION = 23
 
 # SQL schema definition
 SCHEMA_SQL = """
@@ -169,6 +169,7 @@ CREATE TABLE IF NOT EXISTS active_thoughts (
     slug TEXT NOT NULL UNIQUE,
     topic TEXT NOT NULL,
     elaboration TEXT NOT NULL,
+    project_id INTEGER REFERENCES projects(id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -232,6 +233,31 @@ CREATE TABLE IF NOT EXISTS reading_sessions (
     completed_at TIMESTAMP
 );
 
+-- Projects: structured multi-step plans with progress tracking
+CREATE TABLE IF NOT EXISTS projects (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active'
+        CHECK (status IN ('active', 'paused', 'completed', 'abandoned')),
+    abandonment_reason TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Project actions: individual steps within a project
+CREATE TABLE IF NOT EXISTS project_actions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    description TEXT NOT NULL,
+    notes TEXT,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'in_progress', 'completed')),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Indexes for efficient queries
 CREATE INDEX IF NOT EXISTS idx_conversations_session ON conversations(session_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_unprocessed ON conversations(processed_for_memory) WHERE processed_for_memory = FALSE;
@@ -257,6 +283,8 @@ CREATE INDEX IF NOT EXISTS idx_growth_threads_stage ON growth_threads(stage);
 CREATE INDEX IF NOT EXISTS idx_growth_threads_slug ON growth_threads(slug);
 CREATE INDEX IF NOT EXISTS idx_reading_sessions_status ON reading_sessions(status);
 CREATE INDEX IF NOT EXISTS idx_memories_bridge_status ON memories(bridge_status);
+CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
+CREATE INDEX IF NOT EXISTS idx_project_actions_project_id ON project_actions(project_id);
 """
 
 # Migration SQL for v1 -> v2
@@ -850,6 +878,39 @@ ALTER TABLE memories ADD COLUMN meta_source TEXT;
 CREATE INDEX IF NOT EXISTS idx_memories_bridge_status ON memories(bridge_status);
 """
 
+MIGRATION_V23_SQL = """
+-- Projects table for structured multi-step plans
+CREATE TABLE IF NOT EXISTS projects (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active'
+        CHECK (status IN ('active', 'paused', 'completed', 'abandoned')),
+    abandonment_reason TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Project actions (individual steps within a project)
+CREATE TABLE IF NOT EXISTS project_actions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    description TEXT NOT NULL,
+    notes TEXT,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'in_progress', 'completed')),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_actions_project_id ON project_actions(project_id);
+CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
+
+-- Add optional project_id pointer to active_thoughts
+ALTER TABLE active_thoughts ADD COLUMN project_id INTEGER REFERENCES projects(id);
+"""
+
 
 class Database:
     """SQLite database manager with WAL mode and thread-safe connections."""
@@ -1053,6 +1114,10 @@ class Database:
             if from_version < 22:
                 log_config("Applying migration", "v21 → v22 (bridge memory tracking for metacognition)", indent=1)
                 conn.executescript(MIGRATION_V22_SQL)
+
+            if from_version < 23:
+                log_config("Applying migration", "v22 → v23 (add projects, project_actions tables + active_thoughts.project_id)", indent=1)
+                conn.executescript(MIGRATION_V23_SQL)
 
             # Record new version
             conn.execute(

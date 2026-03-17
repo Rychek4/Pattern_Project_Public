@@ -71,6 +71,10 @@ Rules:
                         "elaboration": {
                             "type": "string",
                             "description": "Detailed thinking (~50-75 words)"
+                        },
+                        "project_id": {
+                            "type": "integer",
+                            "description": "Optional: ID of a related project this thought connects to"
                         }
                     },
                     "required": ["rank", "slug", "topic", "elaboration"]
