@@ -673,7 +673,13 @@ class ChatEngine:
                 )
 
                 history = self._conversation_mgr.get_api_messages()
-                history.append({"role": "user", "content": pulse_prompt})
+                # Use content-block format with cache_control so the full
+                # messages prefix (conversation history + pulse prompt) is
+                # cached across continuation rounds within this pulse.
+                history.append({"role": "user", "content": [
+                    {"type": "text", "text": pulse_prompt,
+                     "cache_control": {"type": "ephemeral"}}
+                ]})
 
                 tools = get_tool_definitions(is_pulse=True, pulse_type=pulse_type)
 
@@ -891,7 +897,11 @@ class ChatEngine:
         system_prompt = assembled.full_system_prompt
 
         presence_history = self._conversation_mgr.get_api_messages()
-        presence_history.append({"role": "user", "content": presence_prompt})
+        # Cache the messages prefix for reflective phase 3 continuation rounds.
+        presence_history.append({"role": "user", "content": [
+            {"type": "text", "text": presence_prompt,
+             "cache_control": {"type": "ephemeral"}}
+        ]})
 
         # Full pulse tool set for presence (growth threads, active thoughts, etc.)
         # Metacognition tools are handled in Phases 1-2 with manual tool lists.
