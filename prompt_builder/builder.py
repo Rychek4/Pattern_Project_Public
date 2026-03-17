@@ -25,17 +25,24 @@ class AssembledPrompt:
 
         parts = [self.system_prompt] if self.system_prompt else []
 
-        # Add context blocks sorted by priority, inserting a cache breakpoint
-        # between stable and dynamic content when prompt caching is enabled.
+        # Add context blocks sorted by priority, inserting cache breakpoints
+        # between stable, semi-stable, and dynamic content when prompt caching
+        # is enabled.  Two breakpoints → up to 3 segments cached independently.
         sorted_blocks = sorted(self.context_blocks, key=lambda b: b.priority)
-        breakpoint_inserted = False
+        stable_bp_inserted = False
+        semistable_bp_inserted = False
         for block in sorted_blocks:
             if block.content:
-                if (not breakpoint_inserted
-                        and config.PROMPT_CACHE_ENABLED
-                        and block.priority > config.PROMPT_CACHE_STABLE_PRIORITY):
-                    parts.append(config.PROMPT_CACHE_BREAKPOINT)
-                    breakpoint_inserted = True
+                if config.PROMPT_CACHE_ENABLED:
+                    if (not stable_bp_inserted
+                            and block.priority > config.PROMPT_CACHE_STABLE_PRIORITY):
+                        parts.append(config.PROMPT_CACHE_BREAKPOINT)
+                        stable_bp_inserted = True
+                    elif (not semistable_bp_inserted
+                            and stable_bp_inserted
+                            and block.priority > config.PROMPT_CACHE_SEMISTABLE_PRIORITY):
+                        parts.append(config.PROMPT_CACHE_BREAKPOINT)
+                        semistable_bp_inserted = True
                 parts.append(block.content)
 
         return "\n\n".join(parts)

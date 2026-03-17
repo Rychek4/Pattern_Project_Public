@@ -92,6 +92,7 @@ API_DEFERRED_RETRY_DELAY = 1200               # 20 minutes in seconds
 PROMPT_CACHE_ENABLED = os.getenv("PROMPT_CACHE_ENABLED", "true").lower() == "true"
 PROMPT_CACHE_BREAKPOINT = "<!-- cache-breakpoint -->"  # Delimiter between stable/dynamic content
 PROMPT_CACHE_STABLE_PRIORITY = 10  # Cache blocks with priority <= this (base prompt + core memory)
+PROMPT_CACHE_SEMISTABLE_PRIORITY = 28  # Second cache tier (after intentions, before temporal context)
 
 # =============================================================================
 # DATABASE CONFIGURATION
