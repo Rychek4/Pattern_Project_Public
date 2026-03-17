@@ -238,18 +238,11 @@ def create_default_builder() -> PromptBuilder:
         CoreMemorySource(),     # Core identity (priority 10)
         ActiveThoughtsSource(), # AI's working memory (priority 18)
         GrowthThreadsSource(),  # AI's developmental aspirations (priority 20)
-        # ProjectSource registered below (priority 21) - between growth threads and intentions
         IntentionSource(),      # AI's forward-looking memory (priority 22)
         SystemPulseSource(),
         TemporalSource(),
         SemanticMemorySource(),
     ]
-
-    # Projects source (if enabled) - active project awareness
-    if getattr(config, 'PROJECTS_ENABLED', True):
-        from prompt_builder.sources.project_source import ProjectSource
-        sources.append(ProjectSource())
-        log_info("ProjectSource enabled", prefix="📋")
 
     # Tool stance source (if enabled) - proactive tool usage guidance
     if getattr(config, 'TOOL_STANCE_ENABLED', True):
