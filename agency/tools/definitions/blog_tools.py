@@ -139,6 +139,26 @@ Use the slug from results to edit or unpublish a specific post.""",
     }
 }
 
+GET_BLOG_POST_TOOL: Dict[str, Any] = {
+    "name": "get_blog_post",
+    "description": """Retrieve a blog post's full content and metadata by slug.
+
+Use this to recall a draft for revision, or to review a published post's content.
+Returns the title, author, date, status, tags, summary, and the full Markdown body.
+
+Use list_blog_posts to find the slug of the post you want to retrieve.""",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "slug": {
+                "type": "string",
+                "description": "The post slug (from list_blog_posts)"
+            }
+        },
+        "required": ["slug"]
+    }
+}
+
 UNPUBLISH_BLOG_POST_TOOL: Dict[str, Any] = {
     "name": "unpublish_blog_post",
     "description": """Revert a published post back to draft status (removes it from the public site).

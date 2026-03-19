@@ -112,6 +112,7 @@ from agency.tools.definitions.blog_tools import (
     PUBLISH_BLOG_POST_TOOL,
     SAVE_BLOG_DRAFT_TOOL,
     EDIT_BLOG_POST_TOOL,
+    GET_BLOG_POST_TOOL,
     LIST_BLOG_POSTS_TOOL,
     UNPUBLISH_BLOG_POST_TOOL,
 )
@@ -237,6 +238,7 @@ def get_tool_definitions(is_pulse: bool = False, pulse_type: str = None) -> List
         tools.append(PUBLISH_BLOG_POST_TOOL)
         tools.append(SAVE_BLOG_DRAFT_TOOL)
         tools.append(EDIT_BLOG_POST_TOOL)
+        tools.append(GET_BLOG_POST_TOOL)
         tools.append(LIST_BLOG_POSTS_TOOL)
         tools.append(UNPUBLISH_BLOG_POST_TOOL)
 
