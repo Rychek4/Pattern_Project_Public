@@ -112,6 +112,71 @@ class SaveBlogDraftHandler(CommandHandler):
         return f"Draft saved: \"{result.query}\" (slug: {d['slug']})"
 
 
+class GetBlogPostHandler(CommandHandler):
+    """Retrieve a blog post's full content and metadata."""
+
+    def execute(self, query: str, context: dict) -> CommandResult:
+        from blog.blog_manager import get_post
+
+        params = context.get("blog_params", {})
+        slug = params.get("slug", "").strip()
+
+        if not slug:
+            return CommandResult(
+                command_name=self.command_name, query=query,
+                data=None, needs_continuation=True,
+                error=ToolError(ToolErrorType.FORMAT_ERROR, "Slug is required", None, None),
+            )
+
+        post = get_post(slug)
+
+        if post is None:
+            return CommandResult(
+                command_name=self.command_name, query=slug,
+                data=None, needs_continuation=True,
+                error=ToolError(ToolErrorType.SYSTEM_ERROR, f"Post not found: {slug}", None, None),
+            )
+
+        return CommandResult(
+            command_name=self.command_name, query=slug,
+            data={
+                "slug": post["slug"],
+                "title": post["title"],
+                "author": post.get("author", "Isaac"),
+                "date": post["date"].strftime("%Y-%m-%d"),
+                "status": post["status"],
+                "tags": post.get("tags", []),
+                "summary": post.get("summary", ""),
+                "in_response_to": post.get("in_response_to", ""),
+                "content": post["content"],
+            },
+            needs_continuation=True,
+            display_text=f"Retrieved blog post: {post['title']}",
+        )
+
+    def format_result(self, result: CommandResult) -> str:
+        if result.error:
+            return result.get_error_message()
+        d = result.data
+        tags_str = ", ".join(d["tags"]) if d["tags"] else "none"
+        status = d["status"]
+        lines = [
+            f"Title: {d['title']}",
+            f"Slug: {d['slug']}",
+            f"Author: {d['author']}",
+            f"Date: {d['date']}",
+            f"Status: {status}",
+            f"Tags: {tags_str}",
+        ]
+        if d["summary"]:
+            lines.append(f"Summary: {d['summary']}")
+        if d["in_response_to"]:
+            lines.append(f"In response to: {d['in_response_to']}")
+        lines.append("")
+        lines.append(d["content"])
+        return "\n".join(lines)
+
+
 class EditBlogPostHandler(CommandHandler):
     """Edit an existing blog post."""
 

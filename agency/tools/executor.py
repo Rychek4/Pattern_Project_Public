@@ -96,6 +96,7 @@ class ToolExecutor:
             "publish_blog_post": self._exec_publish_blog_post,
             "save_blog_draft": self._exec_save_blog_draft,
             "edit_blog_post": self._exec_edit_blog_post,
+            "get_blog_post": self._exec_get_blog_post,
             "list_blog_posts": self._exec_list_blog_posts,
             "unpublish_blog_post": self._exec_unpublish_blog_post,
             # Projects
@@ -1192,6 +1193,30 @@ class ToolExecutor:
 
         return ToolResult(
             tool_use_id=id, tool_name="edit_blog_post",
+            content=handler.format_result(result),
+        )
+
+    def _exec_get_blog_post(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Retrieve a blog post's full content and metadata."""
+        from agency.commands.handlers.blog_handler import GetBlogPostHandler
+
+        handler = GetBlogPostHandler()
+        ctx["blog_params"] = {
+            "slug": input.get("slug", ""),
+        }
+
+        result = handler.execute(input.get("slug", ""), ctx)
+
+        if result.error:
+            return ToolResult(
+                tool_use_id=id, tool_name="get_blog_post",
+                content=result.get_error_message(), is_error=True,
+            )
+
+        return ToolResult(
+            tool_use_id=id, tool_name="get_blog_post",
             content=handler.format_result(result),
         )
 
