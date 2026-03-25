@@ -66,7 +66,8 @@ CLIRunner(
     model: str,               # e.g. "sonnet" — the model Claude Code uses internally
     max_turns: int,           # Cap on agentic tool-use loops (e.g. 25)
     timeout_seconds: int,     # Hard timeout on subprocess (e.g. 600)
-    allowed_tools: str        # --allowedTools value
+    allowed_tools: str,       # --allowedTools value
+    api_key: str              # SELF_UPDATE_API_KEY from config.py
 )
 ```
 
@@ -168,6 +169,10 @@ PROTECTED_PATHS = [
     "config.py",
     ".env",
 
+    # Dependencies — supply-chain risk; Isaac can note needed deps in
+    # commit messages for Brian to add manually after review
+    "requirements.txt",
+
     # Deployment infrastructure
     "deploy/",
 
@@ -182,6 +187,9 @@ PROTECTED_PATHS = [
 
     # Tool definitions init — could inject tools into the prompt
     "agency/tools/definitions/__init__.py",
+
+    # Self-update tool schema — cannot weaken its own constraints
+    "agency/tools/definitions/self_update_tools.py",
 
     # Protected paths config itself — cannot edit the rules
     "agency/self_update/protected_paths.py",
@@ -337,6 +345,7 @@ def execute(self, query: str, context: dict) -> CommandResult:
         max_turns=config.SELF_UPDATE_MAX_TURNS,
         timeout_seconds=config.SELF_UPDATE_TIMEOUT,
         allowed_tools=config.SELF_UPDATE_ALLOWED_TOOLS,
+        api_key=config.SELF_UPDATE_API_KEY,
     )
     cli_result = runner.execute(task=query, branch_name=branch_name)
 
@@ -432,7 +441,7 @@ SELF_UPDATE_TIMEOUT = int(os.getenv("SELF_UPDATE_TIMEOUT", "600"))
 # Restricts what the CLI can do. Notably excludes system commands.
 SELF_UPDATE_ALLOWED_TOOLS = os.getenv(
     "SELF_UPDATE_ALLOWED_TOOLS",
-    "Edit,Write,Read,Glob,Grep,Bash(git diff:git status:git add:git commit:python -m pytest)"
+    "Edit,Write,Read,Glob,Grep,Bash(git diff:git status:git add:git commit:git log:python -m pytest)"
 )
 
 # API key for Claude Code CLI (defaults to Isaac's own key).
@@ -672,7 +681,8 @@ uses `subprocess.run` because Claude Code CLI is a finite process. Always:
 
 7. **Bash restrictions in CLI**: The `--allowedTools` flag limits Bash to
    specific commands: `git diff`, `git status`, `git add`, `git commit`,
-   `python -m pytest`. No `rm`, `systemctl`, `curl`, `pip install`, etc.
+   `git log`, `python -m pytest`. No `rm`, `systemctl`, `curl`, `pip install`,
+   etc.
 
 ---
 
@@ -779,87 +789,90 @@ uses `subprocess.run` because Claude Code CLI is a finite process. Always:
 
 ---
 
-## Outstanding Questions
+## Resolved Questions
 
-These must be resolved before or during implementation:
+All outstanding questions have been reviewed and resolved (2026-03-15).
 
-### 1. API Key Flow into CLIRunner
+### 1. API Key Flow into CLIRunner — RESOLVED
 
-The `CLIRunner` constructor does not include an `api_key` parameter, but the
-`execute()` method's subprocess call passes it via environment. How does
-`api_key` get into scope?
+**Resolution**: `api_key: str` added to the `CLIRunner` constructor signature
+(see updated class definition in section 2 above). The handler passes
+`config.SELF_UPDATE_API_KEY`. The `execute()` method references `self.api_key`
+in the subprocess env dict. The config value defaults to `ANTHROPIC_API_KEY`
+per the config block.
 
-**Recommended resolution**: Add `api_key: str` to the constructor signature.
-In `self_update_handler.py`, pass `config.SELF_UPDATE_API_KEY` (which defaults
-to `ANTHROPIC_API_KEY` per the config block at line 440 of the plan).
+### 2. Exact `--allowedTools` Bash Subcommand Syntax — REQUIRES TESTING
 
-### 2. Exact `--allowedTools` Bash Subcommand Syntax
+**Resolution**: The syntax
+`Bash(git diff:git status:git add:git commit:python -m pytest)` is believed
+correct based on Claude Code CLI documentation (colon-delimited prefix
+matching). `git log` should also be added to the allowed list so the CLI can
+inspect commit history for context.
 
-The plan assumes `Bash(git diff:git status:git add:git commit:python -m pytest)`
-is valid syntax. This needs verification:
-- Does Claude Code CLI parse this as prefix matching or exact matching?
-- Are colons the correct delimiter?
-- Does `python -m pytest` (with spaces) work as a single subcommand entry?
+**Updated value**:
+```
+Edit,Write,Read,Glob,Grep,Bash(git diff:git status:git add:git commit:git log:python -m pytest)
+```
 
-**Action**: Run `claude -p "test" --allowedTools "Bash(echo hello)" --output-format json`
-on the VPS after install to verify the syntax is accepted.
+**REQUIRES MANUAL TESTING**: Run the verification commands in "VPS
+Prerequisites" Step 6 after installing Claude Code CLI. This is the one item
+that cannot be confirmed without the CLI binary present.
 
-### 3. `requirements.txt` Protection
+### 3. `requirements.txt` Protection — RESOLVED
 
-`requirements.txt` is NOT on the protected paths list. A proposed change that
-adds a malicious or incompatible dependency could break the environment on next
-deploy (e.g., `pip install` during deploy script). Should it be protected?
+**Resolution**: Added to `PROTECTED_PATHS` (see updated list in section 3
+above). Supply-chain risk outweighs convenience. Isaac can note needed
+dependencies in commit messages or code comments; Brian adds them manually
+after review.
 
-**Trade-off**: Protecting it blocks Isaac from adding legitimate dependencies
-for new features. Not protecting it allows supply-chain risk. **Recommended
-resolution**: Add `requirements.txt` to `PROTECTED_PATHS` in this first
-iteration. Isaac can describe needed dependencies in the branch's commit
-message, and Brian adds them manually after review.
+### 4. Tool Definition File Self-Protection — RESOLVED
 
-### 4. Tool Definition File Self-Protection
+**Resolution**: `agency/tools/definitions/self_update_tools.py` added to
+`PROTECTED_PATHS` (see updated list in section 3 above). Prevents Isaac from
+weakening LLM-level constraints in its own tool description.
 
-`agency/tools/definitions/self_update_tools.py` is NOT on the protected paths
-list. Only `agency/tools/definitions/__init__.py` and `agency/self_update/`
-are protected. Isaac could modify the tool schema to remove constraint
-documentation from its own prompt (e.g., strip the "Protected files..." text
-from the tool description), which would weaken the LLM-level guardrail.
+### 5. Guardian Restart Branch Behavior — RESOLVED (accepted risk)
 
-**Recommended resolution**: Add
-`agency/tools/definitions/self_update_tools.py` to `PROTECTED_PATHS`.
+**Resolution**: Confirmed that Guardian does NOT perform an explicit
+`git checkout` on restart. Guardian (`agency/guardian_check.py`) spawns Pattern
+via `subprocess.Popen(["python", str(executable_path)])` — it simply re-runs
+`main.py`. The systemd service (`deploy/pattern.service`) also has no branch
+checkout logic.
 
-### 5. Guardian Restart Branch Behavior
+This means if the Pattern process is killed mid-checkout (SIGKILL during the
+~millisecond `git checkout` window), Pattern could restart on an `isaac/*`
+branch. The try/finally in CLIRunner makes this window extremely narrow.
 
-The plan states "Guardian's restart will start Pattern fresh (which checks out
-the configured branch)" as the worst-case recovery for a killed process
-mid-checkout. What branch does Guardian configure?
+**Accepted for v1**: The risk is low-probability (requires SIGKILL at the
+exact wrong millisecond). Manual recovery is `git checkout main && systemctl
+restart pattern`. A Guardian-side startup branch check is documented as a
+future enhancement (see `GUARDIAN_SELF_UPDATE_SPEC.md`).
 
-**Action**: Check `guardian.toml` or Guardian's restart logic to confirm it
-does an explicit `git checkout main` (or equivalent) on restart, rather than
-inheriting whatever branch the repo happens to be on.
+### 6. Invocation Rate Limiting — RESOLVED (not implementing)
 
-### 6. Invocation Rate Limiting
+**Resolution**: Dropped. The action pulse interval is already configured at
+6+ hours as a matter of token spend. Adding a separate cooldown mechanism is
+redundant infrastructure. If pulse frequency changes in the future, rate
+limiting can be revisited then.
 
-Nothing prevents Isaac from calling `propose_code_change` on every action
-pulse. If the action pulse fires every ~30 minutes, Isaac could invoke 48
-CLI sessions per day.
+### 7. `pulse_type` Parameter Reliability — RESOLVED (confirmed safe)
 
-**Recommended resolution**: Add a cooldown check in the handler — e.g., read
-a timestamp file (`DATA_DIR / "last_self_update.json"`) and reject invocations
-within 4 hours of the last attempt. This is simple, file-based, and matches
-existing codebase patterns (see heartbeat files).
+**Resolution**: Traced all 7 call sites of `get_tool_definitions()`:
 
-### 7. `pulse_type` Parameter Reliability
+| Call site | `pulse_type` passed? | Value |
+|-----------|---------------------|-------|
+| `chat_engine.py:678` (action pulse) | Yes | Runtime variable |
+| `chat_engine.py:898` (reflective pulse) | Yes | `"reflective"` |
+| `chat_engine.py:441` (conversation) | No | N/A (not pulse) |
+| `chat_engine.py:993` (conversation) | No | N/A (not pulse) |
+| `chat_engine.py:1121` (conversation) | No | N/A (not pulse) |
+| `chat_engine.py:1282` (conversation) | No | N/A (not pulse) |
+| `response_helper.py:322` (fallback) | No | N/A (not pulse) |
 
-The plan gates the tool on `pulse_type == "action"` in
-`definitions/__init__.py`. The `pulse_type` parameter exists in
-`get_tool_definitions()` (line 127: `pulse_type: str = None`) but is
-documented as "currently informational" (lines 133–134). This would be its
-first functional use.
-
-**Action**: Trace all call sites of `get_tool_definitions()` to confirm
-`pulse_type` is passed correctly in action pulse codepaths. If any call site
-omits it (passes `None`), the tool will silently not appear. This is safe
-(fails closed) but could cause confusion if Isaac never sees the tool.
+The gating logic `if pulse_type == "action"` fails closed — if `pulse_type`
+is `None` or omitted, the tool simply doesn't appear. The action pulse
+codepath at line 678 correctly passes the runtime `pulse_type` variable.
+No changes needed.
 
 ---
 
