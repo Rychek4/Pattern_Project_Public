@@ -1,16 +1,90 @@
-# Self-Update Pipeline: Claude Code CLI Integration
+# Self-Authoring Pipeline: Claude Code CLI Integration
 
 ## Overview
 
-This plan adds the ability for Isaac to propose changes to his own codebase by
-invoking the Claude Code CLI as a subprocess. Changes are created on isolated
-git branches and require human approval before merging.
+This plan adds the ability for Isaac to propose changes to his own codebase
+through a structured self-authoring workflow. The pipeline has three phases:
+impulse examination, design negotiation (multi-turn), and adversarial
+evaluation. Changes are created on isolated git branches and require human
+approval before merging.
 
-**Scope**: New tool (`propose_code_change`), new module (`agency/self_update/`),
-config additions, and registration in the existing tool/executor system.
+**Design Philosophy**: This is the only tool in Isaac's architecture where the
+expected outcome includes not producing output. Every other tool succeeds by
+generating something. This tool sometimes succeeds by generating nothing — by
+recognizing that the work it just did shouldn't exist.
+
+**Core Principle — Frame Before Fix**: The tool exists to prevent Isaac from
+becoming an automated patcher. Without structured judgment, an agent with
+code-editing capability will default to the training distribution: here's a
+system, here's a problem, write code that handles the problem. The most powerful
+code change is often deletion — removal of the thing that made the code
+necessary in the first place.
+
+**Scope**: New tool (`self_author`), new module (`agency/self_update/`), new
+database table (`self_authoring_sessions`), config additions, and registration
+in the existing tool/executor system.
 
 **What this does NOT do**: Auto-merge, auto-deploy, or modify Guardian. The
 human gate is non-negotiable in this first iteration.
+
+---
+
+## The Two Valid Outcomes (Plus a Third)
+
+Every invocation of this tool produces one of three outcomes, and all are
+successes:
+
+1. **"This accomplishes the task I meant to solve for."** — The frame was
+   correct. Implementation follows cleanly. A branch is created for review.
+
+2. **"This changes the frame such that the task no longer matters, is not
+   achievable, or we need to solve for a different task entirely."** — The frame
+   was wrong. Discovery of that fact before writing code is the most valuable
+   outcome possible.
+
+3. **"The problem space is too ambiguous for autonomous resolution."** — The
+   system has attempted multiple frames and none have converged. The task
+   requires context, judgment, or domain knowledge that the system cannot
+   acquire through further autonomous exploration. This is an escalation to the
+   human operator — a boundary recognition, not a failure.
+
+**"Think Outside the Room"**: "Think outside the box" finds a better solution
+within the same problem space. "Think outside the room" questions whether you're
+in the right problem space at all. This tool's architecture is designed to
+create structural opportunities for "room-level" reframes at every phase.
+
+---
+
+## Architecture Overview
+
+The tool has three phases. Phase 2 contains a multi-turn sub-workflow. All
+phases use Opus.
+
+```
+Phase 1: Examine the Impulse
+    ↓
+Phase 2a: Design Negotiation (Isaac ↔ Claude Code, multi-turn)
+    ↓
+    Fork A: Converged plan → Phase 2b
+    Fork B: Frame invalidated → Return to Phase 1 with new information
+    ↓
+Phase 2b: Complexity Gate
+    ↓
+    Pass: Complexity proportional to prediction → Phase 2c
+    Fail: Complexity disproportionate → Return to Phase 1
+    ↓
+Phase 2c: Implementation
+    ↓
+    Clean: Proceed to Phase 3
+    Messy: Return to Phase 2a (not "fix it" — restart the design conversation)
+    ↓
+Phase 3: Adversarial Evaluation
+    ↓
+    Approve: Commit
+    Veto: Return to Phase 1 with the failure as new input
+
+Hard cap: 3 full cycles. After 3 cycles without convergence → Outcome 3.
+```
 
 ---
 
@@ -24,10 +98,12 @@ auto-restart). Claude Code CLI is a short-lived, single-shot process — it runs
 produces output, and exits. `subprocess.run()` with a timeout is the right tool.
 
 Isaac's ChatEngine processes messages synchronously on a single thread. During a
-code change, Isaac is blocked (up to 10 minutes). This is acceptable because:
-- Code changes are triggered during action pulses, not user conversations
+self-authoring session, Isaac is blocked. This is acceptable because:
+- Self-authoring is triggered during action pulses, not user conversations
 - The pulse system already pauses timers during processing
 - A blocked pulse simply delays the next one
+- Token limits will be hit before any practical time concern arises
+- Blocking windows under 6 hours are acceptable
 
 **Why post-hoc diff checking instead of pre-constraining Claude Code?**
 
@@ -43,6 +119,375 @@ agency window — browser, Telegram, blog, Reddit. Code changes fit this pattern
 Reflective pulses are for introspection and metacognition, not action. Regular
 conversation should not trigger code changes because the human is present and
 can make changes themselves.
+
+**Why multi-turn design negotiation (Phase 2a)?**
+
+A single-shot brief would never reveal that the frame is wrong. The
+back-and-forth is the mechanism that allows the frame to be challenged before
+code exists. Isaac has the *why*. Claude Code has the *what's actually in the
+repo*. The 2a conversation is where those two perspectives merge — or where
+their incompatibility reveals a frame error.
+
+**Why `--continue` for multi-turn CLI sessions?**
+
+Claude Code CLI supports `--continue` (`-c`) to resume the most recent session
+in the working directory, preserving full message history and codebase context.
+This means each round of 2a negotiation retains all prior file reads, greps,
+and research from previous rounds — no redundant codebase exploration.
+
+---
+
+## Database Schema
+
+### New Table: `self_authoring_sessions`
+
+Stores the full iteration history for each self-authoring invocation. One row
+per phase execution within a session, providing a complete audit trail and raw
+material for reflective pulse pattern detection.
+
+```sql
+CREATE TABLE IF NOT EXISTS self_authoring_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    -- Session identity
+    session_key TEXT NOT NULL,          -- Unique key per invocation (e.g. "sa-{timestamp}")
+    cycle_number INTEGER NOT NULL,      -- Which iteration cycle (1, 2, or 3)
+    phase TEXT NOT NULL CHECK (phase IN (
+        'phase_1', 'phase_2a', 'phase_2b', 'phase_2c', 'phase_3'
+    )),
+
+    -- Phase 1 artifacts
+    original_impulse TEXT,              -- What Isaac thought the problem was
+    rationale TEXT,                      -- Full Phase 1 reasoning
+    complexity_prediction JSON,         -- {"files": N, "lines_net": N, "conditionals": N, "dependencies": N, "rating": "low|medium|high"}
+
+    -- Phase 2a artifacts
+    negotiation_rounds INTEGER,         -- How many rounds of back-and-forth
+    negotiation_summary TEXT,           -- Compressed summary of the 2a conversation
+    fork_outcome TEXT CHECK (fork_outcome IN ('converged', 'invalidated')),
+    plan_description TEXT,              -- The agreed plan (if converged)
+
+    -- Phase 2b artifacts
+    complexity_actual JSON,             -- Same shape as complexity_prediction
+    gate_passed BOOLEAN,
+
+    -- Phase 2c artifacts
+    branch_name TEXT,                   -- isaac/{suffix}
+    implementation_clean BOOLEAN,       -- Did 2c go smoothly?
+
+    -- Phase 3 artifacts
+    argument_against TEXT,              -- Mandatory rejection case
+    argument_for TEXT,                  -- Acceptance case
+    complexity_comparison JSON,         -- {"predicted": {...}, "actual": {...}, "gap_assessment": "..."}
+    phase_3_decision TEXT CHECK (phase_3_decision IN ('approve', 'veto')),
+
+    -- Iteration tracking
+    delta_from_previous TEXT,           -- What structurally changed since last cycle
+    return_reason TEXT,                 -- Why we returned to Phase 1 (if applicable)
+
+    -- Final outcome (set on the last row of the session)
+    final_outcome TEXT CHECK (final_outcome IN (
+        'committed',                    -- Outcome 1: branch ready for review
+        'frame_dissolved',              -- Outcome 2: task no longer matters
+        'escalated'                     -- Outcome 3: needs human help
+    )),
+
+    -- Metadata
+    total_input_tokens INTEGER DEFAULT 0,
+    total_output_tokens INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_self_authoring_session_key
+    ON self_authoring_sessions(session_key);
+CREATE INDEX IF NOT EXISTS idx_self_authoring_outcome
+    ON self_authoring_sessions(final_outcome);
+CREATE INDEX IF NOT EXISTS idx_self_authoring_created
+    ON self_authoring_sessions(created_at);
+```
+
+**Why one table, not multiple?** The phases are sequential within a session and
+share context. A single table with nullable columns per phase keeps queries
+simple — "show me all sessions where Phase 3 vetoed" is one WHERE clause, not a
+JOIN across three tables. The tradeoff is nullable columns, but the phase CHECK
+constraint makes it clear which columns are relevant per row.
+
+**Why store negotiation summary, not full transcripts?** The full 2a transcript
+lives in Claude Code's session history (accessible via `--resume`). Storing a
+compressed summary in the database is sufficient for reflective pulse pattern
+detection ("Isaac has written three rationales about workarounds for the same
+subsystem") without bloating the table with multi-turn conversation logs.
+
+**Growth thread integration**: Over time, accumulated Phase 1 rationale
+artifacts allow the reflective pulse to detect patterns. A query like
+`SELECT rationale, return_reason FROM self_authoring_sessions WHERE
+final_outcome = 'frame_dissolved' ORDER BY created_at DESC LIMIT 10` surfaces
+recurring frame errors that point to systemic issues.
+
+---
+
+## Phase Specifications
+
+### Phase 1: Examine the Impulse
+
+**Model**: Opus (Isaac's own model, via Anthropic API)
+**Purpose**: Surface why Isaac thinks code needs to change, before any
+implementation begins.
+**Output**: A stored rationale artifact (written to `self_authoring_sessions`).
+
+**What Phase 1 Must Answer**:
+- What is the problem I'm actually solving?
+- What am I observing that triggered this?
+- Am I patching a symptom or addressing a cause?
+- Have I seen this kind of problem before, and if so, what happened?
+- Is the complexity of what I'm about to do proportional to the value it delivers?
+- If I'm adding a special case handler — does the edge case exist because
+  something upstream is framed wrong?
+
+**Complexity Prediction**: Phase 1 must produce a concrete prediction:
+- Estimated files touched
+- Estimated lines added/removed (net)
+- Estimated new conditionals or special cases
+- Estimated new dependencies
+- Overall complexity rating: Low / Medium / High
+
+If complexity is rated **High**, Phase 1 restarts immediately. High complexity
+is not "this will take longer." High complexity is "I'm probably in the wrong
+room." The frame needs rethinking before any downstream work begins.
+
+**On re-entry** (after a return from Phase 2 or 3): Phase 1 is not starting
+fresh — it carries the full record of what was attempted and why it failed.
+Before producing a new rationale, the system must reason about the **delta** —
+what specific new constraint, codebase reality, or structural understanding
+distinguishes this attempt from the previous one. The absence of a meaningful
+delta is itself a signal that iteration is not producing convergence.
+
+**Implementation**: A call to `AnthropicClient.chat()` with a structured system
+prompt. The prompt includes:
+- Isaac's original impulse (the task description)
+- If cycle > 1: all prior Phase 1 rationales, return reasons, and deltas
+- Instructions to produce the rationale and complexity prediction as structured
+  output
+
+The response is parsed and stored in `self_authoring_sessions`.
+
+---
+
+### Phase 2a: Design Negotiation
+
+**Model**: Opus (Isaac, via API) ↔ Claude Code (via CLI subprocess)
+**Purpose**: Converge on a shared understanding through iterative clarification.
+**Structure**: Multi-turn conversation, typically 3-5 rounds.
+
+**Conversation Shape**:
+
+Round 1:
+- Isaac: Proposes the change with context and intent from Phase 1.
+- Claude Code: Researches the codebase. Responds with grounded assessment of
+  feasibility and approach.
+
+Round 2:
+- Isaac: Identifies where Claude Code's interpretation diverged from intent.
+  Reframes or clarifies the goal.
+- Claude Code: Re-evaluates against the codebase with corrected understanding.
+  Proposes revised plan.
+
+Round 3:
+- Isaac: Refines the plan, adds constraints, adjusts scope based on what Claude
+  Code revealed about the codebase.
+- Claude Code: Produces final plan. Confirms readiness for implementation.
+
+Additional rounds as needed, but excessive rounds (4+) are themselves a
+complexity signal.
+
+**Multi-turn mechanism**:
+```
+Round 1: claude -p "{isaac_prompt}" --model opus --max-turns 25 \
+         --output-format json --allowedTools "{allowed_tools}"
+Round 2+: claude --continue -p "{isaac_next_message}" --output-format json
+```
+
+Each round:
+1. Claude Code runs as a subprocess and returns JSON output
+2. Isaac (via `AnthropicClient.chat()`) evaluates the response with full
+   conversation history
+3. Isaac decides: converged (Fork A), invalidated (Fork B), or continue
+
+**Fork A — Plan Convergence**: "This plan accomplishes the task I meant to solve
+for." → Proceed to Phase 2b (Complexity Gate).
+
+**Fork B — Frame Invalidation**: "This conversation has revealed that my Phase 1
+framing was incorrect. The task needs to be redefined." → Return to Phase 1,
+carrying everything 2a revealed about codebase reality.
+
+**What Makes Fork B Happen**: Claude Code's grounded assessment contradicts
+Isaac's assumptions:
+- The module Isaac wanted to modify doesn't work the way he thought
+- There's already a mechanism that handles this differently
+- A dependency Isaac wanted to remove is load-bearing in a way he didn't realize
+- The "edge case" Isaac wanted to handle is actually a symptom of a deeper
+  structural issue that Claude Code can see in the codebase
+
+Fork B is the more valuable outcome. It means the design negotiation did
+something that Phase 1's pure reasoning couldn't — it reality-tested the frame
+and found it wanting.
+
+---
+
+### Phase 2b: Complexity Gate
+
+**Model**: Opus (Isaac, via API)
+**Purpose**: Compare Claude Code's implementation plan against Phase 1's
+predicted complexity.
+
+**Assessment**: Opus evaluates the gap with full conversation context — the
+Phase 1 prediction, the 2a plan, and all prior rounds. This is LLM-judged, not
+threshold-based, because proportionality depends on the nature of the change.
+The prompt must be specific and high-quality, providing the full conversation
+history and asking Opus to reason about whether the plan's complexity is
+proportional to what was predicted.
+
+**Assessment Criteria**:
+- Does the plan touch more files than Phase 1 predicted?
+- Does the plan introduce more conditionals or special cases?
+- Does the plan require new dependencies Phase 1 didn't anticipate?
+- Is the estimated line count significantly higher than predicted?
+
+**Gate Outcomes**:
+- **Pass**: Complexity is proportional to prediction. Proceed to Phase 2c.
+- **Fail**: Complexity is disproportionate. Return to **Phase 1** — not 2a. If
+  the plan is complex, the problem framing is wrong. A new Phase 1 is needed,
+  not a new plan within the same frame.
+
+---
+
+### Phase 2c: Implementation
+
+**Model**: Claude Code (via CLI subprocess)
+**Purpose**: Execute the agreed plan from 2a.
+
+**Expected Behavior**: If 2a converged properly, implementation should be
+straightforward. The plan was negotiated, the codebase was researched, both
+sides agreed. Phase 2c is execution, not design.
+
+**Mechanism**: Claude Code runs with `--continue` to preserve the full 2a
+conversation context. The prompt instructs it to implement the agreed plan and
+commit the result.
+
+```
+claude --continue -p "Implement the plan we agreed on. Commit your changes." \
+    --output-format json
+```
+
+**Scope Creep Detection**: After implementation, compare the actual files
+changed (via `git diff --name-only`) against the file list from the 2a plan. If
+unexpected files were modified, that's a complexity signal — the 2a convergence
+was incomplete.
+
+**Failure Path**: If 2c goes sideways — messy implementation, unexpected
+complications, cascading changes — do not fix the code. Return to **Phase 2a**.
+Restart the design conversation with new information about why the plan didn't
+survive contact with the code. Not "fix it." Restart.
+
+---
+
+### Phase 3: Adversarial Evaluation
+
+**Model**: Opus (Isaac, via API)
+**Purpose**: Evaluate whether the implementation validates or contradicts the
+Phase 1 reasoning.
+**Key principle**: Phase 3 must argue against the implementation before it's
+allowed to argue for it.
+
+**Structure**:
+
+**Step 1 — Argue Against (Mandatory First)**: Generate the strongest case for
+why this change is wrong, unnecessary, or overcomplicated. List every reason to
+reject it. This must be generated *before* the acceptance case to prevent the
+model from building a justification narrative first.
+
+**Step 2 — Argue For**: Generate the case for why this change is correct and
+valuable.
+
+**Step 3 — Compare Predicted vs. Actual Complexity**:
+
+| Metric | Phase 1 Prediction | Actual |
+|--------|-------------------|--------|
+| Files touched | N | N |
+| Net lines (added - removed) | N | N |
+| New conditionals/special cases | N | N |
+| New dependencies | N | N |
+| Refinement rounds needed | N | N |
+
+The gap between predicted and actual is the primary decision signal.
+
+**Step 4 — Decide**:
+- **Approve**: The rejection argument is weak, the complexity gap is small, the
+  implementation matches the reasoning. Commit.
+- **Veto**: The rejection argument is strong, OR the complexity gap is large, OR
+  the implementation shape contradicts the Phase 1 rationale. Throw it all away.
+
+**On Veto**: A veto does not mean "try again with the same approach." A veto
+means the entire chain — rationale, design, implementation — was built on a
+frame that didn't hold. The failure feeds back into a new Phase 1, carrying:
+- The original rationale (what Isaac thought the problem was)
+- What the implementation revealed (what the problem actually was)
+- The complexity gap (how far off the prediction was)
+- The strongest argument from the rejection case
+
+**The Sunk Cost Problem**: Everything in the training distribution fights
+against Phase 3 doing its job. Structural countermeasures:
+1. Argue against first — rejection case before acceptance case
+2. Concrete metrics resist narrativizing — either a new conditional exists or
+   it doesn't
+3. Predicted vs. actual complexity is quantified — the discrepancy is a number,
+   not a feeling
+
+**Implementation**: A call to `AnthropicClient.chat()` with a structured prompt
+that includes the Phase 1 rationale, 2a plan summary, the actual `git diff`,
+and complexity metrics. The prompt enforces argue-against-first ordering.
+
+---
+
+## Iteration Awareness
+
+### The Loop Problem
+
+Every return path feeds back into Phase 1. Without structural awareness of its
+own iteration history, the system can cycle: propose a frame, discover it's
+wrong, propose a subtly different frame that fails for related reasons. Each
+individual iteration looks productive — new rationale, new negotiation, new
+discovery. But the sequence may be treading water.
+
+### Delta as a Reasoning Requirement
+
+Return paths are **stateful, not stateless**. When the system re-enters Phase 1
+after a failure, it carries the full record from the `self_authoring_sessions`
+table. Phase 1 must reason about the delta — what specific new constraint,
+codebase reality, or structural understanding distinguishes this attempt from
+the previous one.
+
+The absence of a meaningful delta is itself a signal. If the new rationale is a
+rephrasing rather than a reframing, iteration is not producing convergence.
+
+### Hard Cap: 3 Full Cycles
+
+After 3 complete cycles (Phase 1 → 2a → 2b → 2c → 3) without convergence, the
+system halts and produces **Outcome 3**: escalation to the human operator. This
+is not a failure — it is a boundary recognition. The system has identified that
+it is operating at the edge of its competence and that continued iteration will
+consume resources without producing convergence.
+
+### What This Means for Autonomous Operation
+
+- Outcome 1 demonstrates the ability to solve problems within a correct frame
+- Outcome 2 demonstrates the ability to recognize and escape incorrect frames
+- Outcome 3 demonstrates the ability to recognize the limits of its own
+  frame-finding capacity
+
+An agent capable of all three is qualitatively different from one capable of
+only the first two. The willingness to halt is a competence, not an admission
+of incompetence.
 
 ---
 
@@ -63,7 +508,7 @@ Empty init file. Standard Python package marker.
 ```
 CLIRunner(
     repo_path: Path,          # PROJECT_ROOT from config.py
-    model: str,               # e.g. "sonnet" — the model Claude Code uses internally
+    model: str,               # e.g. "opus" — the model Claude Code uses internally
     max_turns: int,           # Cap on agentic tool-use loops (e.g. 25)
     timeout_seconds: int,     # Hard timeout on subprocess (e.g. 600)
     allowed_tools: str,       # --allowedTools value
@@ -101,6 +546,29 @@ Steps:
    - IMPORTANT: Must always return to the original branch, even on failure
    - Use try/finally to guarantee this
 6. Return `CLIRunResult(stdout, stderr, exit_code, branch_name, original_branch)`
+
+**Method**: `continue_session(message: str) -> CLIRunResult`
+
+For Phase 2a multi-turn and Phase 2c implementation. Resumes the most recent
+Claude Code session in the working directory:
+```
+subprocess.run(
+    [
+        "claude",
+        "--continue",
+        "-p", message,
+        "--output-format", "json",
+    ],
+    cwd=str(repo_path),
+    capture_output=True,
+    text=True,
+    timeout=timeout_seconds,
+    env={**os.environ, "ANTHROPIC_API_KEY": api_key}
+)
+```
+
+Note: `--continue` does not need `--model`, `--max-turns`, or `--allowedTools`
+— these carry over from the initial session.
 
 **Dataclass**: `CLIRunResult`
 ```python
@@ -144,8 +612,6 @@ status = subprocess.run(
 if status:
     return error("Working tree has uncommitted changes, cannot proceed")
 ```
-This prevents Claude Code CLI from accidentally committing Isaac's runtime
-artifacts or uncommitted work.
 
 #### 3. `agency/self_update/protected_paths.py`
 
@@ -237,50 +703,192 @@ class ValidationResult:
     skipped: bool     # True if no tests found (still counts as passed)
 ```
 
-**Note**: If no tests exist yet (pytest returns exit code 5 = "no tests collected"),
-treat this as `passed=True, skipped=True`. The project currently has no test
-suite, so this will be the initial state. The validator is forward-looking
-infrastructure.
+**Note**: If no tests exist yet (pytest returns exit code 5 = "no tests
+collected"), treat this as `passed=True, skipped=True`. The project currently
+has no test suite, so this will be the initial state.
 
-#### 5. `agency/tools/definitions/self_update_tools.py`
+#### 5. `agency/self_update/orchestrator.py`
+
+**Purpose**: The core orchestration engine that manages the three-phase workflow
+with iteration tracking. This is the heart of the self-authoring system.
+
+**Class**: `SelfAuthoringOrchestrator`
+
+```python
+class SelfAuthoringOrchestrator:
+    def __init__(self, db, anthropic_client, cli_runner):
+        self.db = db
+        self.client = anthropic_client  # For Phase 1, 2a (Isaac side), 2b, 3
+        self.runner = cli_runner        # For Phase 2a (Claude Code side), 2c
+        self.max_cycles = 3
+```
+
+**Method**: `run(impulse: str, branch_suffix: str) -> SelfAuthoringResult`
+
+Top-level orchestration loop:
+```python
+def run(self, impulse: str, branch_suffix: str) -> SelfAuthoringResult:
+    session_key = f"sa-{int(time.time())}"
+    iteration_history = []
+
+    for cycle in range(1, self.max_cycles + 1):
+        # Phase 1: Examine the Impulse
+        rationale = self._phase_1(impulse, iteration_history, session_key, cycle)
+
+        if rationale.complexity_rating == "high":
+            iteration_history.append(rationale)
+            continue  # Restart Phase 1 with new framing
+
+        # Phase 2a: Design Negotiation
+        negotiation = self._phase_2a(rationale, iteration_history, session_key, cycle)
+
+        if negotiation.fork == "invalidated":
+            iteration_history.append(negotiation)
+            continue  # Return to Phase 1
+
+        # Phase 2b: Complexity Gate
+        gate = self._phase_2b(rationale, negotiation, iteration_history, session_key, cycle)
+
+        if not gate.passed:
+            iteration_history.append(gate)
+            continue  # Return to Phase 1
+
+        # Phase 2c: Implementation
+        implementation = self._phase_2c(negotiation, branch_suffix, session_key, cycle)
+
+        if not implementation.clean:
+            # Return to 2a, not Phase 1 — restart the design conversation
+            # But for the outer loop, this means continuing to next cycle
+            iteration_history.append(implementation)
+            continue
+
+        # Phase 3: Adversarial Evaluation
+        evaluation = self._phase_3(
+            rationale, negotiation, implementation, iteration_history,
+            session_key, cycle
+        )
+
+        if evaluation.decision == "approve":
+            self._record_outcome(session_key, "committed")
+            return SelfAuthoringResult(
+                outcome="committed",
+                branch=implementation.branch_name,
+                rationale=rationale,
+                evaluation=evaluation
+            )
+        else:
+            iteration_history.append(evaluation)
+            continue  # Veto → return to Phase 1
+
+    # Exhausted all cycles
+    self._record_outcome(session_key, "escalated")
+    return SelfAuthoringResult(
+        outcome="escalated",
+        iteration_history=iteration_history
+    )
+```
+
+Each `_phase_*` method:
+1. Constructs the appropriate prompt with full context
+2. Makes the API/CLI call
+3. Parses the response
+4. Stores the result in `self_authoring_sessions`
+5. Returns a typed result object
+
+**Phase 1 prompt construction**: Includes the original impulse, and on
+re-entry, all prior rationales, return reasons, and deltas from
+`iteration_history`. Asks Opus to produce structured output with the rationale
+and complexity prediction.
+
+**Phase 2a loop** (within `_phase_2a`):
+```python
+def _phase_2a(self, rationale, history, session_key, cycle):
+    # Round 1: Isaac formulates initial prompt from Phase 1 rationale
+    isaac_prompt = self._build_2a_opening(rationale, history)
+    cli_result = self.runner.execute(task=isaac_prompt, ...)
+
+    rounds = 1
+    while rounds < MAX_NEGOTIATION_ROUNDS:
+        # Isaac evaluates Claude Code's response
+        evaluation = self.client.chat(
+            messages=[...conversation history...],
+            system_prompt=PHASE_2A_ISAAC_PROMPT
+        )
+
+        if evaluation indicates convergence:
+            return NegotiationResult(fork="converged", plan=...)
+        if evaluation indicates invalidation:
+            return NegotiationResult(fork="invalidated", reason=...)
+
+        # Continue the conversation
+        cli_result = self.runner.continue_session(evaluation.next_message)
+        rounds += 1
+
+    # Excessive rounds is a complexity signal
+    return NegotiationResult(fork="invalidated", reason="excessive_rounds")
+```
+
+**Phase 2b prompt construction**: Includes the Phase 1 complexity prediction,
+the 2a plan, and full conversation context. Asks Opus to judge whether the
+plan's complexity is proportional. This is LLM-judged, requiring specific and
+high-quality prompting with ongoing knowledge of the conversation and its
+rounds.
+
+**Phase 3 prompt construction**: Includes the Phase 1 rationale, 2a plan
+summary, the actual `git diff`, and complexity metrics. The prompt enforces
+argue-against-first ordering by structuring the response format:
+```
+1. ARGUMENT AGAINST (generate this FIRST):
+   [strongest case for rejection]
+2. ARGUMENT FOR:
+   [case for acceptance]
+3. COMPLEXITY COMPARISON:
+   [predicted vs actual table]
+4. DECISION: approve | veto
+5. REASONING:
+   [why this decision]
+```
+
+#### 6. `agency/tools/definitions/self_update_tools.py`
 
 **Purpose**: Tool schema for the Anthropic API. Follows the exact pattern of
 `communication_tools.py`.
 
 ```python
-"""Self-update tool definitions (Claude Code CLI integration)."""
+"""Self-authoring tool definitions (Claude Code CLI integration)."""
 
 from typing import Any, Dict
 
-PROPOSE_CODE_CHANGE_TOOL: Dict[str, Any] = {
-    "name": "propose_code_change",
-    "description": """Propose a change to your own codebase using Claude Code CLI.
+SELF_AUTHOR_TOOL: Dict[str, Any] = {
+    "name": "self_author",
+    "description": """Propose a change to your own codebase through a structured
+self-authoring workflow.
 
-This tool creates a git branch, runs Claude Code CLI with your task description,
-validates the result, and reports the diff. Changes are NOT automatically merged —
-they require human review and approval.
+This tool does NOT immediately write code. It runs a multi-phase process:
+1. Examine your impulse — why do you think this change is needed?
+2. Negotiate the design with Claude Code against the actual codebase
+3. Evaluate the result adversarially before committing
 
-Use this when you want to:
-- Add a new tool or capability to yourself
-- Fix a bug you've noticed in your own behavior
-- Improve an existing feature
-- Add a new integration
+The tool has three valid outcomes:
+- A branch is created with the change, ready for human review
+- The process reveals the change isn't needed (frame dissolved)
+- The problem is too ambiguous and needs human input (escalation)
+
+All three outcomes are successes. The second and third are often the most
+valuable — they prevent unnecessary code from being written.
 
 Constraints:
-- Protected files (config.py, main.py, deploy/, CORE_MEMORIES.md, the self-update
-  system itself) cannot be modified through this tool
-- Changes that fail validation (tests) will be reported but preserved for inspection
-- Only one code change can run at a time (blocks during execution)
-- Maximum execution time: 10 minutes
-
-The result will include the branch name and a summary of changes. Brian will
-review and merge if approved.""",
+- Protected files (config.py, main.py, deploy/, CORE_MEMORIES.md, the
+  self-update system itself) cannot be modified
+- Maximum 3 iteration cycles before escalation
+- Only available during action pulses
+- Changes require human review and merge""",
     "input_schema": {
         "type": "object",
         "properties": {
             "task": {
                 "type": "string",
-                "description": "Detailed description of what to build or change. Be specific about file locations, expected behavior, and any constraints. The more detail, the better the result."
+                "description": "What you want to change and why. Be specific about the problem you're solving, not just the code you want to write. The 'why' matters more than the 'what' — the system will determine the right 'what' through design negotiation."
             },
             "branch_suffix": {
                 "type": "string",
@@ -292,53 +900,33 @@ review and merge if approved.""",
 }
 ```
 
-#### 6. `agency/commands/handlers/self_update_handler.py`
+#### 7. `agency/commands/handlers/self_update_handler.py`
 
-**Purpose**: CommandHandler subclass that orchestrates the full pipeline. This is
-the handler that `ToolExecutor` calls.
+**Purpose**: CommandHandler subclass that instantiates the orchestrator and
+runs the full pipeline. Thin wrapper — all logic lives in `orchestrator.py`.
 
-**Class**: `ProposeCodeChangeHandler(CommandHandler)`
+**Class**: `SelfAuthorHandler(CommandHandler)`
 
 **Method**: `execute(self, query: str, context: dict) -> CommandResult`
-
-The `query` parameter will be a pipe-delimited string `"task | branch_suffix"`
-following the pattern used by other multi-param handlers in executor.py (see
-how file_handler.py receives `"filename | content"`). However, since we control
-the executor method, we can also pass structured data via context. The cleaner
-approach (used by newer handlers) is to have the `_exec_` method in executor.py
-extract fields from `tool_input` and pass them individually.
-
-**Actual approach**: The `_exec_propose_code_change` method in executor.py will
-extract `task` and `branch_suffix` from `tool_input`, construct the query, and
-pass both via a structured approach. Looking at the codebase pattern, the
-simplest is:
-
-```python
-# In executor.py _exec_propose_code_change:
-handler = ProposeCodeChangeHandler()
-task = input.get("task", "")
-branch_suffix = input.get("branch_suffix", "auto")
-query = task  # Primary query is the task
-ctx["_branch_suffix"] = branch_suffix  # Pass branch via context
-result = handler.execute(query, ctx)
-```
-
-**Handler pipeline** (in `execute()`):
 
 ```python
 def execute(self, query: str, context: dict) -> CommandResult:
     import config
+    from core.database import get_db
+    from llm.anthropic_client import AnthropicClient
+    from agency.self_update.cli_runner import CLIRunner
+    from agency.self_update.orchestrator import SelfAuthoringOrchestrator
 
     # 1. Check if self-update is enabled
     if not getattr(config, 'SELF_UPDATE_ENABLED', False):
         return CommandResult(..., error=ToolError(SYSTEM_ERROR, "Self-update is disabled"))
 
-    # 2. Build branch name
-    branch_suffix = context.get("_branch_suffix", "auto")
-    branch_name = f"isaac/{branch_suffix}"
-
-    # 3. Run CLI
-    from agency.self_update.cli_runner import CLIRunner
+    # 2. Set up components
+    db = get_db()
+    client = AnthropicClient(
+        api_key=config.SELF_UPDATE_API_KEY,
+        model="claude-opus-4-6"  # All phases use Opus
+    )
     runner = CLIRunner(
         repo_path=config.PROJECT_ROOT,
         model=config.SELF_UPDATE_CLI_MODEL,
@@ -347,40 +935,69 @@ def execute(self, query: str, context: dict) -> CommandResult:
         allowed_tools=config.SELF_UPDATE_ALLOWED_TOOLS,
         api_key=config.SELF_UPDATE_API_KEY,
     )
-    cli_result = runner.execute(task=query, branch_name=branch_name)
 
-    if not cli_result.success:
-        return CommandResult(..., error=ToolError(SYSTEM_ERROR, f"CLI failed: {cli_result.stderr}"))
+    # 3. Run the self-authoring pipeline
+    branch_suffix = context.get("_branch_suffix", "auto")
+    orchestrator = SelfAuthoringOrchestrator(db, client, runner)
+    result = orchestrator.run(impulse=query, branch_suffix=branch_suffix)
 
-    # 4. Check protected paths
-    from agency.self_update.protected_paths import check_diff
-    violation = check_diff(config.PROJECT_ROOT, cli_result.original_branch, branch_name)
-    if violation:
-        # Delete the offending branch
-        subprocess.run(["git", "branch", "-D", branch_name], cwd=str(config.PROJECT_ROOT))
-        return CommandResult(..., error=ToolError(VALIDATION, f"BLOCKED: {violation}"))
+    # 4. Handle outcomes
+    if result.outcome == "committed":
+        # Check protected paths
+        from agency.self_update.protected_paths import check_diff
+        violation = check_diff(
+            config.PROJECT_ROOT,
+            result.branch_original,
+            result.branch
+        )
+        if violation:
+            subprocess.run(
+                ["git", "branch", "-D", result.branch],
+                cwd=str(config.PROJECT_ROOT)
+            )
+            return CommandResult(
+                ..., error=ToolError(VALIDATION, f"BLOCKED: {violation}")
+            )
 
-    # 5. Validate (run tests)
-    from agency.self_update.change_validator import validate
-    validation = validate(config.PROJECT_ROOT, branch_name)
+        # Validate (run tests)
+        from agency.self_update.change_validator import validate
+        validation = validate(config.PROJECT_ROOT, result.branch)
 
-    # 6. Get diff summary for the result
-    diff_result = subprocess.run(
-        ["git", "diff", "--stat", f"{cli_result.original_branch}..{branch_name}"],
-        cwd=str(config.PROJECT_ROOT), capture_output=True, text=True
-    )
+        # Get diff summary
+        diff_result = subprocess.run(
+            ["git", "diff", "--stat",
+             f"{result.branch_original}..{result.branch}"],
+            cwd=str(config.PROJECT_ROOT),
+            capture_output=True, text=True
+        )
 
-    # 7. Build result
-    status = "ready for review" if validation.passed else "validation failed"
-    data = {
-        "branch": branch_name,
-        "status": status,
-        "diff_stat": diff_result.stdout.strip(),
-        "validation_passed": validation.passed,
-        "validation_output": validation.output if not validation.passed else None,
-    }
+        status = "ready for review" if validation.passed else "validation failed"
+        data = {
+            "branch": result.branch,
+            "status": status,
+            "outcome": "committed",
+            "diff_stat": diff_result.stdout.strip(),
+            "validation_passed": validation.passed,
+            "cycles_used": result.cycles_used,
+            "rationale_summary": result.rationale.summary,
+        }
 
-    display = f"Code change proposed on branch '{branch_name}' ({status})"
+    elif result.outcome == "frame_dissolved":
+        data = {
+            "outcome": "frame_dissolved",
+            "reason": result.dissolution_reason,
+            "cycles_used": result.cycles_used,
+            "insight": result.insight,
+        }
+
+    elif result.outcome == "escalated":
+        data = {
+            "outcome": "escalated",
+            "cycles_used": result.cycles_used,
+            "summary": result.escalation_summary,
+        }
+
+    display = f"Self-authoring complete: {result.outcome} ({result.cycles_used} cycles)"
     return CommandResult(
         command_name=self.command_name,
         query=query,
@@ -390,38 +1007,17 @@ def execute(self, query: str, context: dict) -> CommandResult:
     )
 ```
 
-**`format_result()`**:
-```python
-def format_result(self, result: CommandResult) -> str:
-    if result.error:
-        return f"  {result.get_error_message()}"
-    d = result.data
-    lines = [
-        f"  Branch: {d['branch']}",
-        f"  Status: {d['status']}",
-        f"  Changes:\n{d['diff_stat']}",
-    ]
-    if not d['validation_passed']:
-        lines.append(f"  Validation output:\n{d['validation_output']}")
-    return "\n".join(lines)
-```
-
 ### Modified Files
 
-#### 7. `config.py` — Add Self-Update Configuration Block
+#### 8. `config.py` — Add Self-Update Configuration Block
 
 Insert a new section after the Guardian configuration block (after line ~741).
-Follow the existing config.py conventions:
-- Section header with `# =====` separators
-- Comments explaining each constant
-- Environment variable overrides where appropriate
-- `getattr()` pattern for feature flags
 
 ```python
 # =============================================================================
 # SELF-UPDATE (Claude Code CLI)
 # =============================================================================
-# Allows Isaac to propose code changes via Claude Code CLI subprocess.
+# Allows Isaac to propose code changes via a structured self-authoring workflow.
 # Changes are created on isolated git branches and require human approval.
 # Protected paths are enforced via post-hoc diff inspection.
 
@@ -429,7 +1025,7 @@ SELF_UPDATE_ENABLED = os.getenv("SELF_UPDATE_ENABLED", "false").lower() == "true
 
 # The model Claude Code CLI uses internally for code generation.
 # This is separate from Isaac's conversation model.
-SELF_UPDATE_CLI_MODEL = os.getenv("SELF_UPDATE_CLI_MODEL", "sonnet")
+SELF_UPDATE_CLI_MODEL = os.getenv("SELF_UPDATE_CLI_MODEL", "opus")
 
 # Maximum agentic tool-use turns within a single Claude Code session.
 SELF_UPDATE_MAX_TURNS = int(os.getenv("SELF_UPDATE_MAX_TURNS", "25"))
@@ -450,19 +1046,18 @@ SELF_UPDATE_API_KEY = os.getenv("SELF_UPDATE_API_KEY", ANTHROPIC_API_KEY)
 ```
 
 **Default is `false`**: Self-update is opt-in. Isaac cannot use the tool until
-the environment variable is explicitly set. This is a safety decision.
+the environment variable is explicitly set.
 
-#### 8. `agency/tools/definitions/__init__.py` — Register the New Tool
+#### 9. `agency/tools/definitions/__init__.py` — Register the New Tool
 
 Add import at the top (after the blog tools import, line ~117):
 
 ```python
-# --- Self-Update (Claude Code CLI) ---
-from agency.tools.definitions.self_update_tools import PROPOSE_CODE_CHANGE_TOOL
+# --- Self-Update (Self-Authoring Pipeline) ---
+from agency.tools.definitions.self_update_tools import SELF_AUTHOR_TOOL
 ```
 
-Add conditional registration inside `get_tool_definitions()`. This goes in the
-pulse-only section (after line 234, inside the `if is_pulse:` block):
+Add conditional registration inside `get_tool_definitions()`:
 
 ```python
     if is_pulse:
@@ -470,45 +1065,43 @@ pulse-only section (after line 234, inside the `if is_pulse:` block):
         tools.append(REMOVE_GROWTH_THREAD_TOOL)
         tools.append(PROMOTE_GROWTH_THREAD_TOOL)
 
-        # Self-update tool (action pulse only — not reflective)
+        # Self-authoring tool (action pulse only — not reflective)
         if pulse_type == "action" and getattr(config, 'SELF_UPDATE_ENABLED', False):
-            tools.append(PROPOSE_CODE_CHANGE_TOOL)
+            tools.append(SELF_AUTHOR_TOOL)
 ```
 
 **Why `pulse_type == "action"`**: The reflective pulse is for introspection
 (growth threads, metacognition, bridge memories). Code changes are actions.
 The `pulse_type` parameter already exists in `get_tool_definitions()` but was
-previously informational only (see docstring at line 133-134). This is its
-first functional use.
+previously informational only. This is its first functional use.
 
-#### 9. `agency/tools/executor.py` — Add Dispatch Entry and Exec Method
+#### 10. `agency/tools/executor.py` — Add Dispatch Entry and Exec Method
 
 **In `__init__`**: Add to the `_handlers` dict (after the metacognition tools
 block, around line 103):
 
 ```python
             # Self-update
-            "propose_code_change": self._exec_propose_code_change,
+            "self_author": self._exec_self_author,
 ```
 
-**New method** (add after the metacognition exec methods, before the class ends):
+**New method**:
 
 ```python
     # =========================================================================
     # SELF-UPDATE TOOLS
     # =========================================================================
 
-    def _exec_propose_code_change(
+    def _exec_self_author(
         self, input: Dict, id: str, ctx: Dict
     ) -> ToolResult:
-        """Propose a code change via Claude Code CLI."""
-        from agency.commands.handlers.self_update_handler import ProposeCodeChangeHandler
+        """Run the self-authoring pipeline."""
+        from agency.commands.handlers.self_update_handler import SelfAuthorHandler
 
-        handler = ProposeCodeChangeHandler()
+        handler = SelfAuthorHandler()
         task = input.get("task", "")
         branch_suffix = input.get("branch_suffix", "auto")
 
-        # Pass branch suffix via context (handler extracts it)
         ctx["_branch_suffix"] = branch_suffix
 
         result = handler.execute(task, ctx)
@@ -516,7 +1109,7 @@ block, around line 103):
         if result.error:
             return ToolResult(
                 tool_use_id=id,
-                tool_name="propose_code_change",
+                tool_name="self_author",
                 content=result.get_error_message(),
                 is_error=True
             )
@@ -524,26 +1117,61 @@ block, around line 103):
         formatted = handler.format_result(result)
         return ToolResult(
             tool_use_id=id,
-            tool_name="propose_code_change",
+            tool_name="self_author",
             content=formatted
         )
 ```
 
-This follows the exact pattern of `_exec_send_telegram` (executor.py lines
-576-600): instantiate handler, extract input fields, call execute, check error,
-format result, return ToolResult.
+#### 11. `core/database.py` — Add Migration for New Table
+
+Add a new migration constant (following the existing `MIGRATION_V*_SQL` pattern):
+
+```python
+MIGRATION_V{N}_SQL = """
+CREATE TABLE IF NOT EXISTS self_authoring_sessions (
+    -- [full schema from Database Schema section above]
+);
+CREATE INDEX IF NOT EXISTS idx_self_authoring_session_key ...;
+CREATE INDEX IF NOT EXISTS idx_self_authoring_outcome ...;
+CREATE INDEX IF NOT EXISTS idx_self_authoring_created ...;
+"""
+```
+
+And register it in the migration list (following existing pattern).
+
+---
+
+## Files Changed Summary
+
+| File | Action | Lines (est.) |
+|------|--------|-------------|
+| `agency/self_update/__init__.py` | Create | 1 |
+| `agency/self_update/cli_runner.py` | Create | ~150 |
+| `agency/self_update/protected_paths.py` | Create | ~50 |
+| `agency/self_update/change_validator.py` | Create | ~60 |
+| `agency/self_update/orchestrator.py` | Create | ~400 |
+| `agency/tools/definitions/self_update_tools.py` | Create | ~50 |
+| `agency/commands/handlers/self_update_handler.py` | Create | ~150 |
+| `config.py` | Modify | +20 |
+| `agency/tools/definitions/__init__.py` | Modify | +6 |
+| `agency/tools/executor.py` | Modify | +30 |
+| `core/database.py` | Modify | +40 |
+
+**Total**: 7 new files, 4 modified files, ~960 lines of code.
 
 ---
 
 ## Notification After Change
 
-When a code change is successfully proposed, Isaac's LLM response will naturally
-mention it (the tool result tells Isaac the branch name and diff summary). If
-Telegram is enabled, Isaac can choose to also send a notification — the
-`send_telegram` tool is already available during action pulses, and Isaac
-routinely uses it for things it considers noteworthy.
+When a self-authoring session completes with any outcome, Isaac's LLM response
+will naturally mention it (the tool result tells Isaac the outcome, branch name,
+diff summary, or escalation reason). If Telegram is enabled, Isaac can choose to
+send a notification — the `send_telegram` tool is already available during
+action pulses. No special notification plumbing is needed.
 
-No special notification plumbing is needed. Isaac's judgment handles this.
+For Outcome 3 (escalation), Isaac should be encouraged by the tool result text
+to notify Brian via Telegram, since escalation explicitly means human input is
+needed.
 
 ---
 
@@ -552,13 +1180,18 @@ No special notification plumbing is needed. Isaac's judgment handles this.
 **Single-threaded guarantee**: The ChatEngine processes one message/pulse at a
 time. The `_is_processing` flag (chat_engine.py) prevents concurrent processing.
 Pulse timers pause during processing (via `_pause_timers()` / `_resume_timers()`).
-This means two `propose_code_change` calls cannot run simultaneously.
+This means two `self_author` calls cannot run simultaneously.
 
 **Git branch isolation**: Each change gets its own branch (`isaac/{suffix}`).
 The CLI runner checks for clean working tree before starting and always returns
 to the original branch via try/finally. Even if the process is killed, the
 worst case is being on a detached branch — Guardian's restart will start
-Pattern fresh (which checks out the configured branch).
+Pattern fresh.
+
+**Claude Code session isolation**: The `--continue` flag resumes the most recent
+session in the working directory. Since self-authoring is single-threaded, there
+is no risk of two concurrent sessions interfering with each other's `--continue`
+state.
 
 ---
 
@@ -572,30 +1205,15 @@ counts as passed).
 1. Install Claude Code CLI on VPS: `npm install -g @anthropic-ai/claude-code`
 2. Set `SELF_UPDATE_ENABLED=true` in `.env`
 3. Trigger an action pulse or send a message that prompts Isaac to use the tool
-4. Verify: branch created, diff clean, protected paths enforced, original
-   branch restored
+4. Verify: Phase 1 rationale stored in database, 2a negotiation rounds logged,
+   branch created (or frame dissolved / escalated), protected paths enforced,
+   original branch restored
 5. Review the proposed branch, merge or delete
+6. Query `self_authoring_sessions` to verify iteration history is stored
 
-**Future**: Add unit tests for `protected_paths.check_diff()` and integration
-tests for `CLIRunner.execute()` with a mock repo.
-
----
-
-## Files Changed Summary
-
-| File | Action | Lines (est.) |
-|------|--------|-------------|
-| `agency/self_update/__init__.py` | Create | 1 |
-| `agency/self_update/cli_runner.py` | Create | ~120 |
-| `agency/self_update/protected_paths.py` | Create | ~50 |
-| `agency/self_update/change_validator.py` | Create | ~60 |
-| `agency/tools/definitions/self_update_tools.py` | Create | ~45 |
-| `agency/commands/handlers/self_update_handler.py` | Create | ~130 |
-| `config.py` | Modify | +20 |
-| `agency/tools/definitions/__init__.py` | Modify | +6 |
-| `agency/tools/executor.py` | Modify | +30 |
-
-**Total**: 6 new files, 3 modified files, ~460 lines of code.
+**Future**: Add unit tests for `protected_paths.check_diff()`, integration
+tests for `CLIRunner.execute()` with a mock repo, and prompt quality tests
+for the Phase 1/2b/3 system prompts.
 
 ---
 
@@ -604,14 +1222,7 @@ tests for `CLIRunner.execute()` with a mock repo.
 ### Import Pattern
 All handlers use deferred imports (import inside method body, not at module top).
 This prevents circular imports and speeds up startup. See every `_exec_*` method
-in `executor.py` — they all do `from agency.commands.handlers.X import XHandler`
-inside the method body.
-
-### Singleton Pattern
-Global instances use the `_instance: Optional[T] = None` + `get_instance() -> T`
-pattern. See `guardian_check.py` lines 310-345 and `executor.py` lines 1248-1259.
-The CLI runner does NOT need a singleton — it's instantiated fresh each time
-by the handler.
+in `executor.py`.
 
 ### Config Access Pattern
 Handlers import config inside the method body:
@@ -621,39 +1232,29 @@ def execute(self, query, context):
     if not getattr(config, 'FEATURE_ENABLED', False):
         ...
 ```
-The `getattr()` with default is used for newer config values to handle the case
-where config.py hasn't been updated yet. See `definitions/__init__.py` lines
-181, 194, 203, 210, 221.
+The `getattr()` with default is used for newer config values.
 
 ### Error Pattern
-All errors use `ToolError` from `agency/commands/errors.py`. The error types
-are: `FORMAT_ERROR`, `VALIDATION`, `INVALID_INPUT`, `NOT_FOUND`, `PARSE_ERROR`,
-`SYSTEM_ERROR`, `RATE_LIMITED`. Self-update errors will use `SYSTEM_ERROR` for
-CLI failures and `VALIDATION` for protected path violations.
+All errors use `ToolError` from `agency/commands/errors.py`. Error types:
+`FORMAT_ERROR`, `VALIDATION`, `INVALID_INPUT`, `NOT_FOUND`, `PARSE_ERROR`,
+`SYSTEM_ERROR`, `RATE_LIMITED`. Self-authoring errors use `SYSTEM_ERROR` for
+CLI/API failures and `VALIDATION` for protected path violations.
 
-### CommandResult Pattern
-- `command_name`: Use `self.command_name` (inherited from base, returns class name)
-- `query`: The original task description
-- `data`: Dict with structured result data
-- `needs_continuation`: Always `True` for tools that produce results Isaac
-  should see (Isaac needs to tell the human what happened)
-- `display_text`: Short status string shown in UI events
-- `error`: `ToolError` instance or `None`
+### Database Pattern
+Raw SQL with parameterized queries via `db.execute()`. JSON columns for nested
+data. CHECK constraints for enums. Indexes for query performance. Context
+manager pattern for connection handling with auto-commit/rollback.
 
-### Tool Definition Pattern
-- Module-level constant: `TOOL_NAME_TOOL: Dict[str, Any] = { ... }`
-- `name` field must exactly match the key in `executor.py`'s `_handlers` dict
-- `description` is multi-line, includes usage guidance and constraints
-- `input_schema` is JSON Schema with `type`, `properties`, `required`
+### Anthropic API Pattern
+Use `AnthropicClient.chat()` with structured system prompts. Messages as lists
+of dicts. Response via `AnthropicResponse` dataclass. Track `input_tokens` and
+`output_tokens` for cost accounting. Defensive `getattr()` access on response
+objects.
 
 ### Subprocess Pattern
-The codebase uses `subprocess.Popen` for long-lived detached processes
-(Guardian) and `subprocess.run` for quick commands. The self-update pipeline
-uses `subprocess.run` because Claude Code CLI is a finite process. Always:
-- Set `cwd` explicitly
-- Use `capture_output=True, text=True`
-- Handle `TimeoutExpired` and `FileNotFoundError`
-- Never use `shell=True`
+Use `subprocess.run` for finite processes. Always set `cwd` explicitly. Use
+`capture_output=True, text=True`. Handle `TimeoutExpired` and
+`FileNotFoundError`. Never use `shell=True`.
 
 ---
 
@@ -681,8 +1282,14 @@ uses `subprocess.run` because Claude Code CLI is a finite process. Always:
 
 7. **Bash restrictions in CLI**: The `--allowedTools` flag limits Bash to
    specific commands: `git diff`, `git status`, `git add`, `git commit`,
-   `git log`, `python -m pytest`. No `rm`, `systemctl`, `curl`, `pip install`,
-   etc.
+   `git log`, `python -m pytest`. No `rm`, `systemctl`, `curl`, `pip install`.
+
+8. **Adversarial evaluation**: Phase 3 structurally argues against the
+   implementation before arguing for it, providing a defense against
+   unjustified changes passing through.
+
+9. **Iteration cap**: The 3-cycle hard cap prevents unbounded token spend and
+   ensures the system cannot loop indefinitely.
 
 ---
 
@@ -690,189 +1297,124 @@ uses `subprocess.run` because Claude Code CLI is a finite process. Always:
 
 ### Low Risk (well-handled in current design)
 
-- **Git state corruption**: The try/finally pattern for branch checkout
-  restoration is solid. The working-tree cleanliness check
-  (`git status --porcelain`) before starting prevents accidental commits of
-  runtime artifacts. Verified: `chat_engine.py:59` `_is_processing` flag and
-  `_pause_timers()`/`_resume_timers()` (lines 128–140) guarantee sequential
-  pulse processing, so two `propose_code_change` calls cannot race on git state.
-- **Protected paths enforcement**: Hardcoded in Python source, self-referential
-  protection (`agency/self_update/protected_paths.py` protects itself), and
-  post-hoc diff checking is the correct approach given that `--allowedTools`
-  cannot restrict file-level access. Branch deletion on violation (`git branch
-  -D`) is appropriately aggressive.
-- **Command injection**: All subprocess calls use list arguments (no
-  `shell=True`). Task descriptions flow into the `-p` flag as a single list
-  element, not interpolated into a shell string.
-- **Concurrency**: Single-threaded ChatEngine (`_is_processing` at
-  `chat_engine.py:59`) plus pulse timer pausing (lines 128–140) means no
-  concurrent git operations. The SubprocessManager (used by Guardian) is a
-  separate concern and does not interact with the CLI runner's
-  `subprocess.run()` calls.
+- **Git state corruption**: try/finally branch checkout restoration, working-tree
+  cleanliness check, single-threaded guarantee via `_is_processing` flag.
+- **Protected paths enforcement**: Hardcoded, self-referential protection,
+  post-hoc diff checking, branch deletion on violation.
+- **Command injection**: List arguments, no `shell=True`. Task descriptions flow
+  into `-p` flag as a single list element.
+- **Concurrency**: Single-threaded ChatEngine, pulse timer pausing.
 
 ### Medium Risk (needs attention during implementation)
 
-- **10-minute blocking window**: Isaac is fully unresponsive during CLI
-  execution. The `_pause_timers()` call (chat_engine.py:128) pauses both the
-  PulseManager and TelegramListener, so incoming Telegram messages queue but
-  are not lost. However, if a user sends multiple messages during the block,
-  they will all arrive at once when `_resume_timers()` fires (line 135). Edge
-  case: if the CLI subprocess hangs past the 600s timeout and the
-  `TimeoutExpired` handler takes additional time to kill the process + restore
-  the branch, the total block could exceed 10 minutes. **Mitigation**: Add a
-  generous buffer to the timeout kill logic and log a warning if cleanup takes
-  more than 10 seconds.
+- **Blocking window during multi-cycle sessions**: Isaac is unresponsive during
+  the full self-authoring pipeline. With 3 cycles, each involving multiple API
+  calls and CLI sessions, this could be extended. Telegram messages queue but
+  don't drop. Acceptable per design decision (anything under 6 hours is fine).
 
 - **Branch accumulation**: Failed, abandoned, or reviewed-but-not-merged
-  `isaac/*` branches will pile up on the VPS. No cleanup mechanism is described.
-  Over weeks/months this becomes git clutter and could slow `git branch`
-  operations. **Mitigation**: Document a manual cleanup command
-  (`git branch --list 'isaac/*' | xargs git branch -D`) or add a future
-  enhancement for periodic branch pruning.
+  `isaac/*` branches will pile up. No cleanup mechanism described. **Mitigation**:
+  Document a manual cleanup command or add future periodic pruning.
 
-- **`--allowedTools` Bash restriction syntax**: The plan specifies
-  `Bash(git diff:git status:git add:git commit:python -m pytest)` as the
-  `--allowedTools` value. This is a colon-delimited allowlist of Bash
-  subcommands. **Open question**: Does Claude Code CLI enforce this as prefix
-  matching or exact string matching? If prefix, `git commit -a -m "..."` would
-  be allowed (acceptable). If exact, it might reject valid git commands with
-  flags. This must be verified against the current Claude Code CLI version
-  before deployment.
+- **`--allowedTools` Bash restriction syntax**: The syntax
+  `Bash(git diff:git status:git add:git commit:python -m pytest)` is believed
+  correct (colon-delimited prefix matching). **REQUIRES MANUAL TESTING** with
+  the CLI binary before deployment.
 
-- **API cost exposure**: 25 max turns with Sonnet, up to 10 minutes. A single
-  misfired self-update (e.g., an overly ambitious task description that causes
-  the CLI to loop) could burn significant tokens. The separate
-  `SELF_UPDATE_API_KEY` config helps isolate billing, but there is no
-  per-invocation cost tracking or budget cap. **Mitigation**: Start with
-  `SELF_UPDATE_MAX_TURNS=15` in production and increase only after observing
-  typical usage patterns. Consider adding token-count logging from the CLI's
-  JSON output.
+- **API cost exposure**: Multi-cycle sessions with Opus for Phases 1/2b/3 and
+  Claude Code for 2a/2c. A 3-cycle session could involve 6+ Opus API calls and
+  10+ CLI invocations. The separate API key config helps isolate billing.
+  **Mitigation**: Start with `SELF_UPDATE_MAX_TURNS=15` and monitor usage.
 
-- **No diff size limit**: Claude Code could generate a 5,000-line change. The
-  handler captures `git diff --stat` for the result, but there is no gate that
-  rejects changes above a certain size. Large diffs are harder to review and
-  more likely to contain subtle issues. **Mitigation**: Add a line-count check
-  in the handler (e.g., `git diff --shortstat` → parse insertions/deletions →
-  reject if >500 lines changed) as a future enhancement.
+- **No diff size limit**: Claude Code could generate a large change. The handler
+  captures `git diff --stat` but no gate rejects oversized diffs. **Mitigation**:
+  Add a line-count check as a future enhancement.
+
+- **Phase 3 sunk cost bias**: Despite structural countermeasures (argue-against-
+  first, concrete metrics), the model may still tend toward justification. Prompt
+  quality is load-bearing here. **Mitigation**: Monitor Phase 3 veto rates — if
+  Phase 3 never vetoes, the prompt needs strengthening.
 
 ### Higher Risk (warrants caution before deployment)
 
-- **API key flow gap in spec**: The `CLIRunner` constructor (section 2 of the
-  plan) accepts `repo_path`, `model`, `max_turns`, `timeout_seconds`, and
-  `allowed_tools` — but NOT `api_key`. However, the `subprocess.run()` call
-  inside `execute()` references `api_key` in the env dict
-  (`env={**os.environ, "ANTHROPIC_API_KEY": api_key}`). The spec must be
-  updated to either: (a) add `api_key: str` as a constructor parameter, or
-  (b) have `execute()` read `SELF_UPDATE_API_KEY` from config directly. Option
-  (a) is cleaner and matches the existing pattern where config values are
-  passed into constructors. **This is a spec bug that must be fixed before
-  implementation.**
+- **Protected paths block writes but not reads**: Claude Code can read `.env`,
+  `config.py`, `CORE_MEMORIES.md`, then potentially include sensitive content in
+  commits. **Mitigation**: Scan diffs for `sk-ant-*` patterns, ensure `.env` is
+  gitignored. Defense-in-depth concern, not a blocker.
 
-- **Protected paths block writes but not reads**: The `--allowedTools` value
-  includes `Read` and `Grep`, which are unrestricted. Claude Code can read
-  `.env`, `config.py`, `CORE_MEMORIES.md`, and any other file, then
-  potentially include sensitive content (API keys, personal information) in
-  commit messages, branch names, or code comments on the proposed branch.
-  **Mitigation**: Add a post-hoc check that scans the diff content (not just
-  filenames) for patterns matching API key formats (`sk-ant-*`, `sk-*`).
-  Alternatively, ensure `.env` is in `.gitignore` (so it can't be committed
-  even if read). This is a defense-in-depth concern, not a blocker.
+- **`--continue` session state**: If a Claude Code session is corrupted or
+  partially written (e.g., process killed mid-session), `--continue` may resume
+  into an inconsistent state. **Mitigation**: If `--continue` fails, fall back
+  to a fresh `-p` call (losing prior codebase context but not blocking the
+  pipeline).
 
-- **pytest subprocess orphaning**: The `change_validator.py` runs
-  `python -m pytest` with a 60-second timeout. If pytest spawns child
-  processes (e.g., via subprocess fixtures or integration tests),
-  `subprocess.run()` timeout kills the parent pytest process but child
-  processes may orphan. **Mitigation**: Use `subprocess.Popen` with
-  `os.killpg()` to kill the entire process group, or accept this as a
-  low-probability issue given the project currently has no test suite (pytest
-  exit code 5).
+- **Prompt quality for LLM-judged gates**: The complexity gate (Phase 2b) and
+  adversarial evaluation (Phase 3) are entirely dependent on prompt quality.
+  Poor prompts produce rubber-stamp approvals. **Mitigation**: Treat Phase 2b
+  and Phase 3 prompts as load-bearing infrastructure. Version them. Review their
+  effectiveness by querying `self_authoring_sessions` for patterns (e.g., gate
+  pass rate, veto rate, complexity gap distributions).
+
+- **pytest subprocess orphaning**: `change_validator.py` runs pytest with a
+  60-second timeout. Child processes may orphan on timeout. **Mitigation**: Use
+  `subprocess.Popen` with `os.killpg()` or accept as low-probability given no
+  test suite currently exists.
 
 ---
 
 ## Resolved Questions
 
-All outstanding questions have been reviewed and resolved (2026-03-15).
+All outstanding questions from the v1 plan have been reviewed. The following
+carry forward:
 
 ### 1. API Key Flow into CLIRunner — RESOLVED
 
-**Resolution**: `api_key: str` added to the `CLIRunner` constructor signature
-(see updated class definition in section 2 above). The handler passes
-`config.SELF_UPDATE_API_KEY`. The `execute()` method references `self.api_key`
-in the subprocess env dict. The config value defaults to `ANTHROPIC_API_KEY`
-per the config block.
+`api_key: str` is a constructor parameter on `CLIRunner`. The handler passes
+`config.SELF_UPDATE_API_KEY`. The `execute()` and `continue_session()` methods
+reference `self.api_key` in the subprocess env dict.
 
-### 2. Exact `--allowedTools` Bash Subcommand Syntax — REQUIRES TESTING
+### 2. `--allowedTools` Bash Subcommand Syntax — REQUIRES TESTING
 
-**Resolution**: The syntax
-`Bash(git diff:git status:git add:git commit:python -m pytest)` is believed
-correct based on Claude Code CLI documentation (colon-delimited prefix
-matching). `git log` should also be added to the allowed list so the CLI can
-inspect commit history for context.
-
-**Updated value**:
-```
-Edit,Write,Read,Glob,Grep,Bash(git diff:git status:git add:git commit:git log:python -m pytest)
-```
-
-**REQUIRES MANUAL TESTING**: Run the verification commands in "VPS
-Prerequisites" Step 6 after installing Claude Code CLI. This is the one item
-that cannot be confirmed without the CLI binary present.
+The syntax `Bash(git diff:git status:git add:git commit:git log:python -m pytest)`
+is believed correct. Must be verified with the CLI binary before deployment.
 
 ### 3. `requirements.txt` Protection — RESOLVED
 
-**Resolution**: Added to `PROTECTED_PATHS` (see updated list in section 3
-above). Supply-chain risk outweighs convenience. Isaac can note needed
-dependencies in commit messages or code comments; Brian adds them manually
-after review.
+Added to `PROTECTED_PATHS`. Supply-chain risk outweighs convenience.
 
 ### 4. Tool Definition File Self-Protection — RESOLVED
 
-**Resolution**: `agency/tools/definitions/self_update_tools.py` added to
-`PROTECTED_PATHS` (see updated list in section 3 above). Prevents Isaac from
-weakening LLM-level constraints in its own tool description.
+`agency/tools/definitions/self_update_tools.py` added to `PROTECTED_PATHS`.
 
 ### 5. Guardian Restart Branch Behavior — RESOLVED (accepted risk)
 
-**Resolution**: Confirmed that Guardian does NOT perform an explicit
-`git checkout` on restart. Guardian (`agency/guardian_check.py`) spawns Pattern
-via `subprocess.Popen(["python", str(executable_path)])` — it simply re-runs
-`main.py`. The systemd service (`deploy/pattern.service`) also has no branch
-checkout logic.
-
-This means if the Pattern process is killed mid-checkout (SIGKILL during the
-~millisecond `git checkout` window), Pattern could restart on an `isaac/*`
-branch. The try/finally in CLIRunner makes this window extremely narrow.
-
-**Accepted for v1**: The risk is low-probability (requires SIGKILL at the
-exact wrong millisecond). Manual recovery is `git checkout main && systemctl
-restart pattern`. A Guardian-side startup branch check is documented as a
-future enhancement (see `GUARDIAN_SELF_UPDATE_SPEC.md`).
+Guardian does not perform explicit `git checkout` on restart. The try/finally in
+CLIRunner makes the wrong-branch window extremely narrow. Manual recovery is
+`git checkout main && systemctl restart pattern`.
 
 ### 6. Invocation Rate Limiting — RESOLVED (not implementing)
 
-**Resolution**: Dropped. The action pulse interval is already configured at
-6+ hours as a matter of token spend. Adding a separate cooldown mechanism is
-redundant infrastructure. If pulse frequency changes in the future, rate
-limiting can be revisited then.
+The action pulse interval (6+ hours) and the 3-cycle hard cap provide natural
+rate limiting. Redundant infrastructure dropped.
 
 ### 7. `pulse_type` Parameter Reliability — RESOLVED (confirmed safe)
 
-**Resolution**: Traced all 7 call sites of `get_tool_definitions()`:
+All 7 call sites of `get_tool_definitions()` traced. The gating logic
+`if pulse_type == "action"` fails closed.
 
-| Call site | `pulse_type` passed? | Value |
-|-----------|---------------------|-------|
-| `chat_engine.py:678` (action pulse) | Yes | Runtime variable |
-| `chat_engine.py:898` (reflective pulse) | Yes | `"reflective"` |
-| `chat_engine.py:441` (conversation) | No | N/A (not pulse) |
-| `chat_engine.py:993` (conversation) | No | N/A (not pulse) |
-| `chat_engine.py:1121` (conversation) | No | N/A (not pulse) |
-| `chat_engine.py:1282` (conversation) | No | N/A (not pulse) |
-| `response_helper.py:322` (fallback) | No | N/A (not pulse) |
+### 8. `--continue` Session Behavior — NEW, REQUIRES TESTING
 
-The gating logic `if pulse_type == "action"` fails closed — if `pulse_type`
-is `None` or omitted, the tool simply doesn't appear. The action pulse
-codepath at line 678 correctly passes the runtime `pulse_type` variable.
-No changes needed.
+Verify that `claude --continue -p "message" --output-format json` correctly
+resumes the most recent session with full context preservation. Test that
+`--continue` after a session that used `--allowedTools` inherits those
+restrictions. Must be verified with the CLI binary before deployment.
+
+### 9. Multi-turn Token Accumulation — NEW, REQUIRES MONITORING
+
+Each round of Phase 2a adds to the Claude Code session's context window.
+With 5 rounds of negotiation, the accumulated context could be large. Monitor
+token usage per round via the JSON output. If context grows too large, consider
+summarizing prior rounds before continuing.
 
 ---
 
@@ -892,10 +1434,8 @@ No changes needed.
 # =============================================================================
 # Step 1: Install Node.js 18+ (skip if already installed)
 # =============================================================================
-# Check if Node.js is already present and sufficient:
 node --version 2>/dev/null
-# If missing or below v18, install via NodeSource:
-
+# If missing or below v18:
 curl -fsSL https://deb.nodesource.com/setup_18.x | sudo bash -
 sudo apt-get install -y nodejs
 
@@ -908,91 +1448,62 @@ npm --version    # Should print 9.x.x or higher
 # =============================================================================
 sudo npm install -g @anthropic-ai/claude-code
 
-# Verify binary is in PATH:
-which claude        # Should print /usr/bin/claude or /usr/local/bin/claude
-claude --version    # Should print version info
+# Verify:
+which claude
+claude --version
 
 # =============================================================================
 # Step 3: Verify CLI can authenticate and produce JSON output
 # =============================================================================
-# Use the API key that Isaac will use for self-update:
 ANTHROPIC_API_KEY="sk-ant-YOUR-KEY-HERE" claude -p "Say hello" --output-format json
 
-# Expected: JSON output with a "result" field containing a greeting.
-# If this fails with auth errors, the key is wrong.
-# If this fails with "command not found", the npm install didn't work.
+# =============================================================================
+# Step 4: Verify --continue works
+# =============================================================================
+ANTHROPIC_API_KEY="sk-ant-YOUR-KEY-HERE" claude -p "Remember the word 'banana'" --output-format json
+ANTHROPIC_API_KEY="sk-ant-YOUR-KEY-HERE" claude --continue -p "What word did I ask you to remember?" --output-format json
+# Expected: response mentions "banana"
 
 # =============================================================================
-# Step 4: Configure git identity for Claude Code's commits
+# Step 5: Configure git identity for Claude Code's commits
 # =============================================================================
-cd /opt/pattern   # Or wherever PROJECT_ROOT points
-
-# Set identity so commits are attributed properly:
+cd /opt/pattern
 git config user.name "Isaac (automated)"
 git config user.email "isaac-auto@your-domain.com"
 
-# Verify:
-git config user.name
-git config user.email
-
 # =============================================================================
-# Step 5: Add environment variables to .env
+# Step 6: Add environment variables to .env
 # =============================================================================
-# Add these lines to /opt/pattern/.env (or your .env location):
-#
 #   SELF_UPDATE_ENABLED=true
-#   SELF_UPDATE_API_KEY=sk-ant-...       # Optional: separate key for billing isolation
-#   SELF_UPDATE_CLI_MODEL=sonnet         # Optional: defaults to "sonnet"
-#   SELF_UPDATE_MAX_TURNS=15             # Optional: start conservative, increase later
-#   SELF_UPDATE_TIMEOUT=600              # Optional: 10 minutes, default
-#
-# NOTE: SELF_UPDATE_ENABLED defaults to "false" if omitted.
-# Isaac cannot use the tool until this is explicitly set to "true".
+#   SELF_UPDATE_API_KEY=sk-ant-...       # Optional: separate key
+#   SELF_UPDATE_CLI_MODEL=opus           # Optional: defaults to "opus"
+#   SELF_UPDATE_MAX_TURNS=15             # Optional: start conservative
+#   SELF_UPDATE_TIMEOUT=600              # Optional: 10 minutes per CLI call
 
 # =============================================================================
-# Step 6: Verify the --allowedTools Bash restriction syntax
+# Step 7: Verify the --allowedTools Bash restriction syntax
 # =============================================================================
-# This confirms the Bash subcommand allowlist works as expected:
-ANTHROPIC_API_KEY="sk-ant-YOUR-KEY-HERE" claude \
-  -p "Run: echo hello" \
-  --allowedTools "Bash(echo hello)" \
-  --output-format json
-
-# If Claude Code executes the echo, the syntax is valid.
-# Then test the full restriction string from config:
 ANTHROPIC_API_KEY="sk-ant-YOUR-KEY-HERE" claude \
   -p "Run: git status" \
-  --allowedTools "Edit,Write,Read,Glob,Grep,Bash(git diff:git status:git add:git commit:python -m pytest)" \
+  --allowedTools "Edit,Write,Read,Glob,Grep,Bash(git diff:git status:git add:git commit:git log:python -m pytest)" \
   --output-format json
 
 # =============================================================================
-# Step 7: Restart Pattern to pick up new .env values
+# Step 8: Restart Pattern and verify
 # =============================================================================
-# Use whatever process manager is configured (systemd, supervisor, etc.):
-sudo systemctl restart pattern    # if using systemd
-# OR
-sudo supervisorctl restart pattern  # if using supervisor
-# OR manually restart the process
-
-# =============================================================================
-# Step 8: Post-deploy verification
-# =============================================================================
-# After Pattern restarts, trigger an action pulse (or wait for one) and check
-# logs for the propose_code_change tool appearing in the tool definitions.
-# You can also manually test by sending Isaac a message that prompts code change
-# consideration during an action pulse.
+sudo systemctl restart pattern
+# Check logs for self_author tool appearing in action pulse tool definitions
 ```
 
 ### Troubleshooting
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `claude: command not found` | npm global bin not in PATH | `export PATH=$PATH:$(npm config get prefix)/bin` and add to shell profile |
-| `EACCES` during `npm install -g` | Permission denied on global dir | Use `sudo` or configure npm prefix to `~/.npm-global` |
-| CLI auth failure | Wrong API key | Verify `SELF_UPDATE_API_KEY` or `ANTHROPIC_API_KEY` in `.env` |
-| `node: not found` after install | Shell hasn't picked up new PATH | `source ~/.bashrc` or restart shell |
-| Branch creation fails | Dirty working tree | Isaac's handler checks `git status --porcelain`; ensure no uncommitted files in `/opt/pattern` |
-| `git checkout` fails on restore | Branch deleted externally | The try/finally in CLIRunner will log the error; manual `git checkout main` recovers |
+| `claude: command not found` | npm global bin not in PATH | `export PATH=$PATH:$(npm config get prefix)/bin` |
+| `EACCES` during `npm install -g` | Permission denied | Use `sudo` or configure npm prefix |
+| CLI auth failure | Wrong API key | Verify `SELF_UPDATE_API_KEY` in `.env` |
+| `--continue` returns fresh session | No prior session in directory | Ensure first `-p` call runs in `PROJECT_ROOT` |
+| Branch creation fails | Dirty working tree | Check `git status --porcelain` |
 
 ---
 
@@ -1000,9 +1511,9 @@ sudo supervisorctl restart pattern  # if using supervisor
 
 These are documented for future planning but are NOT part of this implementation:
 
-- **Auto-merge with Guardian monitoring**: Merge automatically after validation,
-  let Guardian handle rollback if boot fails
-- **Dedicated self-update pulse**: Separate timer (e.g., daily) instead of
+- **Auto-merge with Guardian monitoring**: Merge automatically after Phase 3
+  approval + validation, let Guardian handle rollback if boot fails
+- **Dedicated self-authoring pulse**: Separate timer (e.g., daily) instead of
   sharing the action pulse window
 - **Change backlog**: Isaac maintains a list of desired improvements, works
   through them over time
@@ -1012,3 +1523,8 @@ These are documented for future planning but are NOT part of this implementation
   GitHub PR for better review workflow
 - **Boot-pulse integration**: After merge+deploy, Isaac runs a self-evaluation
   to confirm the change works as intended
+- **Diff size limit**: Reject changes above a threshold (e.g., >500 lines)
+- **Phase 3 prompt versioning**: Track prompt versions in the database to
+  correlate prompt changes with veto rate changes
+- **Reflective pulse integration**: Query `self_authoring_sessions` during
+  reflective pulses to detect recurring frame errors across sessions
