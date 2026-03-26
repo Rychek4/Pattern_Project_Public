@@ -17,6 +17,7 @@ Modules:
     growth_tools       — Growth thread lifecycle (pulse-only)
     reading_tools      — Novel reading system
     calendar_tools     — Google Calendar integration
+    gmail_tools        — Gmail email integration
     blog_tools         — Blog publishing
     metacognition_tools — Memory metacognition (pulse-only)
 """
@@ -105,6 +106,14 @@ from agency.tools.definitions.calendar_tools import (
     CREATE_CALENDAR_EVENT_TOOL,
     UPDATE_CALENDAR_EVENT_TOOL,
     DELETE_CALENDAR_EVENT_TOOL,
+)
+
+# --- Gmail ---
+from agency.tools.definitions.gmail_tools import (
+    SEARCH_EMAILS_TOOL,
+    READ_EMAIL_TOOL,
+    SEND_EMAIL_TOOL,
+    MANAGE_EMAIL_TOOL,
 )
 
 # --- Blog ---
@@ -216,6 +225,13 @@ def get_tool_definitions(is_pulse: bool = False, pulse_type: str = None) -> List
         tools.append(CREATE_CALENDAR_EVENT_TOOL)
         tools.append(UPDATE_CALENDAR_EVENT_TOOL)
         tools.append(DELETE_CALENDAR_EVENT_TOOL)
+
+    # Gmail tools (if enabled)
+    if getattr(config, 'GMAIL_ENABLED', False):
+        tools.append(SEARCH_EMAILS_TOOL)
+        tools.append(READ_EMAIL_TOOL)
+        tools.append(SEND_EMAIL_TOOL)
+        tools.append(MANAGE_EMAIL_TOOL)
 
     # Reddit tools (if enabled)
     if getattr(config, 'REDDIT_ENABLED', False):

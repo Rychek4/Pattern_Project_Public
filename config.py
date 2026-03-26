@@ -715,6 +715,29 @@ GOOGLE_CALENDAR_DEFAULT_REMINDERS = [
 ]
 
 # =============================================================================
+# GMAIL CONFIGURATION
+# =============================================================================
+# Gmail API integration for sending, receiving, and managing emails.
+# Uses OAuth2 for authentication (one-time browser consent flow).
+#
+# Setup:
+# 1. In Google Cloud Console (same project as Calendar/Drive), enable the Gmail API
+# 2. Reuse the same OAuth2 credentials file (or create a separate one)
+# 3. Set GMAIL_ENABLED=true in .env
+# 4. On first use, a browser window will open for OAuth consent
+# 5. After consent, the token is saved and auto-refreshes (no browser needed again)
+GMAIL_ENABLED = os.getenv("GMAIL_ENABLED", "true").lower() == "true"
+GMAIL_CREDENTIALS_PATH = os.getenv(
+    "GMAIL_CREDENTIALS_PATH",
+    str(DATA_DIR / "Calendar_Google_Credentials.json")
+)
+GMAIL_TOKEN_PATH = os.getenv(
+    "GMAIL_TOKEN_PATH",
+    str(DATA_DIR / "Gmail_Google_Token.json")
+)
+GMAIL_MAX_RESULTS_DEFAULT = int(os.getenv("GMAIL_MAX_RESULTS_DEFAULT", "10"))
+
+# =============================================================================
 # GOOGLE DRIVE BACKUP CONFIGURATION
 # =============================================================================
 # Automated backups to Google Drive. Creates a compressed tar.gz archive
