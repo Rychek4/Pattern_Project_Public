@@ -92,6 +92,11 @@ class ToolExecutor:
             "create_calendar_event": self._exec_create_calendar_event,
             "update_calendar_event": self._exec_update_calendar_event,
             "delete_calendar_event": self._exec_delete_calendar_event,
+            # Gmail
+            "search_emails": self._exec_search_emails,
+            "read_email": self._exec_read_email,
+            "send_email": self._exec_send_email,
+            "manage_email": self._exec_manage_email,
             # Blog
             "publish_blog_post": self._exec_publish_blog_post,
             "save_blog_draft": self._exec_save_blog_draft,
@@ -1104,6 +1109,168 @@ class ToolExecutor:
         return ToolResult(
             tool_use_id=id,
             tool_name="delete_calendar_event",
+            content=formatted
+        )
+
+    # =========================================================================
+    # GMAIL TOOLS
+    # =========================================================================
+
+    def _exec_search_emails(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Search/list emails from Gmail."""
+        try:
+            from agency.commands.handlers.gmail_handler import SearchEmailsHandler
+        except ImportError:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="search_emails",
+                content="Gmail handler not available. Install: google-api-python-client google-auth-oauthlib",
+                is_error=True
+            )
+
+        handler = SearchEmailsHandler()
+
+        ctx["gmail_params"] = {
+            "query": input.get("query", ""),
+            "max_results": input.get("max_results", 10),
+        }
+
+        result = handler.execute(input.get("query", ""), ctx)
+
+        if result.error:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="search_emails",
+                content=result.get_error_message(),
+                is_error=True
+            )
+
+        formatted = handler.format_result(result)
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="search_emails",
+            content=formatted
+        )
+
+    def _exec_read_email(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Read full email content by ID."""
+        try:
+            from agency.commands.handlers.gmail_handler import ReadEmailHandler
+        except ImportError:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="read_email",
+                content="Gmail handler not available. Install: google-api-python-client google-auth-oauthlib",
+                is_error=True
+            )
+
+        handler = ReadEmailHandler()
+
+        ctx["gmail_params"] = {
+            "email_id": input.get("email_id", ""),
+        }
+
+        result = handler.execute(input.get("email_id", ""), ctx)
+
+        if result.error:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="read_email",
+                content=result.get_error_message(),
+                is_error=True
+            )
+
+        formatted = handler.format_result(result)
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="read_email",
+            content=formatted
+        )
+
+    def _exec_send_email(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Send a new email or reply."""
+        try:
+            from agency.commands.handlers.gmail_handler import SendEmailHandler
+        except ImportError:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="send_email",
+                content="Gmail handler not available. Install: google-api-python-client google-auth-oauthlib",
+                is_error=True
+            )
+
+        handler = SendEmailHandler()
+
+        ctx["gmail_params"] = {
+            "to": input.get("to", ""),
+            "subject": input.get("subject", ""),
+            "body": input.get("body", ""),
+            "cc": input.get("cc", ""),
+            "bcc": input.get("bcc", ""),
+            "reply_to_message_id": input.get("reply_to_message_id", ""),
+            "attachment_paths": input.get("attachment_paths"),
+        }
+
+        result = handler.execute(input.get("to", ""), ctx)
+
+        if result.error:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="send_email",
+                content=result.get_error_message(),
+                is_error=True
+            )
+
+        formatted = handler.format_result(result)
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="send_email",
+            content=formatted
+        )
+
+    def _exec_manage_email(
+        self, input: Dict, id: str, ctx: Dict
+    ) -> ToolResult:
+        """Manage an email (mark read/unread, trash, download attachment)."""
+        try:
+            from agency.commands.handlers.gmail_handler import ManageEmailHandler
+        except ImportError:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="manage_email",
+                content="Gmail handler not available. Install: google-api-python-client google-auth-oauthlib",
+                is_error=True
+            )
+
+        handler = ManageEmailHandler()
+
+        ctx["gmail_params"] = {
+            "email_id": input.get("email_id", ""),
+            "action": input.get("action", ""),
+            "attachment_id": input.get("attachment_id", ""),
+            "filename": input.get("filename", ""),
+        }
+
+        result = handler.execute(input.get("email_id", ""), ctx)
+
+        if result.error:
+            return ToolResult(
+                tool_use_id=id,
+                tool_name="manage_email",
+                content=result.get_error_message(),
+                is_error=True
+            )
+
+        formatted = handler.format_result(result)
+        return ToolResult(
+            tool_use_id=id,
+            tool_name="manage_email",
             content=formatted
         )
 

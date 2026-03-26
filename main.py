@@ -156,6 +156,11 @@ def initialize_system() -> bool:
         from communication.calendar_gateway import init_calendar_gateway
         init_calendar_gateway()
 
+    # Initialize Gmail gateway if enabled
+    if config.GMAIL_ENABLED:
+        from communication.gmail_gateway import init_gmail_gateway
+        init_gmail_gateway()
+
     # Initialize Google Drive backup gateway if enabled
     if config.GOOGLE_DRIVE_BACKUP_ENABLED:
         from communication.drive_backup_gateway import init_drive_backup_gateway
@@ -250,7 +255,7 @@ def print_configuration() -> None:
         log_subsection(f"Webcam: {config.VISUAL_WEBCAM_MODE}")
 
     # Communication settings
-    if config.TELEGRAM_ENABLED or config.GOOGLE_CALENDAR_ENABLED or config.GOOGLE_DRIVE_BACKUP_ENABLED:
+    if config.TELEGRAM_ENABLED or config.GOOGLE_CALENDAR_ENABLED or config.GOOGLE_DRIVE_BACKUP_ENABLED or config.GMAIL_ENABLED:
         log_section("Communication", "📱")
         log_subsection(f"Telegram: {'ENABLED' if config.TELEGRAM_ENABLED else 'DISABLED'}")
         if config.TELEGRAM_ENABLED:
@@ -258,6 +263,7 @@ def print_configuration() -> None:
             masked = f"...{chat_id[-4:]}" if len(chat_id) >= 4 else "auto-detect"
             log_subsection(f"Telegram Chat: {masked}")
         log_subsection(f"Google Calendar: {'ENABLED' if config.GOOGLE_CALENDAR_ENABLED else 'DISABLED'}")
+        log_subsection(f"Gmail: {'ENABLED' if config.GMAIL_ENABLED else 'DISABLED'}")
         log_subsection(f"Drive Backup: {'ENABLED' if config.GOOGLE_DRIVE_BACKUP_ENABLED else 'DISABLED'}")
         log_subsection(f"Rate Limits: {config.TELEGRAM_MAX_PER_HOUR} telegram/hr")
 
