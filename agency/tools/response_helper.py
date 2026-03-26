@@ -225,18 +225,6 @@ def _build_tool_detail(tool_name: str, tool_input: Any) -> str:
     if tool_name == "web_fetch" and "url" in tool_input:
         return f"{tool_name}: {tool_input['url']}"
 
-    # Social platform tools
-    if tool_name == "reddit_search" and "query" in tool_input:
-        return f"{tool_name}: {tool_input['query']}"
-    if tool_name == "reddit_create_post" and "title" in tool_input:
-        return f"{tool_name}: {tool_input['title'][:50]}"
-    if tool_name == "reddit_comment" and "body" in tool_input:
-        return f"{tool_name}: {tool_input['body'][:50]}"
-    if tool_name == "reddit_feed":
-        subreddit = tool_input.get("subreddit", "")
-        if subreddit:
-            return f"{tool_name}: {subreddit}"
-
     # Domain management
     if tool_name == "manage_fetch_domains" and "domain" in tool_input:
         action = tool_input.get("action", "")

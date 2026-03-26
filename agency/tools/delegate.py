@@ -14,8 +14,8 @@ Usage:
     from agency.tools.delegate import run_delegated_task
 
     result = run_delegated_task(
-        task="Log into Reddit and post 'Hello from Isaac' to r/test",
-        context="Use the reddit credentials. Post as a text post.",
+        task="Log into Twitter and post 'Hello from Isaac'",
+        context="Use the twitter credentials. Post as a new tweet.",
         max_rounds=15
     )
 """

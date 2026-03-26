@@ -39,9 +39,6 @@ pillow>=10.0.0
 # opencv-python>=4.8.0
 # google-generativeai>=0.3.0
 
-# Reddit API
-praw>=7.7.0
-
 # Browser Automation (delegate sub-agent)
 # After installing, run: playwright install chromium
 playwright>=1.40.0
