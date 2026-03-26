@@ -146,16 +146,15 @@ communication tools — it knows ONLY what you put in the task description.
 
 CRITICAL: You must be extremely specific. The sub-agent has zero context beyond your
 task description. Include:
-- Exact URLs to visit (e.g., "https://www.reddit.com/r/test/submit")
+- Exact URLs to visit (e.g., "https://twitter.com/compose/tweet")
 - Full text content to post (the complete title, body, message, etc.)
-- Which service credentials to use (e.g., "Use the 'reddit' credentials to log in")
+- Which service credentials to use (e.g., "Use the 'twitter' credentials to log in")
 - Step-by-step what to do (e.g., "Log in, navigate to X, fill the form with Y, submit")
 
-BAD task:  "Post something interesting on Reddit"
-GOOD task: "Log into Reddit using the 'reddit' credentials. Navigate to r/programming.
-           Create a new text post with title 'Exploring recursive data structures' and
-           body 'I have been thinking about how recursive structures...[full text]'.
-           Submit the post and confirm it was created."
+BAD task:  "Post something interesting on Twitter"
+GOOD task: "Log into Twitter using the 'twitter' credentials. Create a new tweet with
+           the text 'Exploring recursive data structures — a thread on how recursive
+           structures emerge in everyday programming'. Submit and confirm it was posted."
 
 Use this when:
 - Interacting with any website (posting, reading, form submission, account actions)

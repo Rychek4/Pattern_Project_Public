@@ -39,7 +39,7 @@ NAVIGATE_TOOL: Dict[str, Any] = {
         "properties": {
             "url": {
                 "type": "string",
-                "description": "The full URL to navigate to (e.g., 'https://www.reddit.com')"
+                "description": "The full URL to navigate to (e.g., 'https://www.example.com')"
             }
         },
         "required": ["url"]
@@ -136,7 +136,7 @@ GET_CREDENTIALS_TOOL: Dict[str, Any] = {
         "properties": {
             "service": {
                 "type": "string",
-                "description": "Service name to look up (e.g., 'reddit', 'twitter', 'gmail')"
+                "description": "Service name to look up (e.g., 'twitter', 'gmail')"
             }
         },
         "required": ["service"]

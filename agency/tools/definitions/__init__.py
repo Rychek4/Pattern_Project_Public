@@ -13,8 +13,7 @@ Modules:
     visual_tools       — Screenshot, webcam, image memory
     agency_tools       — Active thoughts, pulse, curiosity, delegation
     web_tools          — Web fetch domain management
-    reddit_tools       — Reddit browsing, posting, commenting
-    growth_tools       — Growth thread lifecycle (pulse-only)
+growth_tools       — Growth thread lifecycle (pulse-only)
     reading_tools      — Novel reading system
     calendar_tools     — Google Calendar integration
     gmail_tools        — Gmail email integration
@@ -69,18 +68,6 @@ from agency.tools.definitions.agency_tools import (
 from agency.tools.definitions.web_tools import (
     MANAGE_FETCH_DOMAINS_TOOL,
     LIST_FETCH_DOMAINS_TOOL,
-)
-
-# --- Reddit ---
-from agency.tools.definitions.reddit_tools import (
-    REDDIT_FEED_TOOL,
-    REDDIT_POST_TOOL,
-    REDDIT_CREATE_POST_TOOL,
-    REDDIT_COMMENT_TOOL,
-    REDDIT_VOTE_TOOL,
-    REDDIT_SEARCH_TOOL,
-    REDDIT_SUBREDDITS_TOOL,
-    REDDIT_PROFILE_TOOL,
 )
 
 # --- Growth Threads (pulse-only) ---
@@ -232,17 +219,6 @@ def get_tool_definitions(is_pulse: bool = False, pulse_type: str = None) -> List
         tools.append(READ_EMAIL_TOOL)
         tools.append(SEND_EMAIL_TOOL)
         tools.append(MANAGE_EMAIL_TOOL)
-
-    # Reddit tools (if enabled)
-    if getattr(config, 'REDDIT_ENABLED', False):
-        tools.append(REDDIT_FEED_TOOL)
-        tools.append(REDDIT_POST_TOOL)
-        tools.append(REDDIT_CREATE_POST_TOOL)
-        tools.append(REDDIT_COMMENT_TOOL)
-        tools.append(REDDIT_VOTE_TOOL)
-        tools.append(REDDIT_SEARCH_TOOL)
-        tools.append(REDDIT_SUBREDDITS_TOOL)
-        tools.append(REDDIT_PROFILE_TOOL)
 
     # Project tools (if enabled)
     if getattr(config, 'PROJECTS_ENABLED', True):

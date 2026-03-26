@@ -63,15 +63,6 @@ class ToolExecutor:
             "advance_curiosity": self._exec_advance_curiosity,
             "manage_fetch_domains": self._exec_manage_fetch_domains,
             "list_fetch_domains": self._exec_list_fetch_domains,
-            # Reddit tools
-            "reddit_feed": self._exec_reddit_feed,
-            "reddit_post": self._exec_reddit_post,
-            "reddit_create_post": self._exec_reddit_create_post,
-            "reddit_comment": self._exec_reddit_comment,
-            "reddit_vote": self._exec_reddit_vote,
-            "reddit_search": self._exec_reddit_search,
-            "reddit_subreddits": self._exec_reddit_subreddits,
-            "reddit_profile": self._exec_reddit_profile,
             # Image memory
             "save_image": self._exec_save_image,
             # Delegation
@@ -757,86 +748,6 @@ class ToolExecutor:
         """List current web fetch domain configuration."""
         from agency.commands.handlers.fetch_domain_handler import exec_list_fetch_domains
         return exec_list_fetch_domains(input, id, ctx)
-
-    # =========================================================================
-    # REDDIT TOOLS
-    # =========================================================================
-
-    def _get_reddit_client(self) -> Any:
-        """Lazy-import and return the Reddit client."""
-        from communication.reddit_client import get_reddit_client
-        return get_reddit_client()
-
-    def _reddit_result(
-        self, tool_name: str, id: str, data: Dict
-    ) -> ToolResult:
-        """Format a Reddit API response into a ToolResult."""
-        import json
-
-        if data.get("error"):
-            return ToolResult(
-                tool_use_id=id,
-                tool_name=tool_name,
-                content=data.get("message", "Unknown Reddit error"),
-                is_error=True,
-            )
-
-        return ToolResult(
-            tool_use_id=id,
-            tool_name=tool_name,
-            content=json.dumps(data, indent=2, default=str),
-        )
-
-    def _exec_reddit_tool(
-        self, tool_name: str, id: str, method_name: str, **kwargs
-    ) -> ToolResult:
-        """Generic dispatch for all Reddit tools."""
-        try:
-            client = self._get_reddit_client()
-            data = getattr(client, method_name)(**kwargs)
-            return self._reddit_result(tool_name, id, data)
-        except RuntimeError as e:
-            return ToolResult(
-                tool_use_id=id, tool_name=tool_name,
-                content=str(e), is_error=True,
-            )
-
-    def _exec_reddit_feed(self, input: Dict, id: str, ctx: Dict) -> ToolResult:
-        return self._exec_reddit_tool("reddit_feed", id, "get_feed",
-            subreddit=input.get("subreddit", "all"), sort=input.get("sort", "hot"),
-            time_filter=input.get("time_filter", "day"), limit=input.get("limit", 10))
-
-    def _exec_reddit_post(self, input: Dict, id: str, ctx: Dict) -> ToolResult:
-        return self._exec_reddit_tool("reddit_post", id, "get_post",
-            post_id=input.get("post_id", ""), comment_sort=input.get("comment_sort", "best"),
-            comment_limit=input.get("comment_limit", 20))
-
-    def _exec_reddit_create_post(self, input: Dict, id: str, ctx: Dict) -> ToolResult:
-        return self._exec_reddit_tool("reddit_create_post", id, "create_post",
-            subreddit=input.get("subreddit", ""), title=input.get("title", ""),
-            content=input.get("content"), url=input.get("url"))
-
-    def _exec_reddit_comment(self, input: Dict, id: str, ctx: Dict) -> ToolResult:
-        return self._exec_reddit_tool("reddit_comment", id, "create_comment",
-            thing_id=input.get("thing_id", ""), content=input.get("content", ""))
-
-    def _exec_reddit_vote(self, input: Dict, id: str, ctx: Dict) -> ToolResult:
-        return self._exec_reddit_tool("reddit_vote", id, "vote",
-            thing_id=input.get("thing_id", ""), direction=input.get("direction", "up"))
-
-    def _exec_reddit_search(self, input: Dict, id: str, ctx: Dict) -> ToolResult:
-        return self._exec_reddit_tool("reddit_search", id, "search",
-            query=input.get("query", ""), subreddit=input.get("subreddit"),
-            sort=input.get("sort", "relevance"), time_filter=input.get("time_filter", "all"),
-            limit=input.get("limit", 10))
-
-    def _exec_reddit_subreddits(self, input: Dict, id: str, ctx: Dict) -> ToolResult:
-        return self._exec_reddit_tool("reddit_subreddits", id, "get_subreddits",
-            query=input.get("query"), limit=input.get("limit", 10))
-
-    def _exec_reddit_profile(self, input: Dict, id: str, ctx: Dict) -> ToolResult:
-        return self._exec_reddit_tool("reddit_profile", id, "get_profile",
-            username=input.get("username"))
 
     # =========================================================================
     # DELEGATION TOOL

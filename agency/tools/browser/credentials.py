@@ -7,11 +7,6 @@ but cannot modify the file.
 
 Credential file format (data/credentials.toml):
 
-    [reddit]
-    username = "my_username"
-    password = "my_password"
-    login_url = "https://www.reddit.com/login/"
-
     [twitter]
     username = "my_handle"
     password = "my_password"
@@ -84,7 +79,7 @@ def get_credential(
 
     Args:
         credentials_path: Path to the credentials.toml file
-        service: Service name (e.g., "reddit", "twitter", "gmail")
+        service: Service name (e.g., "twitter", "gmail")
 
     Returns:
         Dict with service credentials, or None if not found.

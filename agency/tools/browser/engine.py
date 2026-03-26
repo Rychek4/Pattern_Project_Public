@@ -15,10 +15,10 @@ Usage:
     await page.goto("https://example.com")
 
     # Load saved session for a service before navigating to login
-    await engine.load_session("reddit")
+    await engine.load_session("twitter")
 
     # Save session after login succeeds
-    await engine.save_session("reddit")
+    await engine.save_session("twitter")
 
     # Cleanup when delegation is done
     await engine.close()
@@ -126,7 +126,7 @@ class BrowserEngine:
         and the login may be skipped entirely.
 
         Args:
-            service: Service name (e.g., "reddit", "twitter")
+            service: Service name (e.g., "twitter", "gmail")
 
         Returns:
             True if a session was loaded, False if none existed
@@ -166,7 +166,7 @@ class BrowserEngine:
         can skip the login flow.
 
         Args:
-            service: Service name (e.g., "reddit", "twitter")
+            service: Service name (e.g., "twitter", "gmail")
 
         Returns:
             True if session was saved successfully

@@ -26,7 +26,6 @@ Pattern is an AI companion system built around Claude that doesn't just respond 
 
 ### Communication Gateways
 - **Telegram Bot** — Bidirectional messaging with background listener
-- **Reddit Integration** — Browse, post, comment, vote, and search via PRAW
 - **Google Calendar** — List, create, update, and delete calendar events
 - Rate limiting on all channels to prevent abuse
 
@@ -36,14 +35,14 @@ Pattern is an AI companion system built around Claude that doesn't just respond 
 - **Modes** — Auto (every prompt), On-Demand (tool-triggered), or Disabled
 
 ### Native Tool System
-Pattern uses Claude's native tool use (no text-pattern parsing). 50 tools across these categories:
+Pattern uses Claude's native tool use (no text-pattern parsing). 42 tools across these categories:
 
 | Category | Examples |
 |----------|----------|
 | Memory | `search_memories`, `store_bridge_memory`, `update_memory_self_model` |
 | Reminders | `create_reminder`, `complete_reminder`, `dismiss_reminder`, `list_reminders` |
 | Files | `read_file`, `write_file`, `append_file`, `list_files`, `create_directory`, `move_file` |
-| Communication | `send_telegram`, `reddit_feed`, `reddit_create_post`, `reddit_comment` |
+| Communication | `send_telegram` |
 | Calendar | `list_calendar_events`, `create_calendar_event`, `update_calendar_event` |
 | Visual | `capture_screenshot`, `capture_webcam`, `save_image` |
 | Agency | `set_pulse_interval`, `set_active_thoughts`, `advance_curiosity`, `delegate_task` |
@@ -176,7 +175,6 @@ Core dependencies:
 
 Optional:
 - `python-telegram-bot>=21.0` — Telegram integration
-- `praw>=7.7.0` — Reddit integration
 - `playwright>=1.40.0` — Browser automation (delegate sub-agent)
 - `google-api-python-client` — Google Calendar integration
 - `pillow>=10.0.0` — Screenshot capture
@@ -269,7 +267,6 @@ Pattern_Project/
 ├── communication/           # External gateways
 │   ├── telegram_gateway.py  # Telegram messaging
 │   ├── telegram_listener.py # Background message listener
-│   ├── reddit_client.py     # Reddit API
 │   ├── calendar_gateway.py  # Google Calendar
 │   └── drive_backup_gateway.py  # Google Drive backup
 ├── interface/               # User interfaces
@@ -343,7 +340,7 @@ All documentation lives in `docs/`, organized by category:
 |--------|----------|
 | [`docs/architecture/`](docs/architecture/) | System design, data flow, project overview |
 | [`docs/deployment/`](docs/deployment/) | VPS setup guide, cloud readiness audit, operations cheatsheet |
-| [`docs/guides/`](docs/guides/) | AI concepts guide & slides, Reddit integration setup |
+| [`docs/guides/`](docs/guides/) | AI concepts guide & slides |
 | [`docs/plans/`](docs/plans/) | Active development plans (metacognition, audit/testing, blog, cleanup) |
 | [`docs/reference/`](docs/reference/) | Feature catalog, Guardian spec, streaming pipeline, bug history |
 | [`docs/legacy/`](docs/legacy/) | Historical prompt system docs (pre-native tool use) |
