@@ -48,16 +48,22 @@ class PublishBlogPostHandler(CommandHandler):
                 error=ToolError(ToolErrorType.SYSTEM_ERROR, result["error"], None, None),
             )
 
+        display = f"Blog post published: {title}"
+        if "warning" in result:
+            display = result["warning"]
+
         return CommandResult(
             command_name=self.command_name, query=title,
             data=result, needs_continuation=True,
-            display_text=f"Blog post published: {title}",
+            display_text=display,
         )
 
     def format_result(self, result: CommandResult) -> str:
         if result.error:
             return result.get_error_message()
         d = result.data
+        if "warning" in d:
+            return f"WARNING: {d['warning']}"
         return f"Published: \"{result.query}\" (slug: {d['slug']})"
 
 
@@ -209,16 +215,22 @@ class EditBlogPostHandler(CommandHandler):
                 error=ToolError(ToolErrorType.SYSTEM_ERROR, result["error"], None, None),
             )
 
+        display = f"Blog post edited: {slug}"
+        if "warning" in result:
+            display = result["warning"]
+
         return CommandResult(
             command_name=self.command_name, query=slug,
             data=result, needs_continuation=True,
-            display_text=f"Blog post edited: {slug}",
+            display_text=display,
         )
 
     def format_result(self, result: CommandResult) -> str:
         if result.error:
             return result.get_error_message()
         d = result.data
+        if "warning" in d:
+            return f"WARNING: {d['warning']}"
         return f"Edited: {d['slug']} (status: {d['status']})"
 
 

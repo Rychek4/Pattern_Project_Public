@@ -281,7 +281,10 @@ def create_post(
     log_info(f"Blog: created post '{title}' ({actual_slug})", prefix="📝")
 
     if status == "published":
-        rebuild_site()
+        rebuild_result = rebuild_site()
+        if "error" in rebuild_result:
+            return {"slug": actual_slug, "status": status, "filepath": str(filepath),
+                    "warning": f"Post saved but site rebuild failed: {rebuild_result['error']}"}
 
     return {"slug": actual_slug, "status": status, "filepath": str(filepath)}
 
@@ -319,7 +322,10 @@ def edit_post(
 
     # Rebuild if the post is published or was just unpublished
     if post["status"] == "published" or status is not None:
-        rebuild_site()
+        rebuild_result = rebuild_site()
+        if "error" in rebuild_result:
+            return {"slug": slug, "status": post["status"],
+                    "warning": f"Post saved but site rebuild failed: {rebuild_result['error']}"}
 
     return {"slug": slug, "status": post["status"]}
 
@@ -342,7 +348,10 @@ def delete_post(slug: str) -> Dict[str, Any]:
 
     post["filepath"].unlink()
     log_info(f"Blog: deleted post '{post['title']}' ({slug})", prefix="📝")
-    rebuild_site()
+    rebuild_result = rebuild_site()
+    if "error" in rebuild_result:
+        return {"deleted": slug,
+                "warning": f"Post deleted but site rebuild failed: {rebuild_result['error']}"}
     return {"deleted": slug}
 
 
