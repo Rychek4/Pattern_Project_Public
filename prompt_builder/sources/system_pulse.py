@@ -22,11 +22,12 @@ PULSE_INTERVAL_OPTIONS = {
     21600: "6 hours",
     43200: "12 hours",
     86400: "24 hours",
+    172800: "48 hours",
 }
 
 # Valid intervals per pulse type
-REFLECTIVE_INTERVALS = {"6h": 21600, "12h": 43200, "24h": 86400}
-ACTION_INTERVALS = {"1h": 3600, "2h": 7200, "3h": 10800, "6h": 21600}
+REFLECTIVE_INTERVALS = {"6h": 21600, "12h": 43200, "24h": 86400, "48h": 172800}
+ACTION_INTERVALS = {"1h": 3600, "2h": 7200, "3h": 10800, "6h": 21600, "12h": 43200, "24h": 86400}
 
 # Combined mapping for tool input validation (used by ToolExecutor)
 PULSE_COMMAND_TO_SECONDS = {
@@ -36,6 +37,7 @@ PULSE_COMMAND_TO_SECONDS = {
     "6h": 21600,
     "12h": 43200,
     "24h": 86400,
+    "48h": 172800,
 }
 
 

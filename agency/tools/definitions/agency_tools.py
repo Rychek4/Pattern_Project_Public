@@ -7,8 +7,8 @@ SET_PULSE_INTERVAL_TOOL: Dict[str, Any] = {
     "description": """Adjust one of your two pulse timers.
 
 You have two pulse types:
-- "reflective": Deep introspection (Opus 4.6). Valid intervals: 6h, 12h, 24h.
-- "action": Open-ended agency (Sonnet 4.6). Valid intervals: 1h, 2h, 3h, 6h.
+- "reflective": Deep introspection (Opus 4.6). Valid intervals: 6h, 12h, 24h, 48h.
+- "action": Open-ended agency (Sonnet 4.6). Valid intervals: 1h, 2h, 3h, 6h, 12h, 24h.
 
 Use this when your own sense of timing calls for a different rhythm.""",
     "input_schema": {
@@ -21,8 +21,8 @@ Use this when your own sense of timing calls for a different rhythm.""",
             },
             "interval": {
                 "type": "string",
-                "enum": ["1h", "2h", "3h", "6h", "12h", "24h"],
-                "description": "The new interval. Reflective accepts 6h/12h/24h. Action accepts 1h/2h/3h/6h."
+                "enum": ["1h", "2h", "3h", "6h", "12h", "24h", "48h"],
+                "description": "The new interval. Reflective accepts 6h/12h/24h/48h. Action accepts 1h/2h/3h/6h/12h/24h."
             }
         },
         "required": ["pulse_type", "interval"]
