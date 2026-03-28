@@ -119,6 +119,12 @@ class SemanticMemorySource(ContextSource):
         7. Update retrieval warmth for returned memories
         8. Expand topic warmth to associated memories
         """
+        # Pulses use boilerplate prompt text as the query, which would retrieve
+        # irrelevant memories (e.g. about "presence" or "awareness").  Pulse code
+        # paths don't inject retrieved memories anyway, so skip the work entirely.
+        if session_context.get("is_pulse"):
+            return None
+
         import config
         vector_store = get_vector_store()
 
