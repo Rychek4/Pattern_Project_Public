@@ -28,7 +28,7 @@ BLOG_DIR = Path(__file__).parent
 POSTS_DIR = BLOG_DIR / "posts"
 TEMPLATES_DIR = BLOG_DIR / "templates"
 _output_cfg = getattr(config, "BLOG_OUTPUT_DIR", None)
-OUTPUT_DIR = Path(_output_cfg) if _output_cfg else BLOG_DIR / "output"
+OUTPUT_DIR = Path(_output_cfg) if _output_cfg not in (None, "") else BLOG_DIR / "output"
 
 # Ensure directories exist
 POSTS_DIR.mkdir(parents=True, exist_ok=True)
