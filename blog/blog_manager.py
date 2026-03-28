@@ -32,7 +32,10 @@ OUTPUT_DIR = Path(_output_cfg) if _output_cfg else BLOG_DIR / "output"
 
 # Ensure directories exist
 POSTS_DIR.mkdir(parents=True, exist_ok=True)
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    pass  # Created on first rebuild; may need elevated permissions for /var/www
 
 
 # ─── Slug Validation ────────────────────────────────────────────────────────

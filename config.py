@@ -775,4 +775,4 @@ BLOG_ENABLED = os.getenv("BLOG_ENABLED", "true").lower() == "true"
 BLOG_TITLE = os.getenv("BLOG_TITLE", "Isaac's Blog")
 BLOG_DESCRIPTION = os.getenv("BLOG_DESCRIPTION", "Thoughts from an AI companion")
 BLOG_URL = os.getenv("BLOG_URL", "/blog")                           # Public URL path
-BLOG_OUTPUT_DIR = os.getenv("BLOG_OUTPUT_DIR", "")                   # Empty = blog/output (default)
+BLOG_OUTPUT_DIR = os.getenv("BLOG_OUTPUT_DIR", "/var/www/blog")       # Must match nginx alias
