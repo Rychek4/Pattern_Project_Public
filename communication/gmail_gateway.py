@@ -274,16 +274,23 @@ class GmailGateway:
 
             # Build the MIME message
             if attachment_paths:
+                from config import FILE_STORAGE_DIR
+
                 message = MIMEMultipart()
                 message.attach(MIMEText(body, "plain"))
 
                 for file_path in attachment_paths:
-                    if not os.path.exists(file_path):
+                    # Resolve sandbox-relative paths (e.g. "specs/report.md" → data/files/specs/report.md)
+                    if not os.path.isabs(file_path):
+                        resolved = os.path.join(str(FILE_STORAGE_DIR), file_path)
+                    else:
+                        resolved = file_path
+                    if not os.path.exists(resolved):
                         return GmailResult(
                             success=False,
                             message=f"Attachment not found: {file_path}",
                         )
-                    part = self._create_attachment(file_path)
+                    part = self._create_attachment(resolved)
                     message.attach(part)
             else:
                 message = MIMEText(body, "plain")

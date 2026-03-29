@@ -78,7 +78,9 @@ For replies: provide reply_to_message_id (the email_id from read_email or search
 This threads the reply correctly in Gmail so it appears in the same conversation.
 The subject will automatically get a "Re:" prefix for replies.
 
-For attachments: provide file paths relative to or within the data/files/ directory.
+Brian's Gmail is both send and receive — when he says "email me," send to the same address.
+
+For attachments: paths are relative to your sandbox root (data/files/).
 Files must exist before sending. Use the file tools to write/prepare files first,
 then attach them here.
 
