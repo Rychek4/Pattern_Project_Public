@@ -45,24 +45,6 @@ ANTHROPIC_MODEL_CONVERSATION = os.getenv("ANTHROPIC_MODEL_CONVERSATION", "anthro
 ANTHROPIC_MODEL_EXTRACTION = os.getenv("ANTHROPIC_MODEL_EXTRACTION", "anthropic/claude-sonnet-4-6")  # Memory extraction (Sonnet)
 ANTHROPIC_MAX_TOKENS = int(os.getenv("ANTHROPIC_MAX_TOKENS", "64000"))
 
-# =============================================================================
-# OPENROUTER FREE MODEL FALLBACK CHAIN (tried in order)
-# =============================================================================
-# Current top reliable free models on OpenRouter (March 2026)
-OPENROUTER_FREE_MODELS = [
-    # Best free models for tool calling right now (March 2026)
-    "openai/gpt-4o-mini",                    # Best balance: cheap + excellent tool calling"openrouter/free",                           # ← Smart router: auto-picks best available free model that supports your request (tools, etc.)
-    "stepfun/step-3.5-flash:free",               # Currently one of the most popular and capable free models
-    "qwen/qwen3-next-80b-a3b-instruct:free",
-    "qwen/qwen3-coder:free",                     # Strong tool use
-    "nvidia/nemotron-3-super-120b-a12b:free",
-    "meta-llama/llama-3.3-70b-instruct:free",    # More reliable Llama variant than older ones
-    "meta-llama/llama-3.1-8b-instruct:free",
-]
-
-# Default starting model (first in the list above)
-OPENROUTER_FREE_MODEL = OPENROUTER_FREE_MODELS[0]
-
 # Extended Thinking
 # Claude uses a private scratchpad to reason before responding.
 # Improves quality for complex reasoning tasks but uses more output tokens.
@@ -77,7 +59,7 @@ ANTHROPIC_THINKING_EFFORT = "high"                 # Effort level for adaptive t
 ANTHROPIC_THINKING_ENABLED = True                   # Default state for new users (on by default)
 
 # Routing
-LLM_PRIMARY_PROVIDER = "openrouter_free"
+LLM_PRIMARY_PROVIDER = "openrouter"
 
 # API Retry & Failover
 # Layer 1: Automatic retry for transient errors (500, 502, 503, timeouts)

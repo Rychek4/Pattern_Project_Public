@@ -206,15 +206,12 @@ class AnthropicClient:
         self._client = None
 
     def _get_client(self):
-        """Lazy-load the Anthropic client, pointed at OpenRouter."""
+        """Lazy-load the Anthropic client."""
         if self._client is None:
             try:
                 import anthropic
-                import config as _cfg
-                base_url = getattr(_cfg, 'OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1')
                 self._client = anthropic.Anthropic(
                     api_key=self.api_key,
-                    base_url=base_url,
                     timeout=self.timeout
                 )
             except ImportError:
@@ -1180,9 +1177,9 @@ def get_anthropic_client() -> AnthropicClient:
     """Get the global Anthropic client instance."""
     global _anthropic_client
     if _anthropic_client is None:
-        from config import OPENROUTER_API_KEY, ANTHROPIC_MODEL, ANTHROPIC_MAX_TOKENS
+        from config import ANTHROPIC_API_KEY, ANTHROPIC_MODEL, ANTHROPIC_MAX_TOKENS
         _anthropic_client = AnthropicClient(
-            api_key=OPENROUTER_API_KEY,
+            api_key=ANTHROPIC_API_KEY,
             model=ANTHROPIC_MODEL,
             max_tokens=ANTHROPIC_MAX_TOKENS
         )

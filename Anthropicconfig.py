@@ -37,31 +37,12 @@ AI_NAME = os.getenv("AI_NAME", "Frank")
 # =============================================================================
 # LLM CONFIGURATION
 # =============================================================================
-# OpenRouter (Claude via OpenAI-compatible API)
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "anthropic/claude-sonnet-4-6")  # Default/fallback model
-ANTHROPIC_MODEL_CONVERSATION = os.getenv("ANTHROPIC_MODEL_CONVERSATION", "anthropic/claude-sonnet-4-6")  # User-facing chat (Sonnet)
-ANTHROPIC_MODEL_EXTRACTION = os.getenv("ANTHROPIC_MODEL_EXTRACTION", "anthropic/claude-sonnet-4-6")  # Memory extraction (Sonnet)
+# Anthropic (Claude)
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")  # Default/fallback model
+ANTHROPIC_MODEL_CONVERSATION = os.getenv("ANTHROPIC_MODEL_CONVERSATION", "claude-sonnet-4-6")  # User-facing chat (Sonnet)
+ANTHROPIC_MODEL_EXTRACTION = os.getenv("ANTHROPIC_MODEL_EXTRACTION", "claude-sonnet-4-6")  # Memory extraction (Sonnet)
 ANTHROPIC_MAX_TOKENS = int(os.getenv("ANTHROPIC_MAX_TOKENS", "64000"))
-
-# =============================================================================
-# OPENROUTER FREE MODEL FALLBACK CHAIN (tried in order)
-# =============================================================================
-# Current top reliable free models on OpenRouter (March 2026)
-OPENROUTER_FREE_MODELS = [
-    # Best free models for tool calling right now (March 2026)
-    "openai/gpt-4o-mini",                    # Best balance: cheap + excellent tool calling"openrouter/free",                           # ← Smart router: auto-picks best available free model that supports your request (tools, etc.)
-    "stepfun/step-3.5-flash:free",               # Currently one of the most popular and capable free models
-    "qwen/qwen3-next-80b-a3b-instruct:free",
-    "qwen/qwen3-coder:free",                     # Strong tool use
-    "nvidia/nemotron-3-super-120b-a12b:free",
-    "meta-llama/llama-3.3-70b-instruct:free",    # More reliable Llama variant than older ones
-    "meta-llama/llama-3.1-8b-instruct:free",
-]
-
-# Default starting model (first in the list above)
-OPENROUTER_FREE_MODEL = OPENROUTER_FREE_MODELS[0]
 
 # Extended Thinking
 # Claude uses a private scratchpad to reason before responding.
@@ -77,7 +58,7 @@ ANTHROPIC_THINKING_EFFORT = "high"                 # Effort level for adaptive t
 ANTHROPIC_THINKING_ENABLED = True                   # Default state for new users (on by default)
 
 # Routing
-LLM_PRIMARY_PROVIDER = "openrouter_free"
+LLM_PRIMARY_PROVIDER = "anthropic"
 
 # API Retry & Failover
 # Layer 1: Automatic retry for transient errors (500, 502, 503, timeouts)
@@ -94,8 +75,8 @@ STREAM_INACTIVITY_TIMEOUT = 360                # seconds (0 = disabled)
 # Maps each model to its fallback. When primary model is overloaded or rate-limited,
 # the system automatically retries with the alternate model.
 ANTHROPIC_MODEL_FAILOVER = {
-    "anthropic/claude-opus-4-6": "anthropic/claude-sonnet-4-6",
-    "anthropic/claude-sonnet-4-6": "anthropic/claude-opus-4-6",
+    "claude-opus-4-6": "claude-sonnet-4-6",
+    "claude-sonnet-4-6": "claude-opus-4-6",
 }
 
 # Layer 3: Deferred retry when all models unavailable
@@ -658,8 +639,8 @@ NOVEL_CHAPTER_MAX_TOKENS = 4000
 # Model routing for reading tasks:
 #   - Chapter extraction (per-chapter): Uses Sonnet (cost-effective, strong comprehension)
 #   - Reflective passes (arc boundaries + completion): Uses Opus (deeper synthesis)
-NOVEL_EXTRACTION_MODEL = os.getenv("NOVEL_EXTRACTION_MODEL", "anthropic/claude-sonnet-4-6")
-NOVEL_REFLECTION_MODEL = os.getenv("NOVEL_REFLECTION_MODEL", "anthropic/claude-opus-4-6")
+NOVEL_EXTRACTION_MODEL = os.getenv("NOVEL_EXTRACTION_MODEL", "claude-sonnet-4-6")
+NOVEL_REFLECTION_MODEL = os.getenv("NOVEL_REFLECTION_MODEL", "claude-opus-4-6")
 
 # Reflective pass triggers: Opus runs at arc boundaries and at book completion.
 # This controls the "step back and see the whole" synthesis passes.

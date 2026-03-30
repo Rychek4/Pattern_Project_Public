@@ -11,13 +11,11 @@ from core.logger import log_info, log_warning, log_error, log_success
 from llm.anthropic_client import (
     AnthropicClient, AnthropicResponse, ToolCall, StreamingState, get_anthropic_client
 )
-from llm.openrouter_client import OpenRouterClient, get_openrouter_client
 
 
 class LLMProvider(Enum):
     """Available LLM providers."""
     ANTHROPIC = "anthropic"
-    OPENROUTER_FREE = "openrouter_free"
 
 
 class TaskType(Enum):
@@ -93,7 +91,6 @@ class LLMRouter:
         """
         self.primary_provider = primary_provider
         self._anthropic: Optional[AnthropicClient] = None
-        self._openrouter_free: Optional[OpenRouterClient] = None
         self._provider_status: Dict[LLMProvider, bool] = {}
 
     def _get_anthropic(self) -> AnthropicClient:
@@ -101,12 +98,6 @@ class LLMRouter:
         if self._anthropic is None:
             self._anthropic = get_anthropic_client()
         return self._anthropic
-
-    def _get_openrouter_free(self) -> OpenRouterClient:
-        """Get or create OpenRouter free-model client."""
-        if self._openrouter_free is None:
-            self._openrouter_free = get_openrouter_client()
-        return self._openrouter_free
 
     def _get_failover_model(self, current_model: str) -> Optional[str]:
         """
@@ -143,17 +134,6 @@ class LLMRouter:
         except Exception as e:
             status[LLMProvider.ANTHROPIC] = (False, str(e))
 
-        # Check OpenRouter free
-        try:
-            or_client = self._get_openrouter_free()
-            is_available = or_client.is_available()
-            if is_available:
-                status[LLMProvider.OPENROUTER_FREE] = (True, f"Available ({or_client.model})")
-            else:
-                status[LLMProvider.OPENROUTER_FREE] = (False, "API key not configured")
-        except Exception as e:
-            status[LLMProvider.OPENROUTER_FREE] = (False, str(e))
-
         self._provider_status = {p: s[0] for p, s in status.items()}
         return status
 
@@ -182,10 +162,6 @@ class LLMRouter:
 
         # For conversation and analysis, use primary provider
         return self.primary_provider
-
-    def get_free_provider(self) -> LLMProvider:
-        """Return the free/low-cost provider for eligible tasks."""
-        return LLMProvider.OPENROUTER_FREE
 
     def chat(
         self,
@@ -868,39 +844,6 @@ class LLMRouter:
                 )
 
                 return llm_response
-
-            elif provider == LLMProvider.OPENROUTER_FREE:
-                client = self._get_openrouter_free()
-
-                import config
-                if model_override:
-                    model = model_override
-                else:
-                    model = getattr(config, 'OPENROUTER_FREE_MODEL', client.model)
-
-                response = client.chat(
-                    messages=messages,
-                    system_prompt=system_prompt,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    tools=tools,
-                    model=model
-                )
-
-                return LLMResponse(
-                    text=response.text,
-                    success=response.success,
-                    provider=provider,
-                    tokens_in=response.input_tokens,
-                    tokens_out=response.output_tokens,
-                    error=response.error,
-                    error_type=response.error_type,
-                    stop_reason=response.stop_reason,
-                    tool_calls=response.tool_calls,
-                    raw_content=response.raw_content,
-                    server_tool_details=response.server_tool_details,
-                    thinking_text=response.thinking_text
-                )
 
             else:
                 log_error(f"Unknown provider: {provider}")
