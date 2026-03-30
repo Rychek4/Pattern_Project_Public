@@ -76,6 +76,18 @@ class MemorySearchResult:
     combined_score: float
 
 
+@dataclass
+class ExploreResult:
+    """A memory found via neighborhood exploration from a seed memory."""
+    memory: Memory
+    seed_similarity: float      # Cosine similarity to the seed memory
+    importance_score: float
+    freshness_score: float
+    query_similarity: float     # Cosine similarity to the optional query (0.0 if no query)
+    explore_score: float        # Weighted combination for ranking
+    tier: str                   # 'closely_connected', 'connected', or 'loosely_associated'
+
+
 class VectorStore:
     """
     Vector store for semantic memory search.
@@ -488,6 +500,178 @@ class VectorStore:
             )
 
             return [self._row_to_memory(row) for row in result]
+
+    @db_retry()
+    def explore(
+        self,
+        seed_memory_id: int,
+        query: Optional[str] = None,
+        limit: int = 10,
+    ) -> Tuple[Optional[Memory], List[ExploreResult]]:
+        """
+        Explore the neighborhood around a seed memory in embedding space.
+
+        Uses the seed memory's embedding as a query vector against both stores,
+        scoring neighbors by proximity to the seed rather than to a search query.
+
+        Args:
+            seed_memory_id: ID of the memory to explore from
+            query: Optional query string for weak contextual tethering (10% weight)
+            limit: Maximum results to return
+
+        Returns:
+            Tuple of (seed_memory, explore_results). seed_memory is None if the
+            ID was not found (caller should fall back to standard search).
+        """
+        from config import (
+            EXPLORE_SEED_SIMILARITY_WEIGHT,
+            EXPLORE_IMPORTANCE_WEIGHT,
+            EXPLORE_FRESHNESS_WEIGHT,
+            EXPLORE_QUERY_WEIGHT,
+            EXPLORE_MIN_SCORE,
+            EXPLORE_MIN_SEED_SIMILARITY,
+            EXPLORE_OVERFETCH_MULTIPLIER,
+            EXPLORE_TIER_CLOSELY,
+            EXPLORE_TIER_CONNECTED,
+            EXPLORE_TIER_LOOSE,
+            MEMORY_DEDUP_THRESHOLD,
+        )
+
+        # Resolve seed memory
+        seed_memory = self.get_memory(seed_memory_id)
+        if seed_memory is None:
+            return None, []
+
+        seed_embedding = seed_memory.embedding
+
+        # Embed query if provided (for weak tether scoring)
+        query_embedding = None
+        has_query = False
+        if query:
+            if is_model_loaded():
+                query_embedding = get_embedding(query)
+                has_query = query_embedding is not None
+
+        # Determine scoring weights
+        if has_query:
+            w_seed = EXPLORE_SEED_SIMILARITY_WEIGHT      # 0.50
+            w_importance = EXPLORE_IMPORTANCE_WEIGHT      # 0.25
+            w_freshness = EXPLORE_FRESHNESS_WEIGHT        # 0.15
+            w_query = EXPLORE_QUERY_WEIGHT                # 0.10
+        else:
+            # No query: redistribute query weight to seed similarity
+            w_seed = EXPLORE_SEED_SIMILARITY_WEIGHT + EXPLORE_QUERY_WEIGHT  # 0.60
+            w_importance = EXPLORE_IMPORTANCE_WEIGHT      # 0.25
+            w_freshness = EXPLORE_FRESHNESS_WEIGHT        # 0.15
+            w_query = 0.0
+
+        overfetch_limit = int(limit * EXPLORE_OVERFETCH_MULTIPLIER)
+
+        with self._lock_manager.acquire("memory"):
+            db = get_database()
+            now = datetime.now()
+
+            # Retrieve all memories (both stores — no category filter)
+            result = db.execute("SELECT * FROM memories", fetch=True)
+            if not result:
+                return seed_memory, []
+
+            # Load memories and embeddings, excluding the seed itself
+            memories = []
+            embeddings = []
+            for row in result:
+                if row["id"] == seed_memory_id:
+                    continue
+                memory = self._row_to_memory(row)
+                memories.append(memory)
+                embeddings.append(memory.embedding)
+
+            if not memories:
+                return seed_memory, []
+
+            # Batch compute similarities to seed
+            embeddings_matrix = np.array(embeddings)
+            seed_similarities = cosine_similarity_batch(seed_embedding, embeddings_matrix)
+
+            # Batch compute similarities to query (if present)
+            if has_query:
+                query_similarities = cosine_similarity_batch(query_embedding, embeddings_matrix)
+            else:
+                query_similarities = np.zeros(len(memories))
+
+            # Score and filter
+            candidates = []
+            for i, memory in enumerate(memories):
+                seed_sim = float(seed_similarities[i])
+
+                # Hard floor: minimum similarity to seed
+                if seed_sim < EXPLORE_MIN_SEED_SIMILARITY:
+                    continue
+
+                importance_score = memory.importance
+                freshness_score = self._compute_freshness(memory, now)
+                query_sim = float(query_similarities[i])
+
+                explore_score = (
+                    w_seed * seed_sim +
+                    w_importance * importance_score +
+                    w_freshness * freshness_score +
+                    w_query * query_sim
+                )
+
+                if explore_score < EXPLORE_MIN_SCORE:
+                    continue
+
+                # Assign tier based on seed similarity
+                if seed_sim >= EXPLORE_TIER_CLOSELY:
+                    tier = "closely_connected"
+                elif seed_sim >= EXPLORE_TIER_CONNECTED:
+                    tier = "connected"
+                else:
+                    tier = "loosely_associated"
+
+                candidates.append(ExploreResult(
+                    memory=memory,
+                    seed_similarity=seed_sim,
+                    importance_score=importance_score,
+                    freshness_score=freshness_score,
+                    query_similarity=query_sim,
+                    explore_score=explore_score,
+                    tier=tier,
+                ))
+
+            # Sort by explore_score descending
+            candidates.sort(key=lambda x: x.explore_score, reverse=True)
+
+            # Overfetch cap before dedup
+            candidates = candidates[:overfetch_limit]
+
+            # Deduplicate: among neighbors, collapse near-identical embeddings
+            deduped = []
+            for candidate in candidates:
+                is_dup = False
+                for kept in deduped:
+                    sim = float(np.dot(
+                        candidate.memory.embedding, kept.memory.embedding
+                    ) / (
+                        np.linalg.norm(candidate.memory.embedding) *
+                        np.linalg.norm(kept.memory.embedding)
+                    ))
+                    if sim >= MEMORY_DEDUP_THRESHOLD:
+                        is_dup = True
+                        break
+                if not is_dup:
+                    deduped.append(candidate)
+
+            # Take top N after dedup
+            top_results = deduped[:limit]
+
+            # Track access for returned memories
+            if top_results:
+                returned_ids = [r.memory.id for r in top_results]
+                self._record_access(db, returned_ids, now)
+
+            return seed_memory, top_results
 
     def _row_to_memory(self, row) -> Memory:
         """

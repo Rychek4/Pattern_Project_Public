@@ -502,6 +502,31 @@ COMMAND_MAX_PASSES = 40         # Maximum LLM calls per user message (safety cap
 COMMAND_SEARCH_LIMIT = 10       # Default memory search result count
 COMMAND_SEARCH_MIN_SCORE = 0.3  # Minimum relevance score for search results
 
+# -----------------------------------------------------------------------------
+# Explore Mode Settings
+# -----------------------------------------------------------------------------
+# Explore mode lets the AI navigate from a known memory to its neighborhood
+# in embedding space. It uses the seed memory's embedding as the query vector
+# and scores neighbors differently from standard search.
+#
+# Scoring weights (must sum to 1.0 when query is present):
+EXPLORE_SEED_SIMILARITY_WEIGHT = 0.50   # How close to the seed memory
+EXPLORE_IMPORTANCE_WEIGHT = 0.25        # Memory importance (same as standard)
+EXPLORE_FRESHNESS_WEIGHT = 0.15         # Freshness decay (same as standard)
+EXPLORE_QUERY_WEIGHT = 0.10             # Weak tether to conversational context
+# When no query is provided, the query weight redistributes to seed similarity:
+# seed=0.60, importance=0.25, freshness=0.15
+
+# Filtering thresholds:
+EXPLORE_MIN_SCORE = 0.30                # Minimum explore_score (lower than standard 0.35)
+EXPLORE_MIN_SEED_SIMILARITY = 0.45      # Minimum cosine similarity to seed
+EXPLORE_OVERFETCH_MULTIPLIER = 3.0      # Higher than standard 2.4x (two filters to survive)
+
+# Tier thresholds (similarity_to_seed for presentation grouping):
+EXPLORE_TIER_CLOSELY = 0.70             # "Closely connected"
+EXPLORE_TIER_CONNECTED = 0.55           # "Connected"
+EXPLORE_TIER_LOOSE = 0.45               # "Loosely associated" (matches min seed similarity)
+
 # =============================================================================
 # DELEGATION CONFIGURATION
 # =============================================================================

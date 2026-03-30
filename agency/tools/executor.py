@@ -167,13 +167,14 @@ class ToolExecutor:
     def _exec_search_memories(
         self, input: Dict, id: str, ctx: Dict
     ) -> ToolResult:
-        """Execute memory search. If results include image memories, load and attach images."""
+        """Execute memory search or explore. If results include image memories, load and attach images."""
         from agency.commands.handlers.memory_search import MemorySearchHandler
 
         handler = MemorySearchHandler()
         query = input.get("query", "")
+        explore_from = input.get("explore_from")
 
-        result = handler.execute(query, ctx)
+        result = handler.execute(query, ctx, explore_from=explore_from)
 
         if result.error:
             return ToolResult(
@@ -186,12 +187,17 @@ class ToolExecutor:
         # Format the result using existing formatter
         formatted = handler.format_result(result)
 
+        # Extract result list for image loading and warmth (works for both modes)
+        result_list = []
+        if result.data:
+            result_list = result.data.get("results", [])
+
         # Check if any results have associated images and load them
         image_data = None
-        if result.data:
+        if result_list:
             from agency.commands.handlers.image_memory_handler import load_image_for_memory
             images = []
-            for r in result.data:
+            for r in result_list:
                 if hasattr(r, 'memory') and r.memory.image_id:
                     img = load_image_for_memory(r.memory.image_id)
                     if img:
@@ -199,12 +205,33 @@ class ToolExecutor:
             if images:
                 image_data = images
 
+        # Apply warmth for returned memories (both search and explore modes)
+        if result_list:
+            self._apply_warmth_for_results(result_list)
+
         return ToolResult(
             tool_use_id=id,
             tool_name="search_memories",
             content=formatted,
             image_data=image_data
         )
+
+    def _apply_warmth_for_results(self, result_list: list) -> None:
+        """Apply retrieval warmth and expand topic warmth for tool-returned memories."""
+        try:
+            from prompt_builder.sources.semantic_memory import get_semantic_memory_source
+            from memory.vector_store import get_vector_store
+
+            source = get_semantic_memory_source()
+            warmth_cache = source._warmth_cache
+
+            returned_ids = [r.memory.id for r in result_list]
+            warmth_cache.set_retrieval_warmth(returned_ids)
+
+            returned_memories = [r.memory for r in result_list]
+            warmth_cache.expand_topic_warmth(returned_memories, get_vector_store())
+        except Exception:
+            pass  # Warmth is non-critical; don't fail the tool call
 
     def _exec_save_image(
         self, input: Dict, id: str, ctx: Dict
