@@ -661,8 +661,6 @@ class LLMRouter:
             import traceback
             log_error(f"Router streaming error: {e}", prefix="🔍")
             log_error(f"Router traceback:\n{traceback.format_exc()}", prefix="🔍")
-            from core.health_ledger import record_health_event
-            record_health_event("llm", "error", f"Router streaming error: {e}")
             # Yield error state
             error_state = StreamingState()
             error_state.stop_reason = "error"
@@ -915,8 +913,6 @@ class LLMRouter:
 
         except Exception as e:
             log_error(f"LLM provider error ({provider.value}): {e}")
-            from core.health_ledger import record_health_event
-            record_health_event("llm", "error", f"Provider error ({provider.value}): {e}")
             return LLMResponse(
                 text="",
                 success=False,

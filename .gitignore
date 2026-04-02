@@ -15,6 +15,7 @@ charts/
 venv/
 .venv/
 env/
+*:Zone.Identifier
 
 # IDE
 .idea/

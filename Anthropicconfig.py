@@ -37,31 +37,12 @@ AI_NAME = os.getenv("AI_NAME", "Frank")
 # =============================================================================
 # LLM CONFIGURATION
 # =============================================================================
-# OpenRouter (Claude via OpenAI-compatible API)
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "anthropic/claude-sonnet-4-6")  # Default/fallback model
-ANTHROPIC_MODEL_CONVERSATION = os.getenv("ANTHROPIC_MODEL_CONVERSATION", "anthropic/claude-sonnet-4-6")  # User-facing chat (Sonnet)
-ANTHROPIC_MODEL_EXTRACTION = os.getenv("ANTHROPIC_MODEL_EXTRACTION", "anthropic/claude-sonnet-4-6")  # Memory extraction (Sonnet)
+# Anthropic (Claude)
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")  # Default/fallback model
+ANTHROPIC_MODEL_CONVERSATION = os.getenv("ANTHROPIC_MODEL_CONVERSATION", "claude-sonnet-4-6")  # User-facing chat (Sonnet)
+ANTHROPIC_MODEL_EXTRACTION = os.getenv("ANTHROPIC_MODEL_EXTRACTION", "claude-sonnet-4-6")  # Memory extraction (Sonnet)
 ANTHROPIC_MAX_TOKENS = int(os.getenv("ANTHROPIC_MAX_TOKENS", "64000"))
-
-# =============================================================================
-# OPENROUTER FREE MODEL FALLBACK CHAIN (tried in order)
-# =============================================================================
-# Current top reliable free models on OpenRouter (March 2026)
-OPENROUTER_FREE_MODELS = [
-    # Best free models for tool calling right now (March 2026)
-    "openai/gpt-4o-mini",                    # Best balance: cheap + excellent tool calling"openrouter/free",                           # ← Smart router: auto-picks best available free model that supports your request (tools, etc.)
-    "stepfun/step-3.5-flash:free",               # Currently one of the most popular and capable free models
-    "qwen/qwen3-next-80b-a3b-instruct:free",
-    "qwen/qwen3-coder:free",                     # Strong tool use
-    "nvidia/nemotron-3-super-120b-a12b:free",
-    "meta-llama/llama-3.3-70b-instruct:free",    # More reliable Llama variant than older ones
-    "meta-llama/llama-3.1-8b-instruct:free",
-]
-
-# Default starting model (first in the list above)
-OPENROUTER_FREE_MODEL = OPENROUTER_FREE_MODELS[0]
 
 # Extended Thinking
 # Claude uses a private scratchpad to reason before responding.
@@ -77,7 +58,7 @@ ANTHROPIC_THINKING_EFFORT = "high"                 # Effort level for adaptive t
 ANTHROPIC_THINKING_ENABLED = True                   # Default state for new users (on by default)
 
 # Routing
-LLM_PRIMARY_PROVIDER = "openrouter_free"
+LLM_PRIMARY_PROVIDER = "anthropic"
 
 # API Retry & Failover
 # Layer 1: Automatic retry for transient errors (500, 502, 503, timeouts)
@@ -94,8 +75,8 @@ STREAM_INACTIVITY_TIMEOUT = 360                # seconds (0 = disabled)
 # Maps each model to its fallback. When primary model is overloaded or rate-limited,
 # the system automatically retries with the alternate model.
 ANTHROPIC_MODEL_FAILOVER = {
-    "anthropic/claude-opus-4-6": "anthropic/claude-sonnet-4-6",
-    "anthropic/claude-sonnet-4-6": "anthropic/claude-opus-4-6",
+    "claude-opus-4-6": "claude-sonnet-4-6",
+    "claude-sonnet-4-6": "claude-opus-4-6",
 }
 
 # Layer 3: Deferred retry when all models unavailable
@@ -111,7 +92,6 @@ API_DEFERRED_RETRY_DELAY = 1200               # 20 minutes in seconds
 PROMPT_CACHE_ENABLED = os.getenv("PROMPT_CACHE_ENABLED", "true").lower() == "true"
 PROMPT_CACHE_BREAKPOINT = "<!-- cache-breakpoint -->"  # Delimiter between stable/dynamic content
 PROMPT_CACHE_STABLE_PRIORITY = 10  # Cache blocks with priority <= this (base prompt + core memory)
-PROMPT_CACHE_SEMISTABLE_PRIORITY = 28  # Second cache tier (after intentions, before temporal context)
 
 # =============================================================================
 # DATABASE CONFIGURATION
@@ -241,29 +221,31 @@ WARMTH_TOPIC_MAX_EXPANSION = 20     # Cap on topic-warm memories per turn
 MEMORY_OVERFETCH_MULTIPLIER = 2.4
 
 # -----------------------------------------------------------------------------
-# Query-Side Chunking Settings
+# Multi-Topic Retrieval Settings
 # -----------------------------------------------------------------------------
-# Long user inputs produce unfocused embeddings (centroid blur). To keep each
-# retrieval vector semantically tight, inputs above a token threshold are split
-# into overlapping chunks by token count — the same principle that makes corpus-
-# side chunking work in RAG, applied to the query.
+# When a user message contains multiple topics (detected via paragraph breaks
+# and topic-shift markers), retrieval scales up: each topic chunk gets its own
+# retrieval pass with independent 5+5 budgets. Results are merged by memory ID
+# (keeping the highest score), deduplicated, and ranked through the standard
+# warmth pipeline. No hard cap — deduplication naturally limits total results.
 #
-# Each chunk gets its own retrieval pass with the standard per-query budget.
-# Results are merged by memory ID (keeping the max score), deduplicated, and
-# ranked through the standard warmth pipeline. The final cap grows sublinearly:
-# base budget (5+5) + EXTRA_BUDGET per additional chunk, so multi-topic inputs
-# get broader coverage without linearly inflating prompt size.
-#
-# Token counts are estimated via character heuristic (chars / 4).
-# The embedding sweet spot is roughly 30-150 tokens; 90 keeps each vector
-# focused with enough context for strong semantic signal.
-#
-# Chunks overlap by 25% on each boundary so concepts that straddle a split
-# appear fully in at least one chunk. Stride = chunk_size - overlap.
-MEMORY_CHUNK_TOKEN_SIZE = 90          # Target tokens per chunk (char heuristic: * 4 = ~360 chars)
-MEMORY_CHUNK_MIN_THRESHOLD = 90       # Below this token count, skip chunking entirely
-MEMORY_CHUNK_OVERLAP_RATIO = 0.25     # Fraction of chunk size to overlap at each boundary
-MEMORY_CHUNK_EXTRA_BUDGET = 3         # Extra memories (across both categories) per additional chunk
+# Minimum word count for a chunk to get its own retrieval pass.
+# Chunks below this threshold are merged into their neighbor to avoid
+# poor-quality embeddings from very short fragments.
+MEMORY_CHUNK_MIN_WORDS = 10
+
+# Topic-shift markers that signal a new topic within a single paragraph.
+# Only trigger when preceded by punctuation (. ! ? , ;) to avoid false
+# positives like "I also like gardening" (no preceding punctuation).
+MEMORY_TOPIC_SHIFT_MARKERS = [
+    "also",
+    "by the way",
+    "separately",
+    "another thing",
+    "on another note",
+    "additionally",
+    "one more thing",
+]
 
 # =============================================================================
 # DECAY CATEGORY CONFIGURATION
@@ -299,20 +281,6 @@ SESSION_AUTO_EXTRACT_ON_END = True
 SYSTEM_PULSE_ENABLED = os.getenv("SYSTEM_PULSE_ENABLED", "true").lower() == "true"
 REFLECTIVE_PULSE_INTERVAL = 43200   # 12 hours (deep reflection, Opus)
 ACTION_PULSE_INTERVAL = 7200        # 2 hours (open-ended agency, Sonnet)
-
-# =============================================================================
-# MEMORY METACOGNITION CONFIGURATION
-# =============================================================================
-# Metacognition gives the AI structural self-awareness about its memory store.
-# Three components: MemoryObserver (signal detection), BridgeManager (bridge
-# memory lifecycle), and Memory Self-Model (ambient awareness every turn).
-# Runs during reflective pulse only.
-METACOGNITION_ENABLED = os.getenv("METACOGNITION_ENABLED", "true").lower() == "true"
-BRIDGE_EFFECTIVENESS_WINDOW_DAYS = int(os.getenv("BRIDGE_EFFECTIVENESS_WINDOW_DAYS", "14"))
-BRIDGE_SELF_SUSTAINING_ACCESS_COUNT = int(os.getenv("BRIDGE_SELF_SUSTAINING_ACCESS_COUNT", "3"))
-BRIDGE_MAX_ATTEMPTS = int(os.getenv("BRIDGE_MAX_ATTEMPTS", "3"))
-OBSERVER_ROLLING_WINDOW = int(os.getenv("OBSERVER_ROLLING_WINDOW", "20"))
-SELF_MODEL_MAX_TOKENS = 250  # Hard cap on self-model size (approximate token count)
 
 # =============================================================================
 # CURIOSITY ENGINE CONFIGURATION
@@ -364,17 +332,11 @@ GROWTH_THREADS_PRIORITY = 20
 GROWTH_THREAD_STAGES = ('seed', 'growing', 'integrating', 'dormant', 'abandoned')
 
 # =============================================================================
-# PROJECTS CONFIGURATION
+# HTTP API CONFIGURATION
 # =============================================================================
-# Projects are structured multi-step plans with progress tracking.
-# The AI can create, update, and track projects with ordered actions.
-# Currently limited to one active project at a time (designed for future
-# concurrent support).
-PROJECTS_ENABLED = os.getenv("PROJECTS_ENABLED", "true").lower() == "true"
-
-# Maximum number of active (non-paused/completed/abandoned) projects at once.
-# Start with 1; increase when concurrent project support is added.
-PROJECTS_MAX_ACTIVE = 1
+HTTP_ENABLED = True
+HTTP_HOST = os.getenv("HTTP_HOST", "127.0.0.1")
+HTTP_PORT = int(os.getenv("HTTP_PORT", "5000"))
 
 # =============================================================================
 # WEB UI CONFIGURATION
@@ -433,15 +395,6 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_TO_FILE = True
 LOG_TO_CONSOLE = True
 PROMPT_EXPORT_PATH = LOGS_DIR / "prompt_export.txt"  # Overwritten each time by prompt export
-
-# =============================================================================
-# HEALTH LEDGER CONFIGURATION
-# =============================================================================
-# Rotating JSONL error log for AI-accessible health monitoring.
-# The AI reads this via the health_check tool for infrastructure awareness.
-# Errors are also emitted to stderr for journalctl visibility.
-HEALTH_LEDGER_PATH = LOGS_DIR / "health_ledger.jsonl"
-HEALTH_LEDGER_MAX_LINES = int(os.getenv("HEALTH_LEDGER_MAX_LINES", "400"))
 
 # =============================================================================
 # CONCURRENCY CONFIGURATION
@@ -520,31 +473,6 @@ IMAGE_TEMP_DIR = DATA_DIR / "images" / "temp"
 COMMAND_MAX_PASSES = 40         # Maximum LLM calls per user message (safety cap; typical queries use 1-3)
 COMMAND_SEARCH_LIMIT = 10       # Default memory search result count
 COMMAND_SEARCH_MIN_SCORE = 0.3  # Minimum relevance score for search results
-
-# -----------------------------------------------------------------------------
-# Explore Mode Settings
-# -----------------------------------------------------------------------------
-# Explore mode lets the AI navigate from a known memory to its neighborhood
-# in embedding space. It uses the seed memory's embedding as the query vector
-# and scores neighbors differently from standard search.
-#
-# Scoring weights (must sum to 1.0 when query is present):
-EXPLORE_SEED_SIMILARITY_WEIGHT = 0.50   # How close to the seed memory
-EXPLORE_IMPORTANCE_WEIGHT = 0.25        # Memory importance (same as standard)
-EXPLORE_FRESHNESS_WEIGHT = 0.15         # Freshness decay (same as standard)
-EXPLORE_QUERY_WEIGHT = 0.10             # Weak tether to conversational context
-# When no query is provided, the query weight redistributes to seed similarity:
-# seed=0.60, importance=0.25, freshness=0.15
-
-# Filtering thresholds:
-EXPLORE_MIN_SCORE = 0.30                # Minimum explore_score (lower than standard 0.35)
-EXPLORE_MIN_SEED_SIMILARITY = 0.45      # Minimum cosine similarity to seed
-EXPLORE_OVERFETCH_MULTIPLIER = 3.0      # Higher than standard 2.4x (two filters to survive)
-
-# Tier thresholds (similarity_to_seed for presentation grouping):
-EXPLORE_TIER_CLOSELY = 0.70             # "Closely connected"
-EXPLORE_TIER_CONNECTED = 0.55           # "Connected"
-EXPLORE_TIER_LOOSE = 0.45               # "Loosely associated" (matches min seed similarity)
 
 # =============================================================================
 # DELEGATION CONFIGURATION
@@ -661,6 +589,33 @@ WEB_FETCH_BLOCKED_DOMAINS = []                  # Default domain blacklist
 WEB_FETCH_BETA_HEADER = True                    # Send beta header (disable when tool goes GA)
 
 # =============================================================================
+# REDDIT CONFIGURATION
+# =============================================================================
+# Reddit integration via PRAW (Python Reddit API Wrapper).
+# Pattern can browse, post, comment, vote, and search on Reddit.
+#
+# Setup:
+# 1. Create a Reddit account (or use an existing one)
+# 2. Go to https://www.reddit.com/prefs/apps and create a "script" app
+# 3. Copy the client ID and secret to your .env file
+# 4. Run scripts/reddit_setup.py to validate your credentials
+#
+# See docs/reddit_setup.md for detailed instructions.
+REDDIT_ENABLED = os.getenv("REDDIT_ENABLED", "false").lower() == "true"
+REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID", "")
+REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET", "")
+REDDIT_USERNAME = os.getenv("REDDIT_USERNAME", "")
+REDDIT_PASSWORD = os.getenv("REDDIT_PASSWORD", "")
+REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT", "python:pattern-agent:v1.0 (by /u/pattern-agent)")
+
+# Rate limits (conservative - well under Reddit's actual limits)
+# Reddit allows 60 requests/min for OAuth clients; we use half that.
+REDDIT_RATE_LIMIT_REQUESTS_PER_MIN = 30          # Global request cap (Reddit allows 60)
+REDDIT_RATE_LIMIT_POSTS_PER_30MIN = 1             # Post creation cap
+REDDIT_RATE_LIMIT_COMMENTS_PER_HOUR = 10          # Comment cap (conservative)
+REDDIT_RATE_LIMIT_VOTES_PER_HOUR = 30             # Vote cap
+
+# =============================================================================
 # NOVEL READING CONFIGURATION
 # =============================================================================
 # The novel reading system allows the AI to "read" a novel chapter by chapter,
@@ -684,8 +639,8 @@ NOVEL_CHAPTER_MAX_TOKENS = 4000
 # Model routing for reading tasks:
 #   - Chapter extraction (per-chapter): Uses Sonnet (cost-effective, strong comprehension)
 #   - Reflective passes (arc boundaries + completion): Uses Opus (deeper synthesis)
-NOVEL_EXTRACTION_MODEL = os.getenv("NOVEL_EXTRACTION_MODEL", "anthropic/claude-sonnet-4-6")
-NOVEL_REFLECTION_MODEL = os.getenv("NOVEL_REFLECTION_MODEL", "anthropic/claude-opus-4-6")
+NOVEL_EXTRACTION_MODEL = os.getenv("NOVEL_EXTRACTION_MODEL", "claude-sonnet-4-6")
+NOVEL_REFLECTION_MODEL = os.getenv("NOVEL_REFLECTION_MODEL", "claude-opus-4-6")
 
 # Reflective pass triggers: Opus runs at arc boundaries and at book completion.
 # This controls the "step back and see the whole" synthesis passes.
@@ -730,29 +685,6 @@ GOOGLE_CALENDAR_DEFAULT_REMINDERS = [
     {"method": "popup", "minutes": 30},
     {"method": "popup", "minutes": 10},
 ]
-
-# =============================================================================
-# GMAIL CONFIGURATION
-# =============================================================================
-# Gmail API integration for sending, receiving, and managing emails.
-# Uses OAuth2 for authentication (one-time browser consent flow).
-#
-# Setup:
-# 1. In Google Cloud Console (same project as Calendar/Drive), enable the Gmail API
-# 2. Reuse the same OAuth2 credentials file (or create a separate one)
-# 3. Set GMAIL_ENABLED=true in .env
-# 4. On first use, a browser window will open for OAuth consent
-# 5. After consent, the token is saved and auto-refreshes (no browser needed again)
-GMAIL_ENABLED = os.getenv("GMAIL_ENABLED", "true").lower() == "true"
-GMAIL_CREDENTIALS_PATH = os.getenv(
-    "GMAIL_CREDENTIALS_PATH",
-    str(DATA_DIR / "Calendar_Google_Credentials.json")
-)
-GMAIL_TOKEN_PATH = os.getenv(
-    "GMAIL_TOKEN_PATH",
-    str(DATA_DIR / "Gmail_Google_Token.json")
-)
-GMAIL_MAX_RESULTS_DEFAULT = int(os.getenv("GMAIL_MAX_RESULTS_DEFAULT", "10"))
 
 # =============================================================================
 # GOOGLE DRIVE BACKUP CONFIGURATION
@@ -819,4 +751,4 @@ BLOG_ENABLED = os.getenv("BLOG_ENABLED", "true").lower() == "true"
 BLOG_TITLE = os.getenv("BLOG_TITLE", "Isaac's Blog")
 BLOG_DESCRIPTION = os.getenv("BLOG_DESCRIPTION", "Thoughts from an AI companion")
 BLOG_URL = os.getenv("BLOG_URL", "/blog")                           # Public URL path
-BLOG_OUTPUT_DIR = os.getenv("BLOG_OUTPUT_DIR") or "/var/www/blog"      # Must match nginx alias
+BLOG_OUTPUT_DIR = os.getenv("BLOG_OUTPUT_DIR", "")                   # Empty = blog/output (default)

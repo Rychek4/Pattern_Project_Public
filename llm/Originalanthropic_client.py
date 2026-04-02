@@ -3,10 +3,10 @@ Pattern Project - Anthropic Claude Client
 Client for Claude API (frontier reasoning)
 """
 
-from typing import Optional, List, Dict, Any, Generator
+from typing import Optional, List, Dict, Any, Generator, Iterator
 from dataclasses import dataclass, field
 
-from core.logger import log_info, log_error, log_warning
+from core.logger import log_info, log_error, log_success, log_warning
 
 
 @dataclass
@@ -206,15 +206,12 @@ class AnthropicClient:
         self._client = None
 
     def _get_client(self):
-        """Lazy-load the Anthropic client, pointed at OpenRouter."""
+        """Lazy-load the Anthropic client."""
         if self._client is None:
             try:
                 import anthropic
-                import config as _cfg
-                base_url = getattr(_cfg, 'OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1')
                 self._client = anthropic.Anthropic(
                     api_key=self.api_key,
-                    base_url=base_url,
                     timeout=self.timeout
                 )
             except ImportError:
@@ -300,16 +297,12 @@ class AnthropicClient:
         Convert a flat system prompt string into structured content blocks
         with cache_control markers for Anthropic prompt caching.
 
-        Supports multiple breakpoint delimiters — each segment before a
-        breakpoint gets a cache_control marker, allowing the API to cache
-        progressively (stable content survives longer than semi-stable).
-
         If caching is disabled or no breakpoint delimiter is found, returns
         the original string unchanged (the API accepts both formats).
 
         Returns:
             str or list[dict]: Original string, or list of content blocks
-            with cache_control on cached portions.
+            with cache_control on the stable portion.
         """
         import config
 
@@ -320,20 +313,23 @@ class AnthropicClient:
         if not breakpoint or breakpoint not in system_prompt:
             return system_prompt
 
-        # Split at all breakpoint delimiters
-        segments = [s.strip() for s in system_prompt.split(breakpoint)]
-        segments = [s for s in segments if s]  # Drop empty segments
-
-        if not segments:
-            return system_prompt
+        # Split at the breakpoint delimiter
+        stable_part, dynamic_part = system_prompt.split(breakpoint, 1)
+        stable_part = stable_part.strip()
+        dynamic_part = dynamic_part.strip()
 
         blocks = []
-        for i, segment in enumerate(segments):
-            block = {"type": "text", "text": segment}
-            # All segments except the last get cache_control markers
-            if i < len(segments) - 1:
-                block["cache_control"] = {"type": "ephemeral"}
-            blocks.append(block)
+        if stable_part:
+            blocks.append({
+                "type": "text",
+                "text": stable_part,
+                "cache_control": {"type": "ephemeral"}
+            })
+        if dynamic_part:
+            blocks.append({
+                "type": "text",
+                "text": dynamic_part
+            })
 
         return blocks if blocks else system_prompt
 
@@ -491,11 +487,6 @@ class AnthropicClient:
                 all_tools.append(web_fetch_tool)
 
             if all_tools:
-                # Mark last tool with cache_control so the entire tools list
-                # is cached.  Shallow-copy to avoid mutating shared tool defs.
-                import config as _cache_cfg
-                if getattr(_cache_cfg, 'PROMPT_CACHE_ENABLED', False):
-                    all_tools[-1] = {**all_tools[-1], "cache_control": {"type": "ephemeral"}}
                 request_params["tools"] = all_tools
 
             # Add beta header for web fetch if enabled
@@ -621,7 +612,7 @@ class AnthropicClient:
             # model_dump() (SDK dropped server-side TypedDicts).  All failed
             # because they modified blocks the SDK needs to round-trip.
             #
-            # See docs/reference/server_tool_use_bug.md for full history.
+            # See docs/server_tool_use_bug.md for full history.
             raw_content_list = list(content_blocks)
 
             # Diagnostic: log block types for debugging server tool issues
@@ -655,8 +646,6 @@ class AnthropicClient:
 
         except Exception as e:
             error_type, error_msg = self._classify_error(e)
-            from core.health_ledger import record_health_event
-            record_health_event("llm", "error", f"Chat API error ({error_type}): {error_msg}")
 
             return AnthropicResponse(
                 text="",
@@ -767,11 +756,6 @@ class AnthropicClient:
                 all_tools.append(web_fetch_tool)
 
             if all_tools:
-                # Mark last tool with cache_control so the entire tools list
-                # is cached.  Shallow-copy to avoid mutating shared tool defs.
-                import config as _cache_cfg
-                if getattr(_cache_cfg, 'PROMPT_CACHE_ENABLED', False):
-                    all_tools[-1] = {**all_tools[-1], "cache_control": {"type": "ephemeral"}}
                 request_params["tools"] = all_tools
 
             # Add beta header for web fetch if enabled
@@ -1089,9 +1073,6 @@ class AnthropicClient:
                 log_error(f"Exception type: {type(e).__name__}", prefix="[Stream]")
                 log_error(f"Full traceback:\n{full_traceback}", prefix="[Stream]")
 
-            from core.health_ledger import record_health_event
-            record_health_event("llm", "error", f"Stream error ({error_type}): {error_msg}")
-
             # Retry transient errors if no content has been yielded to caller yet
             import config as cfg
             max_attempts = getattr(cfg, 'API_RETRY_MAX_ATTEMPTS', 3)
@@ -1196,9 +1177,9 @@ def get_anthropic_client() -> AnthropicClient:
     """Get the global Anthropic client instance."""
     global _anthropic_client
     if _anthropic_client is None:
-        from config import OPENROUTER_API_KEY, ANTHROPIC_MODEL, ANTHROPIC_MAX_TOKENS
+        from config import ANTHROPIC_API_KEY, ANTHROPIC_MODEL, ANTHROPIC_MAX_TOKENS
         _anthropic_client = AnthropicClient(
-            api_key=OPENROUTER_API_KEY,
+            api_key=ANTHROPIC_API_KEY,
             model=ANTHROPIC_MODEL,
             max_tokens=ANTHROPIC_MAX_TOKENS
         )
